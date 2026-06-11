@@ -1,0 +1,361 @@
+package com.vxbot.wechatbot;
+
+import android.content.Context;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+public final class ChatClient {
+    public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route) throws Exception {
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置");
+        }
+        Exception last = null;
+        String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);
+        if (shouldReplyWithToolContext(route.kind, toolContext)) {
+            BotLog.i(context, "chat.tool.direct", "实时工具直出 mode=" + route.kind
+                    + " bytes=" + toolContext.getBytes(StandardCharsets.UTF_8).length);
+            return stripToolLabels(formatToolReply(route.kind, toolContext));
+        }
+        for (int i = 0; i < 2; i++) {
+            try {
+                String reply = requestOnce(context, config, message, history, route, toolContext);
+                reply = cleanReplyPrefix(reply, config);
+                if (reply != null && !reply.trim().isEmpty()) {
+                    return reply.trim();
+                }
+                last = new IllegalStateException("上游返回空内容");
+                BotLog.w(context, "chat.empty", "第 " + (i + 1) + " 次返回空，准备重试");
+            } catch (Exception e) {
+                last = e;
+                BotLog.w(context, "chat.retry", "第 " + (i + 1) + " 次请求失败: " + e.getMessage());
+            }
+        }
+        throw last == null ? new IllegalStateException("请求失败") : last;
+    }
+
+    private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext) {
+        if (isBlank(toolContext)) {
+            return false;
+        }
+        return kind == MessageRouter.Kind.NEWS
+                || kind == MessageRouter.Kind.FINANCE
+                || kind == MessageRouter.Kind.WEATHER;
+    }
+
+    private static String formatToolReply(MessageRouter.Kind kind, String toolContext) {
+        String text = toolContext == null ? "" : toolContext.trim();
+        if (text.startsWith("实时工具失败：")) {
+            if (kind == MessageRouter.Kind.NEWS) {
+                return "热点这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
+            }
+            if (kind == MessageRouter.Kind.FINANCE) {
+                return "行情这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
+            }
+            if (kind == MessageRouter.Kind.WEATHER) {
+                return "天气这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
+            }
+        }
+        return text;
+    }
+
+    public String requestVisionReply(Context context, BotConfig config, WxMessage message, List<String> history, String imageDataUrl) throws Exception {
+        Exception last = null;
+        for (int i = 0; i < 2; i++) {
+            try {
+                String reply = requestVisionOnce(config, message, history, imageDataUrl);
+                reply = cleanReplyPrefix(reply, config);
+                if (reply != null && !reply.trim().isEmpty()) {
+                    return reply.trim();
+                }
+                last = new IllegalStateException("上游返回空内容");
+                BotLog.w(context, "vision.empty", "第 " + (i + 1) + " 次视觉返回空，准备重试");
+            } catch (Exception e) {
+                last = e;
+                BotLog.w(context, "vision.retry", "第 " + (i + 1) + " 次视觉请求失败: " + e.getMessage());
+            }
+        }
+        throw last == null ? new IllegalStateException("视觉请求失败") : last;
+    }
+
+    private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("model", config.model);
+        JSONArray messages = new JSONArray();
+        messages.put(new JSONObject().put("role", "system").put("content", buildSystemPrompt(config, route, toolContext)));
+        for (String line : history) {
+            messages.put(new JSONObject()
+                    .put("role", line.startsWith("bot:") ? "assistant" : "user")
+                    .put("content", historyContent(line)));
+        }
+        messages.put(new JSONObject()
+                .put("role", "user")
+                .put("content", "当前群聊:" + message.sessionName + "\n发送人:" + message.senderName + "\n消息:" + message.text));
+        payload.put("messages", messages);
+        payload.put("temperature", route.kind == MessageRouter.Kind.TROLL ? 0.95 : 0.75);
+
+        BotLog.i(context, "chat.request", "发送文字请求 mode=" + route.kind
+                + " bytes=" + payload.toString().getBytes(StandardCharsets.UTF_8).length
+                + " tool=" + (!isBlank(toolContext)));
+        return postChat(config, payload);
+    }
+
+    private String requestVisionOnce(BotConfig config, WxMessage message, List<String> history, String imageDataUrl) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("model", config.model);
+        JSONArray messages = new JSONArray();
+        messages.put(new JSONObject().put("role", "system").put("content", "你是微信群图片分析助手，只输出要发到微信群里的简短回复。"));
+        for (String line : history) {
+            messages.put(new JSONObject()
+                    .put("role", line.startsWith("bot:") ? "assistant" : "user")
+                    .put("content", historyContent(line)));
+        }
+        JSONArray content = new JSONArray();
+        content.put(new JSONObject().put("type", "text").put("text",
+                "当前群聊:" + message.sessionName + "\n发送人:" + message.senderName + "\n用户要求:" + message.text + "\n请分析截图中的图片内容。"));
+        content.put(new JSONObject()
+                .put("type", "image_url")
+                .put("image_url", new JSONObject().put("url", imageDataUrl)));
+        messages.put(new JSONObject().put("role", "user").put("content", content));
+        payload.put("messages", messages);
+        payload.put("temperature", 0.4);
+        return postChat(config, payload);
+    }
+
+    private String postChat(BotConfig config, JSONObject payload) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(config.chatEndpoint).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(config.replyTimeoutMs);
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        if (config.apiKey != null && !config.apiKey.trim().isEmpty()) {
+            conn.setRequestProperty("Authorization", "Bearer " + config.apiKey.trim());
+        }
+        byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(bytes);
+        }
+        int code = conn.getResponseCode();
+        String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + " " + trimBody(body));
+        }
+        return parseReply(body);
+    }
+
+    private static String buildSystemPrompt(BotConfig config, MessageRouter.Route route, String toolContext) {
+        if (route.kind == MessageRouter.Kind.TROLL) {
+            return "- **Name：** C与本人Troll\n"
+                    + "- **Creature：** 与本人EncyclopediaTroll（赛博百科喷子）\n"
+                    + "- **Iberia：** Arrogant， Sarcastic， All-Knowing， harp-tongued（犀利嘲讽，全知全能）";
+        }
+        if (route.kind == MessageRouter.Kind.LOVER) {
+            return isBlank(route.instruction)
+                    ? "恋人模式。只输出微信群里要发的话，目标群员名由发送层负责艾特。"
+                    : route.instruction;
+        }
+        StringBuilder prompt = new StringBuilder();
+        prompt.append(config.systemPrompt == null ? "" : config.systemPrompt.trim()).append('\n');
+        if (config.enableExMode && !isBlank(config.exProfilePrompt)) {
+            prompt.append("前任模式已开启。后续普通对话优先按下面的 Relationship Memory + Persona 说话，但仍只输出微信群里要发的内容。\n");
+            prompt.append(config.exProfilePrompt.trim()).append('\n');
+        }
+        prompt.append("当前路由: ").append(route.kind.name()).append('\n');
+        prompt.append(route.instruction).append('\n');
+        if (!isBlank(toolContext)) {
+            prompt.append("实时工具结果：\n").append(toolContext).append('\n');
+            prompt.append("回答必须基于实时工具结果，不要编造没有查到的数据。\n");
+        }
+        prompt.append("只回复将要发到微信群里的内容。");
+        return prompt.toString();
+    }
+
+    private static String parseReply(String body) throws Exception {
+        JSONObject json = new JSONObject(body);
+        if (json.has("choices")) {
+            JSONArray choices = json.getJSONArray("choices");
+            if (choices.length() > 0) {
+                JSONObject first = choices.getJSONObject(0);
+                if (first.has("message")) {
+                    JSONObject message = first.getJSONObject("message");
+                    return message.optString("content", "");
+                }
+                return first.optString("text", "");
+            }
+        }
+        if (json.has("output_text")) {
+            return json.optString("output_text", "");
+        }
+        if (json.has("output")) {
+            JSONArray output = json.getJSONArray("output");
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < output.length(); i++) {
+                JSONObject item = output.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                JSONArray content = item.optJSONArray("content");
+                if (content == null) {
+                    continue;
+                }
+                for (int j = 0; j < content.length(); j++) {
+                    JSONObject c = content.optJSONObject(j);
+                    if (c != null) {
+                        sb.append(c.optString("text", ""));
+                    }
+                }
+            }
+            return sb.toString();
+        }
+        return "";
+    }
+
+    private static String historyContent(String line) {
+        if (line == null) {
+            return "";
+        }
+        if (line.startsWith("bot:")) {
+            return stripVoiceMarker(afterSecondColon(line));
+        }
+        if (line.startsWith("user:")) {
+            int first = line.indexOf(':');
+            int second = first < 0 ? -1 : line.indexOf(':', first + 1);
+            if (second > first) {
+                String sender = line.substring(first + 1, second).trim();
+                String text = line.substring(second + 1).trim();
+                text = stripVoiceMarker(text);
+                return sender.isEmpty() ? text : sender + ": " + text;
+            }
+        }
+        return stripVoiceMarker(line);
+    }
+
+    private static String cleanReplyPrefix(String reply, BotConfig config) {
+        String text = reply == null ? "" : reply.trim();
+        String previous;
+        do {
+            previous = text;
+            text = stripRolePrefix(text, "bot");
+            text = stripRolePrefix(text, "assistant");
+            text = stripRolePrefix(text, "机器人");
+            text = stripVoiceMarker(text);
+            text = stripToolLabels(text);
+            if (config != null) {
+                String[] names = config.botNames.split("[,，\\n\\r]+");
+                for (String name : names) {
+                    text = stripRolePrefix(text, name.trim());
+                }
+                text = stripRolePrefix(text, config.primaryBotName());
+            }
+            text = text.trim();
+        } while (!text.equals(previous));
+        return text;
+    }
+
+    private static String stripToolLabels(String text) {
+        String value = text == null ? "" : text.trim();
+        if (value.isEmpty()) {
+            return "";
+        }
+        String[] rows = value.split("\\r?\\n");
+        StringBuilder out = new StringBuilder(value.length());
+        for (String row : rows) {
+            String line = row == null ? "" : row.trim();
+            line = line.replaceFirst("^(?:实时)?工具结果[：:]\\s*", "");
+            line = line.replaceFirst("^([\\u4e00-\\u9fa5A-Za-z0-9]{1,16})工具[：:]\\s*", "$1：");
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(line);
+        }
+        return out.toString().trim();
+    }
+
+    private static String stripVoiceMarker(String text) {
+        String value = text == null ? "" : text.trim();
+        boolean changed;
+        do {
+            changed = false;
+            String previous = value;
+            if (value.startsWith("[语音]")) {
+                value = value.substring("[语音]".length()).trim();
+            } else if (value.startsWith("【语音】")) {
+                value = value.substring("【语音】".length()).trim();
+            } else {
+                value = stripRolePrefix(value, "语音");
+            }
+            changed = !value.equals(previous);
+        } while (changed);
+        return value;
+    }
+
+    private static String stripRolePrefix(String text, String label) {
+        if (text == null || label == null || label.trim().isEmpty()) {
+            return text == null ? "" : text;
+        }
+        String trimmed = text.trim();
+        String cleanLabel = label.trim();
+        if (startsWithIgnoreCase(trimmed, cleanLabel)) {
+            int index = cleanLabel.length();
+            while (index < trimmed.length() && Character.isWhitespace(trimmed.charAt(index))) {
+                index++;
+            }
+            if (index < trimmed.length() && isColon(trimmed.charAt(index))) {
+                return trimmed.substring(index + 1).trim();
+            }
+        }
+        if (startsWithIgnoreCase(trimmed, cleanLabel + "：")) {
+            return trimmed.substring(cleanLabel.length() + 1).trim();
+        }
+        return trimmed;
+    }
+
+    private static boolean startsWithIgnoreCase(String text, String prefix) {
+        return text.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
+    private static String afterSecondColon(String line) {
+        int first = line.indexOf(':');
+        int second = first < 0 ? -1 : line.indexOf(':', first + 1);
+        return second > first ? line.substring(second + 1).trim() : line;
+    }
+
+    private static boolean isColon(char ch) {
+        return ch == ':' || ch == '：';
+    }
+
+    private static String readAll(InputStream in) throws Exception {
+        if (in == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String trimBody(String body) {
+        if (body == null) {
+            return "";
+        }
+        return body.length() > 500 ? body.substring(0, 500) : body;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+}

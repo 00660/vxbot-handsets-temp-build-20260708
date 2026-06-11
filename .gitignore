@@ -1,0 +1,17 @@
+.gradle/
+build/
+app/build/
+dist/
+local.properties
+*.iml
+*.apk
+*.bak
+*.bak-*
+*.log
+apk-output/
+screen-debug/
+live-watch/
+external/
+tmp-*.png
+tmp-*.jpg
+.codex-backups/

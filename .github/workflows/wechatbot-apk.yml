@@ -1,0 +1,80 @@
+name: WeChat Bot APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "app/**"
+      - "src/**"
+      - "build.gradle"
+      - "settings.gradle"
+      - "gradle.properties"
+      - ".github/workflows/wechatbot-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install SDK packages
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Publish APK to output branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
+          cp "$apk" "$out/hs-wechatbot-latest.apk"
+          {
+            echo "sha=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$out/BUILD_INFO.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk-build-output
+          git rm -rf . >/dev/null 2>&1 || true
+          cp "$out/hs-wechatbot-latest.apk" .
+          cp "$out/BUILD_INFO.txt" .
+          git add hs-wechatbot-latest.apk BUILD_INFO.txt
+          git commit -m "Publish APK for ${GITHUB_SHA}"
+          git push --force origin HEAD:apk-build-output
+
+      - name: Upload APK
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: hs-wechatbot-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
