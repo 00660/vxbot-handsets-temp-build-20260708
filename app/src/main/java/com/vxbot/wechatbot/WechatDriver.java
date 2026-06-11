@@ -180,6 +180,10 @@ public final class WechatDriver {
 
     public static void syncAllowedSessionInputModes(Context context, BotConfig config) {
         BotConfig safeConfig = config == null ? BotConfig.load(context) : config;
+        if (!safeConfig.syncInputModeFromVoiceSwitch) {
+            BotLog.i(context, "input.mode.whitelist.sync.skip", "输入态批量同步开关关闭，保留每群自动识别缓存");
+            return;
+        }
         boolean voiceMode = safeConfig.normalReplyAsVoice
                 || safeConfig.imageWarmupAsVoice
                 || safeConfig.imageAfterAsVoice;

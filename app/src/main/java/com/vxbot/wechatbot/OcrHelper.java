@@ -89,11 +89,19 @@ public final class OcrHelper {
         public final boolean voiceIconLikely;
         public final int keyboardIconScore;
         public final int voiceIconScore;
+        public final boolean voiceBarVisualHit;
+        public final boolean keyboardVisualHit;
+        public final boolean imeWindowVisible;
+        public final float inputCenterDarkRatio;
+        public final float inputCenterBrightRatio;
+        public final float keyboardAreaDarkRatio;
+        public final float keyboardAreaBrightRatio;
         public final String snippets;
 
         private InputModeFeature(String mode, int width, int height, Rect inputRect, Rect toggleRect,
                                  boolean pressTalkTextHit, boolean textInputVisualHit,
-                                 IconShapeFeature icon, String snippets) {
+                                 IconShapeFeature icon, InputModeVisualFeature visual,
+                                 boolean imeWindowVisible, String snippets) {
             this.mode = mode;
             this.width = width;
             this.height = height;
@@ -105,6 +113,13 @@ public final class OcrHelper {
             this.voiceIconLikely = icon != null && icon.voiceLikely;
             this.keyboardIconScore = icon == null ? 0 : icon.keyboardScore;
             this.voiceIconScore = icon == null ? 0 : icon.voiceScore;
+            this.voiceBarVisualHit = visual != null && visual.voiceBarLikely;
+            this.keyboardVisualHit = visual != null && visual.keyboardLikely;
+            this.imeWindowVisible = imeWindowVisible;
+            this.inputCenterDarkRatio = visual == null ? 0f : visual.inputCenterDarkRatio;
+            this.inputCenterBrightRatio = visual == null ? 0f : visual.inputCenterBrightRatio;
+            this.keyboardAreaDarkRatio = visual == null ? 0f : visual.keyboardAreaDarkRatio;
+            this.keyboardAreaBrightRatio = visual == null ? 0f : visual.keyboardAreaBrightRatio;
             this.snippets = snippets == null ? "" : snippets;
         }
 
@@ -138,6 +153,13 @@ public final class OcrHelper {
                     + " textInputVisual=" + textInputVisualHit
                     + " keyboardIcon=" + keyboardIconLikely + "/" + keyboardIconScore
                     + " voiceIcon=" + voiceIconLikely + "/" + voiceIconScore
+                    + " voiceBarVisual=" + voiceBarVisualHit
+                    + " keyboardVisual=" + keyboardVisualHit
+                    + " imeVisible=" + imeWindowVisible
+                    + " centerDark=" + ratio(inputCenterDarkRatio)
+                    + " centerBright=" + ratio(inputCenterBrightRatio)
+                    + " keyboardDark=" + ratio(keyboardAreaDarkRatio)
+                    + " keyboardBright=" + ratio(keyboardAreaBrightRatio)
                     + " snippets=" + snippets;
         }
     }
@@ -238,6 +260,8 @@ public final class OcrHelper {
             Rect visualInput = findTextInputBlock(bitmap);
             Rect input = pressTalkRect != null ? pressTalkRect : visualInput;
             IconShapeFeature icon = analyzeInputModeIcon(bitmap, input);
+            InputModeVisualFeature visual = analyzeInputModeVisual(bitmap);
+            boolean imeVisible = isInputMethodVisible(hs);
             boolean pressTalk = pressTalkRect != null;
             boolean textInputVisual = !pressTalk && visualInput != null && visualInput.width() >= Math.round(width * 0.22f);
             boolean raisedToolbar = visualInput != null && visualInput.centerY() < Math.round(height * 0.82f);
@@ -245,11 +269,15 @@ public final class OcrHelper {
             int textScore = 0;
             if (pressTalk) {
                 voiceScore += 10;
-            } else {
-                textScore += 10;
+            }
+            if (visual.voiceBarLikely) {
+                voiceScore += 4;
             }
             if (icon.keyboardLikely) {
-                voiceScore += 1;
+                voiceScore += 2;
+            }
+            if (visual.keyboardLikely || imeVisible) {
+                textScore += 5;
             }
             if (textInputVisual && !pressTalk && (raisedToolbar || icon.voiceLikely)) {
                 textScore += 3;
@@ -258,13 +286,13 @@ public final class OcrHelper {
                 textScore += 3;
             }
             String mode = "unknown";
-            if (pressTalk) {
+            if (pressTalk || voiceScore >= textScore + 3 && visual.voiceBarLikely) {
                 mode = "voice";
-            } else if (icon.voiceLikely || textInputVisual && (raisedToolbar || textScore >= 3)) {
+            } else if (visual.keyboardLikely || imeVisible || icon.voiceLikely || textInputVisual && (raisedToolbar || textScore >= 3)) {
                 mode = "text";
             }
             InputModeFeature feature = new InputModeFeature(mode, width, height, input, icon.region,
-                    pressTalk, textInputVisual, icon, snippets);
+                    pressTalk, textInputVisual, icon, visual, imeVisible, snippets);
             BotLog.i(context, "input.mode.inspect", feature.summary());
             return feature;
         } catch (Exception e) {
@@ -788,6 +816,79 @@ public final class OcrHelper {
         return r >= 238 && g >= 238 && b >= 238 && max - min <= 18;
     }
 
+    private static InputModeVisualFeature analyzeInputModeVisual(Bitmap bitmap) {
+        Ratio inputCenter = sampleRatios(bitmap, 0.24f, 0.895f, 0.62f, 0.935f, 2);
+        Ratio inputFull = sampleRatios(bitmap, 0.13f, 0.885f, 0.78f, 0.945f, 2);
+        Ratio keyboardArea = sampleRatios(bitmap, 0.00f, 0.69f, 1.00f, 0.965f, 4);
+        boolean keyboardLikely = keyboardArea.darkRatio >= 0.09f && keyboardArea.brightRatio <= 0.65f
+                || inputFull.darkRatio >= 0.04f && inputFull.brightRatio <= 0.60f;
+        boolean voiceBarLikely = !keyboardLikely
+                && inputCenter.darkRatio >= 0.018f
+                && inputCenter.brightRatio >= 0.86f
+                && inputFull.brightRatio >= 0.92f;
+        return new InputModeVisualFeature(
+                voiceBarLikely,
+                keyboardLikely,
+                inputCenter.darkRatio,
+                inputCenter.brightRatio,
+                keyboardArea.darkRatio,
+                keyboardArea.brightRatio);
+    }
+
+    private static Ratio sampleRatios(Bitmap bitmap, float leftRatio, float topRatio,
+                                      float rightRatio, float bottomRatio, int step) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int left = clamp(Math.round(width * leftRatio), 0, width - 1);
+        int top = clamp(Math.round(height * topRatio), 0, height - 1);
+        int right = clamp(Math.round(width * rightRatio), left + 1, width);
+        int bottom = clamp(Math.round(height * bottomRatio), top + 1, height);
+        int total = 0;
+        int dark = 0;
+        int bright = 0;
+        int stride = Math.max(1, step);
+        for (int y = top; y < bottom; y += stride) {
+            for (int x = left; x < right; x += stride) {
+                int color = bitmap.getPixel(x, y);
+                total++;
+                if (isDarkColor(color)) {
+                    dark++;
+                }
+                if (isBrightColor(color)) {
+                    bright++;
+                }
+            }
+        }
+        return new Ratio(total, dark, bright);
+    }
+
+    private static boolean isInputMethodVisible(HsClient hs) {
+        try {
+            String inputMethod = hs.shell("dumpsys", "input_method");
+            if (containsVisibleImeFlag(inputMethod)) {
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            String window = hs.shell("dumpsys", "window");
+            return containsVisibleImeFlag(window);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean containsVisibleImeFlag(String dump) {
+        if (dump == null || dump.isEmpty()) {
+            return false;
+        }
+        return dump.contains("mInputShown=true")
+                || dump.contains("mImeWindowVis=0x1")
+                || dump.contains("mImeWindowVis=0x3")
+                || dump.contains("type=ime") && dump.contains("visible=true")
+                || dump.contains("mViewVisibility=0") && dump.contains("InputMethod");
+    }
+
     private static Rect findGreenSendBlock(Bitmap bitmap) {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
@@ -1153,6 +1254,10 @@ public final class OcrHelper {
         return value;
     }
 
+    private static String ratio(float value) {
+        return String.valueOf(Math.round(value * 1000f) / 1000f);
+    }
+
     private static boolean startsWithErr(byte[] bytes) {
         return bytes != null
                 && bytes.length >= 4
@@ -1193,6 +1298,36 @@ public final class OcrHelper {
         Sample(int total, int hit) {
             this.hit = hit;
             this.ratio = total == 0 ? 0f : (float) hit / (float) total;
+        }
+    }
+
+    private static final class Ratio {
+        final float darkRatio;
+        final float brightRatio;
+
+        Ratio(int total, int dark, int bright) {
+            this.darkRatio = total == 0 ? 0f : (float) dark / (float) total;
+            this.brightRatio = total == 0 ? 0f : (float) bright / (float) total;
+        }
+    }
+
+    private static final class InputModeVisualFeature {
+        final boolean voiceBarLikely;
+        final boolean keyboardLikely;
+        final float inputCenterDarkRatio;
+        final float inputCenterBrightRatio;
+        final float keyboardAreaDarkRatio;
+        final float keyboardAreaBrightRatio;
+
+        InputModeVisualFeature(boolean voiceBarLikely, boolean keyboardLikely,
+                               float inputCenterDarkRatio, float inputCenterBrightRatio,
+                               float keyboardAreaDarkRatio, float keyboardAreaBrightRatio) {
+            this.voiceBarLikely = voiceBarLikely;
+            this.keyboardLikely = keyboardLikely;
+            this.inputCenterDarkRatio = inputCenterDarkRatio;
+            this.inputCenterBrightRatio = inputCenterBrightRatio;
+            this.keyboardAreaDarkRatio = keyboardAreaDarkRatio;
+            this.keyboardAreaBrightRatio = keyboardAreaBrightRatio;
         }
     }
 

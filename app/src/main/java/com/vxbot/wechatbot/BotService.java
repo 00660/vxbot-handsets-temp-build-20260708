@@ -49,8 +49,13 @@ public final class BotService extends Service {
             syncLogOverlay(BotConfig.load(this));
         }
         if (isInputModeSettingKey(key)) {
-            WechatDriver.syncAllowedSessionInputModes(this, BotConfig.load(this));
-            BotLog.i(this, "input.mode.cache.sync", "语音/文字发送或白名单设置变化，已同步白名单输入态 key=" + key);
+            BotConfig config = BotConfig.load(this);
+            if (config.syncInputModeFromVoiceSwitch) {
+                WechatDriver.syncAllowedSessionInputModes(this, config);
+                BotLog.i(this, "input.mode.cache.sync", "语音/文字发送或白名单设置变化，已按开关同步白名单输入态 key=" + key);
+            } else {
+                BotLog.i(this, "input.mode.cache.sync.skip", "输入态批量同步关闭，保留每群自动识别缓存 key=" + key);
+            }
         }
         if (key == null || "activeMode".equals(key) || "enableNoRootKeepAwake".equals(key)) {
             ScreenControl.syncForConfig(this, BotConfig.load(this), "config-change");
@@ -70,7 +75,11 @@ public final class BotService extends Service {
         BotConfig initialConfig = BotConfig.load(this);
         syncLogOverlay(initialConfig);
         ScreenControl.syncForConfig(this, initialConfig, "service-create");
-        WechatDriver.syncAllowedSessionInputModes(this, initialConfig);
+        if (initialConfig.syncInputModeFromVoiceSwitch) {
+            WechatDriver.syncAllowedSessionInputModes(this, initialConfig);
+        } else {
+            BotLog.i(this, "input.mode.cache.sync.skip", "服务启动时输入态批量同步关闭，保留每群自动识别缓存");
+        }
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
@@ -200,6 +209,7 @@ public final class BotService extends Service {
         return "normalReplyAsVoice".equals(key)
                 || "imageWarmupAsVoice".equals(key)
                 || "imageAfterAsVoice".equals(key)
+                || "syncInputModeFromVoiceSwitch".equals(key)
                 || "allowedSessions".equals(key);
     }
 

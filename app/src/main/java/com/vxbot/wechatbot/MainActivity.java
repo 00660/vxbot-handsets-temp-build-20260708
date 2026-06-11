@@ -129,6 +129,7 @@ public final class MainActivity extends Activity {
     private Switch enableImageAfterText;
     private Switch imageAfterAsVoice;
     private Switch normalReplyAsVoice;
+    private Switch syncInputModeFromVoiceSwitch;
     private Switch dropImageTaskOnError;
     private Switch lockActiveSender;
     private Switch enableFollowUpWithoutMention;
@@ -344,6 +345,7 @@ public final class MainActivity extends Activity {
         ttsVoice = spinner(featuresPage, "TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
         ttsSpeed = edit(featuresPage, "TTS 语速倍率 0.5-2.0", "1.0", false);
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
+        syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
         enableLogOverlay = switchRow(featuresPage, "悬浮实时日志");
         enableLogOverlay.setOnCheckedChangeListener((buttonView, isChecked) -> {
@@ -519,6 +521,7 @@ public final class MainActivity extends Activity {
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
             normalReplyAsVoice.setChecked(config.normalReplyAsVoice);
+            syncInputModeFromVoiceSwitch.setChecked(config.syncInputModeFromVoiceSwitch);
             enableNoRootKeepAwake.setChecked(config.enableNoRootKeepAwake);
             enableLogOverlay.setChecked(config.enableLogOverlay);
             keepLogOverlayDuringOperation.setChecked(config.keepLogOverlayDuringOperation);
@@ -542,9 +545,11 @@ public final class MainActivity extends Activity {
         boolean oldNormalVoice = prefs.getBoolean("normalReplyAsVoice", false);
         boolean oldWarmupVoice = prefs.getBoolean("imageWarmupAsVoice", false);
         boolean oldAfterVoice = prefs.getBoolean("imageAfterAsVoice", false);
+        boolean oldSyncInputMode = prefs.getBoolean("syncInputModeFromVoiceSwitch", false);
         boolean newNormalVoice = normalReplyAsVoice.isChecked();
         boolean newWarmupVoice = imageWarmupAsVoice.isChecked();
         boolean newAfterVoice = imageAfterAsVoice.isChecked();
+        boolean newSyncInputMode = syncInputModeFromVoiceSwitch.isChecked();
         SharedPreferences.Editor e = prefs.edit();
         e.putString("botNames", botNames.getText().toString());
         e.putString("allowedSessions", allowedSessions.getText().toString());
@@ -601,6 +606,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());
         e.putBoolean("normalReplyAsVoice", newNormalVoice);
+        e.putBoolean("syncInputModeFromVoiceSwitch", newSyncInputMode);
         e.putBoolean("enableNoRootKeepAwake", enableNoRootKeepAwake.isChecked());
         e.putBoolean("enableLogOverlay", enableLogOverlay.isChecked());
         e.putBoolean("keepLogOverlayDuringOperation", keepLogOverlayDuringOperation.isChecked());
@@ -615,9 +621,18 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableFollowUpWithoutMention", enableFollowUpWithoutMention.isChecked());
         e.putBoolean("stayInCodexSession", stayInCodexSession.isChecked());
         e.apply();
-        WechatDriver.syncAllowedSessionInputModes(this, BotConfig.load(this));
-        if (oldNormalVoice != newNormalVoice || oldWarmupVoice != newWarmupVoice || oldAfterVoice != newAfterVoice) {
-            BotLog.i(this, "input.mode.cache.sync", "语音/文字发送开关变化，已同步白名单输入态");
+        BotConfig savedConfig = BotConfig.load(this);
+        boolean voiceSwitchChanged = oldNormalVoice != newNormalVoice
+                || oldWarmupVoice != newWarmupVoice
+                || oldAfterVoice != newAfterVoice
+                || oldSyncInputMode != newSyncInputMode;
+        if (savedConfig.syncInputModeFromVoiceSwitch) {
+            WechatDriver.syncAllowedSessionInputModes(this, savedConfig);
+            if (voiceSwitchChanged) {
+                BotLog.i(this, "input.mode.cache.sync", "语音/文字发送开关变化，已按开关同步白名单输入态");
+            }
+        } else if (voiceSwitchChanged) {
+            BotLog.i(this, "input.mode.cache.sync.skip", "输入态批量同步关闭，保留每群自动识别缓存");
         }
         if (enableMorningGreeting.isChecked()) {
             MorningGreetingScheduler.schedule(this);

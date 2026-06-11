@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`79`
-- `versionName`：`0.1.78-input-mode-state-fix`
+- `versionCode`：`80`
+- `versionName`：`0.1.79-input-mode-visual-sync-switch`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -22,7 +22,7 @@
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持发音人和语速配置。
-- 输入态缓存：每个白名单群单独保存文字/语音输入态；语音模式缺少按压坐标时，进入该群扫描 `按住说话` 并保存该群坐标。
+- 输入态缓存：默认按每个白名单群自动识别文字/语音/输入法弹出态并缓存；语音模式缺少按压坐标时，进入该群扫描 `按住说话` 并保存该群坐标。
 - 图片自拍：支持人物参考图、清凉/泳装风格参考图、前置/后置话术、图片发送。
 - 图片分析/表情：支持引用图点开截图后传上游分析或生成表情图。
 - 群发消息：从配置面板向白名单群依次发送自定义消息。
@@ -100,7 +100,9 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 - `bot.service.create`：服务实例创建。
 - `bot.start`：机器人启动结果。
-- `input.mode.whitelist.sync`：已按配置同步白名单群文字/语音输入态。
+- `input.mode.whitelist.sync`：开启“语音开关批量同步输入态”后，按配置同步白名单群文字/语音输入态。
+- `input.mode.cache.sync.skip` / `input.mode.whitelist.sync.skip`：批量同步输入态关闭，保留每群自动识别缓存。
+- `input.mode.inspect`：输入态识别结果，包含 `pressTalk`、`voiceBarVisual`、`keyboardVisual`、`imeVisible` 等三态判断信号。
 - `input.mode.current_matches`：缓存输入态与现场不一致时，现场已是目标态，已更新缓存并跳过切换。
 - `input.mode.voice_point.scan`：语音态缺坐标时正在 OCR 扫描 `按住说话`。
 - `input.mode.voice_point.scan_hit`：语音态缺坐标时已扫到并准备缓存坐标。
@@ -116,13 +118,15 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-11：修正图片自拍 prompt 拼接，移除发给图片上游的内部“提示词整理器”身份头、`用户原话：自拍` 字段和单条固定场景硬约束；自拍场景改为多地点候选策略，避免固定室内/客厅背景。
 - 2026-06-11：修正语音输入态坐标重建。会话已记录为语音态但缺少 `按住说话` 坐标时，先多轮 OCR 扫描并缓存坐标；只有确认当前是文字态才允许切换，避免在已处于语音态时误点左下角切换按钮。
 - 2026-06-11：修正输入态缓存与现场不一致导致反向切换的问题。发送文字/语音前先用 OCR 判断当前底部输入态，若现场已是目标态则更新该群缓存并跳过切换。
+- 2026-06-11：增强输入态识别为三态判断：OCR `按住说话`、底部输入栏像素/颜色特征、输入法窗口可见状态共同判断语音态、文字态和输入法弹出态。
+- 2026-06-11：新增“语音开关批量同步输入态”开关，默认关闭。关闭时普通聊天/前置/后置语音开关不会批量覆盖白名单群输入态缓存，继续使用每群自动识别。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 
 - 不要把 `*.bak-*`、调试截图、日志、APK 产物、临时 dump、交接草稿提交进仓库。
 - 修改微信操作链路前，优先在真机小 demo 或单步截图验证，不要直接重写主链路。
 - 微信 UI 控件很多不可读，判断会话页、通知栏、输入态、发送按钮时优先用 OCR/找色/找图，避免写死坐标。
-- 语音输入态按白名单群独立缓存；全局语音开关开启时，所有白名单群应写为 `voice`，坐标在该群首次进入会话后扫描保存。
+- 语音输入态按白名单群独立缓存；默认不要用语音开关批量覆盖缓存。只有明确打开“语音开关批量同步输入态”时，才按普通聊天/前置/后置语音开关批量写入白名单群输入态。
 - 图片、表情、分析、群发、TTS、普通聊天共用 `BotService` 单队列，避免多个并发链路抢微信前台。
