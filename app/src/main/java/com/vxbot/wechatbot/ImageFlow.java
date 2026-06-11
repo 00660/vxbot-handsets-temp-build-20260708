@@ -173,8 +173,7 @@ public final class ImageFlow {
     private String buildImagePrompt(BotConfig config, WxMessage message, String request, boolean cool, boolean selfie, boolean hasPersona, boolean hasStyle,
                                     boolean revision, boolean incomingReference, ImageMemory previous) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("你是微信聊天机器人的图片生成提示词整理器，本次只生成一张图片。\n");
-        prompt.append("图片应像微信群里自然发出的照片，真实、清晰、生活化，不要文字、水印、Logo、边框。\n");
+        prompt.append("图片应像群聊里自然发出的照片，真实、清晰、生活化，不要文字、水印、Logo、边框。\n");
         prompt.append("避免夸张网红滤镜和明显 AI 感。\n");
         prompt.append("图片分辨率目标：").append(config.imageSize).append("。\n");
         if (revision) {
@@ -193,7 +192,7 @@ public final class ImageFlow {
             prompt.append("本次附带人物形象参考图：只参考人物面貌、五官、发型气质和身份一致性；不要复制参考图背景、姿势、构图或原衣服，必须按用户请求重新生成一张新的自然自拍。\n");
         }
         if (cool) {
-            prompt.append("清凉/泳装/比基尼请求：只表现清爽明亮的夏日质感、泳装或比基尼穿搭氛围、自拍视角、自然光线和色彩；不要照搬固定海滩背景，必须按用户原话换一个新的地点、场景、姿势或构图。\n");
+            prompt.append("清凉/泳装/比基尼请求：只表现清爽明亮的夏日质感、泳装或比基尼穿搭氛围、自拍视角、自然光线和色彩；不要照搬固定海滩背景，必须按当前请求换一个新的地点、场景、姿势或构图。\n");
             if (hasStyle) {
                 prompt.append("本次附带风格底图：只参考清爽明亮的夏日质感、穿搭氛围、自拍视角、光线和色彩；不要复制底图人物身份，不要照搬背景、建筑、椰树、海滩或双人构图。\n");
             }
@@ -202,13 +201,16 @@ public final class ImageFlow {
             prompt.append("自拍人物方向：眼神像蜜妮跟对象见面时的样子，青涩、略带羞涩、脸红红、自然不好意思，日常自拍，不要强制全身照。\n");
             prompt.append(currentChinaSeasonOutfitRule()).append("\n");
             prompt.append(currentChinaTimeSceneRule()).append("\n");
-            prompt.append("人物参考图只锁定同一张脸、五官、发型气质和身份一致性；参考图里的衣服、毛衣纹理、针织材质、背景、姿势、手势、镜头角度都不要继承，除非用户原话明确要求。\n");
+            prompt.append("人物参考图只锁定同一张脸、五官、发型气质和身份一致性；参考图里的衣服、毛衣纹理、针织材质、背景、姿势、手势、镜头角度都不要继承，除非当前请求明确要求。\n");
             prompt.append("自拍表情和动作：表情要自然随机，可以是开心、害羞、微恼、困倦、酷一点、emo、偷笑、发呆、认真看镜头等；动作像临时自拍，不要照搬人物参考图、风格底图或上一张图。\n");
             prompt.append(random(SELFIE_PERSONA_LINES)).append("\n");
             prompt.append(random(SELFIE_STYLE_LINES)).append("\n");
-            prompt.append(random(SELFIE_SCENE_LINES)).append("\n");
+            prompt.append(selfieSceneRule()).append("\n");
         }
-        prompt.append("用户原话：").append(request.isEmpty() ? message.text : request).append("\n");
+        String userRequest = request.isEmpty() ? message.text : request;
+        if (shouldAppendUserRequest(userRequest, cool, selfie, revision, incomingReference)) {
+            prompt.append("用户需求：").append(userRequest.trim()).append("\n");
+        }
         prompt.append("最终只生成图片，不要在图片里出现任何说明文字。");
         return prompt.toString();
     }
@@ -2267,19 +2269,6 @@ public final class ImageFlow {
             "这版先交作业。"
     };
 
-    private static final String[] SELFIE_SCENE_LINES = {
-            "本次自拍场景随机约束：客厅自然光自拍，背景能看到沙发、茶几或窗帘，换成日常居家休闲穿搭。",
-            "本次自拍场景随机约束：厨房随手自拍，背景有橱柜、冰箱或台面，像做饭间隙拍的生活照，构图和上一张明显不同。",
-            "本次自拍场景随机约束：阳台傍晚自拍，背景有栏杆、城市楼景或绿植，光线偏自然暖色，衣服和姿势都换掉。",
-            "本次自拍场景随机约束：马路边或街角自拍，背景有路灯、店铺、斑马线或行人虚化，像出门随手拍，不要室内床边背景。",
-            "本次自拍场景随机约束：野外小路或草地自拍，背景有树、草地、天空，画面清爽自然，镜头距离和角度要明显变化。",
-            "本次自拍场景随机约束：商场内自拍，背景有扶梯、橱窗、灯光或店铺招牌虚化，穿搭更像出门逛街，不要复刻参考照衣服。",
-            "本次自拍场景随机约束：河边或湖边自拍，背景有水面、栏杆、树影和自然光，人物仍是同一面貌但场景必须变。",
-            "本次自拍场景随机约束：咖啡店窗边自拍，背景有桌面、杯子、玻璃窗或暖灯，姿势轻松自然。",
-            "本次自拍场景随机约束：便利店门口或货架旁自拍，背景有货架、灯箱或玻璃门，像临时发到群里的生活照。",
-            "本次自拍场景随机约束：电梯口或走廊镜面自拍，背景有电梯门、楼道灯光或镜面反射，换成半身构图，不要大头近景。"
-    };
-
     private static final String[] SELFIE_STYLE_LINES = {
             "本次自拍变化约束：换一套与当前季节匹配的衣服和材质，避免连续使用同一种布料、同一种领口和同一种颜色。",
             "本次自拍变化约束：穿搭、发丝状态、表情和手部动作都要重新设计，不能像参考图换脸或复制姿势。",
@@ -2325,5 +2314,25 @@ public final class ImageFlow {
             return "当前北京时间约为傍晚：场景必须是夕阳、晚霞或傍晚室内暖光，适合河边、阳台、街角、商场门口；不要生成正午烈日或深夜场景。";
         }
         return "当前北京时间约为夜晚：场景必须是夜间实景、室内暖灯、夜街或商场灯光，避免白天蓝天烈日；画面仍要真实清晰，不要黑糊。";
+    }
+
+    private static String selfieSceneRule() {
+        return "自拍场景随机策略：每次从明显不同的生活地点里自然选择，例如客厅、厨房、阳台、街角、野外小路、校园、公园、商场、河边或湖边、咖啡店、便利店门口、电梯口、地铁口等；不要固定室内，不要连续使用同一房间、同一背景、同一镜头角度或同一穿搭。";
+    }
+
+    private static boolean shouldAppendUserRequest(String userRequest, boolean cool, boolean selfie,
+                                                   boolean revision, boolean incomingReference) {
+        if (userRequest == null || userRequest.trim().isEmpty()) {
+            return false;
+        }
+        String normalized = userRequest.replaceAll("\\s+", "");
+        if (selfie && !cool && !revision && !incomingReference) {
+            return !(normalized.equals("自拍")
+                    || normalized.equals("发自拍")
+                    || normalized.equals("来张自拍")
+                    || normalized.equals("拍张自拍")
+                    || normalized.equals("给我发自拍"));
+        }
+        return true;
     }
 }

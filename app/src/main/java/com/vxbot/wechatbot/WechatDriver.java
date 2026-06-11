@@ -272,15 +272,20 @@ public final class WechatDriver {
     }
 
     private boolean rebuildVoiceInputMode(Context context, BotConfig config, String sessionName, String reason) {
-        BotLog.w(context, "input.mode.voice_point_missing", "会话语音态缺少按压坐标，清理该群缓存后重新扫描 sessionName="
+        BotLog.w(context, "input.mode.voice_point_missing", "会话语音态缺少按压坐标，先扫描按住说话，不切换输入态 sessionName="
                 + sessionName + " reason=" + reason);
-        clearStoredInputMode(context, sessionName);
-        OcrHelper.InputModeFeature state = scanInitialInputMode(context, config, sessionName, reason + "-voice-point-rebuild");
+        OcrHelper.InputModeFeature state = scanVoicePressPointOnly(context, config, sessionName, reason + "-voice-point-rebuild");
         if (isVoiceInputReady(state) && state.inputRect != null) {
             saveInputMode(context, sessionName, MODE_VOICE, state);
             BotLog.i(context, "input.mode.voice_point_rebuilt", "重新扫描命中语音态并保存按住说话坐标 sessionName="
                     + sessionName + " reason=" + reason + " " + state.summary());
             return true;
+        }
+        if (!isTextInputReady(state)) {
+            BotLog.w(context, "input.mode.voice_rebuild_state_unknown", "语音态缺坐标但未确认当前是文字态，停止切换避免乱点 sessionName="
+                    + sessionName + " reason=" + reason + " "
+                    + (state == null ? "state=null" : state.summary()));
+            return false;
         }
         if (state == null || state.toggleRect == null) {
             BotLog.w(context, "input.mode.voice_rebuild_toggle_missing", "重建语音态时未找到切换按钮，取消发送 sessionName="
@@ -293,7 +298,7 @@ public final class WechatDriver {
         }
         long settleMs = Math.max(800L, config == null ? 1200L : config.inputModeToggleSettleMs);
         SystemClock.sleep(settleMs);
-        OcrHelper.InputModeFeature confirmed = OcrHelper.inspectInputMode(context, hs);
+        OcrHelper.InputModeFeature confirmed = scanVoicePressPointOnly(context, config, sessionName, reason + "-voice-point-confirm");
         if (!isVoiceInputReady(confirmed) || confirmed.inputRect == null) {
             BotLog.w(context, "input.mode.voice_rebuild_confirm_failed", "重建语音态后未识别到按住说话，不保存坐标 sessionName="
                     + sessionName + " reason=" + reason + " settleMs=" + settleMs + " "
@@ -306,6 +311,28 @@ public final class WechatDriver {
                         + " settleMs=" + settleMs + " reason=" + reason + " "
                         + confirmed.summary());
         return true;
+    }
+
+    private OcrHelper.InputModeFeature scanVoicePressPointOnly(Context context, BotConfig config,
+                                                               String sessionName, String reason) {
+        long waitMs = Math.max(500L, config == null ? 800L : config.wechatChatOcrPollMs);
+        OcrHelper.InputModeFeature lastState = null;
+        for (int i = 1; i <= 5; i++) {
+            OcrHelper.InputModeFeature state = OcrHelper.inspectInputMode(context, hs);
+            if (state != null) {
+                lastState = state;
+            }
+            if (isVoiceInputReady(state) && state.inputRect != null) {
+                BotLog.i(context, "input.mode.voice_point.scan_hit", "扫描命中按住说话 sessionName="
+                        + sessionName + " round=" + i + " reason=" + reason + " " + state.summary());
+                return state;
+            }
+            BotLog.i(context, "input.mode.voice_point.scan", "扫描未命中按住说话 sessionName="
+                    + sessionName + " round=" + i + " reason=" + reason + " "
+                    + (state == null ? "state=null" : state.summary()));
+            SystemClock.sleep(waitMs);
+        }
+        return lastState;
     }
 
     private OcrHelper.InputModeFeature scanInitialInputMode(Context context, BotConfig config,

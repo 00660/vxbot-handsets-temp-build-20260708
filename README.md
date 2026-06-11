@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`77`
-- `versionName`：`0.1.76-boot-keepawake-manual`
+- `versionCode`：`78`
+- `versionName`：`0.1.77-voice-point-prompt-fix`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -101,6 +101,8 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `bot.service.create`：服务实例创建。
 - `bot.start`：机器人启动结果。
 - `input.mode.whitelist.sync`：已按配置同步白名单群文字/语音输入态。
+- `input.mode.voice_point.scan`：语音态缺坐标时正在 OCR 扫描 `按住说话`。
+- `input.mode.voice_point.scan_hit`：语音态缺坐标时已扫到并准备缓存坐标。
 - `input.mode.voice_point_rebuilt`：某群语音按压坐标重建成功。
 - `screen.dim.enable` / `screen.dim.disable`：低亮防熄屏开启或关闭。
 - `screen.brightness.set`：系统亮度写入成功。
@@ -110,8 +112,10 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-11：修正图片自拍 prompt 拼接，移除发给图片上游的内部“提示词整理器”身份头、`用户原话：自拍` 字段和单条固定场景硬约束；自拍场景改为多地点候选策略，避免固定室内/客厅背景。
+- 2026-06-11：修正语音输入态坐标重建。会话已记录为语音态但缺少 `按住说话` 坐标时，先多轮 OCR 扫描并缓存坐标；只有确认当前是文字态才允许切换，避免在已处于语音态时误点左下角切换按钮。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 
