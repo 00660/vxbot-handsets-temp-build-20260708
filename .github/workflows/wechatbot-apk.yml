@@ -23,7 +23,6 @@ jobs:
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      RELEASE_DIR: ${{ runner.temp }}/wechatbot-release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,30 +54,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RELEASE_DIR"
-          mkdir -p "$RELEASE_DIR"
+          rm -rf release
+          mkdir -p release
           apk="$(ls app/build/outputs/apk/debug/*.apk | head -1)"
-          cp "$apk" "$RELEASE_DIR/hs-wechatbot-latest.apk"
+          cp "$apk" release/hs-wechatbot-latest.apk
           {
             echo "sha=$GITHUB_SHA"
             echo "run_id=$GITHUB_RUN_ID"
             echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "apk=hs-wechatbot-latest.apk"
-          } > "$RELEASE_DIR/BUILD_INFO.txt"
-
-      - name: Publish APK to output branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan apk-build-output
-          git rm -rf . >/dev/null 2>&1 || true
-          cp "$RELEASE_DIR/hs-wechatbot-latest.apk" .
-          cp "$RELEASE_DIR/BUILD_INFO.txt" .
-          git add hs-wechatbot-latest.apk BUILD_INFO.txt
-          git commit -m "Publish APK for ${GITHUB_SHA}"
-          git push --force origin HEAD:apk-build-output
+          } > release/BUILD_INFO.txt
 
       - name: Publish GitHub Release
         shell: bash
@@ -88,10 +73,10 @@ jobs:
           set -euo pipefail
           notes="自动发布最新调试版 APK。构建提交：${GITHUB_SHA}"
           if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest "$RELEASE_DIR/hs-wechatbot-latest.apk" "$RELEASE_DIR/BUILD_INFO.txt" --clobber
+            gh release upload latest release/hs-wechatbot-latest.apk release/BUILD_INFO.txt --clobber
             gh release edit latest --title "HS 微信机器人 APK 最新版" --notes "$notes"
           else
-            gh release create latest "$RELEASE_DIR/hs-wechatbot-latest.apk" "$RELEASE_DIR/BUILD_INFO.txt" \
+            gh release create latest release/hs-wechatbot-latest.apk release/BUILD_INFO.txt \
               --title "HS 微信机器人 APK 最新版" \
               --notes "$notes"
           fi
@@ -101,4 +86,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hs-wechatbot-debug-apk
-          path: ${{ runner.temp }}/wechatbot-release/hs-wechatbot-latest.apk
+          path: release/hs-wechatbot-latest.apk
+
+      - name: Publish APK to output branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          cp release/hs-wechatbot-latest.apk "$out/hs-wechatbot-latest.apk"
+          cp release/BUILD_INFO.txt "$out/BUILD_INFO.txt"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk-build-output
+          git rm -rf . >/dev/null 2>&1 || true
+          cp "$out/hs-wechatbot-latest.apk" .
+          cp "$out/BUILD_INFO.txt" .
+          git add hs-wechatbot-latest.apk BUILD_INFO.txt
+          git commit -m "Publish APK for ${GITHUB_SHA}"
+          git push --force origin HEAD:apk-build-output
