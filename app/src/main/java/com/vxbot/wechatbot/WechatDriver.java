@@ -242,6 +242,13 @@ public final class WechatDriver {
             return true;
         }
         OcrHelper.InputModeFeature state = OcrHelper.inspectInputMode(context, hs);
+        if (isTargetInputModeReady(target, state)) {
+            saveInputMode(context, sessionName, target, state);
+            BotLog.i(context, "input.mode.current_matches", "现场输入态已是目标态，更新缓存并跳过切换 sessionName="
+                    + sessionName + " target=" + target + " cached=" + stored
+                    + " reason=" + reason + " " + state.summary());
+            return true;
+        }
         if (state == null || state.toggleRect == null) {
             BotLog.w(context, "input.mode.toggle.missing", "会话状态机需要切换，但未找到左侧切换按钮 target="
                     + target + " current=" + stored + " sessionName=" + sessionName + " reason=" + reason + " "
@@ -440,6 +447,13 @@ public final class WechatDriver {
             return false;
         }
         return state.pressTalkTextHit && state.isVoiceModeLikely();
+    }
+
+    private static boolean isTargetInputModeReady(String target, OcrHelper.InputModeFeature state) {
+        if (MODE_VOICE.equals(target)) {
+            return isVoiceInputReady(state);
+        }
+        return isTextInputReady(state);
     }
 
     private void backUntilLeaveWechat(Context context, String reason) throws Exception {
