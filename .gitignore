@@ -15,3 +15,4 @@ external/
 tmp-*.png
 tmp-*.jpg
 .codex-backups/
+.backup-*/

@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -200,8 +201,10 @@ public final class ImageFlow {
         if (selfie) {
             prompt.append("自拍人物方向：眼神像蜜妮跟对象见面时的样子，青涩、略带羞涩、脸红红、自然不好意思，日常自拍，不要强制全身照。\n");
             prompt.append(currentChinaSeasonOutfitRule()).append("\n");
+            prompt.append(currentChinaTimeSceneRule()).append("\n");
             prompt.append("人物参考图只锁定同一张脸、五官、发型气质和身份一致性；参考图里的衣服、毛衣纹理、针织材质、背景、姿势、手势、镜头角度都不要继承，除非用户原话明确要求。\n");
             prompt.append("自拍表情和动作：表情要自然随机，可以是开心、害羞、微恼、困倦、酷一点、emo、偷笑、发呆、认真看镜头等；动作像临时自拍，不要照搬人物参考图、风格底图或上一张图。\n");
+            prompt.append(random(SELFIE_PERSONA_LINES)).append("\n");
             prompt.append(random(SELFIE_STYLE_LINES)).append("\n");
             prompt.append(random(SELFIE_SCENE_LINES)).append("\n");
         }
@@ -2285,8 +2288,17 @@ public final class ImageFlow {
             "本次自拍变化约束：可以自然微笑、抿嘴害羞、轻轻皱眉、歪头、托腮、比小手势、侧身回头，但动作必须自然。"
     };
 
+    private static final String[] SELFIE_PERSONA_LINES = {
+            "本次人物气质随机约束：学院风，干净清爽，像刚下课随手拍的自然自拍。",
+            "本次人物气质随机约束：邻家小妹感，亲近、松弛、明亮，表情不要端着。",
+            "本次人物气质随机约束：气质女神感，五官精致但生活化，不要棚拍写真感。",
+            "本次人物气质随机约束：知性温柔，眼神安静，穿搭简洁有质感。",
+            "本次人物气质随机约束：温柔儒雅，姿态舒展，像熟人聊天里自然发出的自拍。",
+            "本次人物气质随机约束：风情要有层次，眼神和姿态更有故事感，但仍是日常自然自拍，不要夸张摆拍。"
+    };
+
     private static String currentChinaSeasonOutfitRule() {
-        Calendar calendar = Calendar.getInstance(Locale.CHINA);
+        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"), Locale.CHINA);
         int month = calendar.get(Calendar.MONTH) + 1;
         if (month >= 3 && month <= 5) {
             return "当前中国季节按春季处理：优先轻薄衬衫、薄开衫、卫衣、牛仔外套、棉质上衣、长裙或休闲裤等春季材质；不要套用人物参考图原衣服。";
@@ -2298,5 +2310,20 @@ public final class ImageFlow {
             return "当前中国季节按秋季处理：优先薄风衣、衬衫、针织马甲、薄毛衫、牛仔外套、休闲夹克等秋季层次；可以有轻薄针织，但不要照搬参考图毛衣纹理和颜色。";
         }
         return "当前中国季节按冬季处理：可以选择毛衣、针织、围巾、羽绒服、呢大衣或厚外套等冬季材质，但仍必须换款式、颜色、姿势和场景，不要照搬人物参考图。";
+    }
+
+    private static String currentChinaTimeSceneRule() {
+        Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"), Locale.CHINA);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        if (hour >= 5 && hour < 10) {
+            return "当前北京时间约为早晨：场景必须是清晨或上午自然光，适合卧室窗边、早餐店、上班路上、校园/小区晨光；不要生成夜景、霓虹或深夜室内灯光。";
+        }
+        if (hour >= 10 && hour < 17) {
+            return "当前北京时间约为白天：场景必须是白天实景和自然日光，适合商场、街边、公园、河边、教室、咖啡店窗边；不要生成夜晚、酒吧、霓虹灯或月光场景。";
+        }
+        if (hour >= 17 && hour < 20) {
+            return "当前北京时间约为傍晚：场景必须是夕阳、晚霞或傍晚室内暖光，适合河边、阳台、街角、商场门口；不要生成正午烈日或深夜场景。";
+        }
+        return "当前北京时间约为夜晚：场景必须是夜间实景、室内暖灯、夜街或商场灯光，避免白天蓝天烈日；画面仍要真实清晰，不要黑糊。";
     }
 }

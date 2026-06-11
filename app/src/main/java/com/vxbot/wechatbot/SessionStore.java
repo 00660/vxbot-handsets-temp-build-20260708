@@ -1,5 +1,8 @@
 package com.vxbot.wechatbot;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,6 +11,8 @@ import java.util.Map;
 
 public final class SessionStore {
     private static final int MAX_LINES = 15;
+    private static final String PREFS = "session_store";
+    private static final String KEY_ACTIVE_PREFIX = "active_sender_";
 
     private final Map<String, ArrayDeque<String>> histories = new HashMap<>();
     private final Map<String, String> activeSenders = new HashMap<>();
@@ -15,7 +20,7 @@ public final class SessionStore {
     private final Map<String, ModeTarget> roastTargets = new HashMap<>();
     private final Map<String, ModeTarget> loverTargets = new HashMap<>();
 
-    public synchronized boolean shouldHandle(WxMessage message, BotConfig config) {
+    public synchronized boolean shouldHandle(Context context, WxMessage message, BotConfig config) {
         String session = message.sessionName;
         if (!config.isAllowedSession(session)) {
             return false;
@@ -35,8 +40,14 @@ public final class SessionStore {
         boolean mentioned = config.isBotMentioned(message.text);
         boolean reportCommand = MessageRouter.isReportCommand(message.text);
         if (mentioned || reportCommand) {
-            if (config.lockActiveSender && !message.senderName.isEmpty()) {
+            if (canLockActiveSender(message, config)) {
                 activeSenders.put(session, message.senderName);
+                if (config.enableFollowUpWithoutMention) {
+                    persistActiveSender(context, session, message.senderName);
+                }
+            } else if (config.lockActiveSender && config.enableFollowUpWithoutMention && !message.senderName.isEmpty()) {
+                BotLog.i(context, "followup.sender.not_allowed",
+                        "发起人不在续聊白名单，不写入发起人锁 group=" + session + " sender=" + message.senderName);
             }
             return true;
         }
@@ -44,7 +55,32 @@ public final class SessionStore {
             return false;
         }
         String active = activeSenders.get(session);
+        if (config.enableFollowUpWithoutMention && active != null && !active.isEmpty()
+                && !config.isFollowUpSenderAllowed(active)) {
+            activeSenders.remove(session);
+            clearPersistedActiveSender(context, session);
+            return false;
+        }
+        if ((active == null || active.isEmpty()) && config.enableFollowUpWithoutMention) {
+            active = persistedActiveSender(context, session);
+            if (active != null && !active.isEmpty() && config.isFollowUpSenderAllowed(active)) {
+                activeSenders.put(session, active);
+            } else if (active != null && !active.isEmpty()) {
+                clearPersistedActiveSender(context, session);
+                active = "";
+            }
+        }
         return active != null && active.equals(message.senderName);
+    }
+
+    private static boolean canLockActiveSender(WxMessage message, BotConfig config) {
+        if (message == null || config == null || !config.lockActiveSender || message.senderName.isEmpty()) {
+            return false;
+        }
+        if (!config.enableFollowUpWithoutMention) {
+            return true;
+        }
+        return config.isFollowUpSenderAllowed(message.senderName);
     }
 
     public synchronized void remember(WxMessage message, String role) {
@@ -122,6 +158,37 @@ public final class SessionStore {
             return null;
         }
         return target;
+    }
+
+    private static void persistActiveSender(Context context, String sessionName, String senderName) {
+        if (context == null || sessionName == null || sessionName.trim().isEmpty()
+                || senderName == null || senderName.trim().isEmpty()) {
+            return;
+        }
+        prefs(context).edit().putString(activeSenderKey(sessionName), senderName.trim()).apply();
+    }
+
+    private static String persistedActiveSender(Context context, String sessionName) {
+        if (context == null || sessionName == null || sessionName.trim().isEmpty()) {
+            return "";
+        }
+        return prefs(context).getString(activeSenderKey(sessionName), "");
+    }
+
+    private static void clearPersistedActiveSender(Context context, String sessionName) {
+        if (context == null || sessionName == null || sessionName.trim().isEmpty()) {
+            return;
+        }
+        prefs(context).edit().remove(activeSenderKey(sessionName)).apply();
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static String activeSenderKey(String sessionName) {
+        String normalized = sessionName == null ? "" : sessionName.trim();
+        return KEY_ACTIVE_PREFIX + Integer.toHexString(normalized.hashCode());
     }
 
     private static final class ModeTarget {

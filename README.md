@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`76`
-- `versionName`：`0.1.75-whitelist-input-mode-sync`
+- `versionCode`：`77`
+- `versionName`：`0.1.76-boot-keepawake-manual`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -34,6 +34,10 @@
 - 悬浮日志：支持开关、拖动、收起为小圆点。
 - 支付监听：独立线程监听微信收款通知并回调后端。
 - 保活：前台服务、BootReceiver、KeepAliveScheduler、root/hs daemon 恢复检查。
+- 无 root 保活：`shizuku` 模式可开启低亮透明防熄屏窗口，支持指令恢复亮度。
+- 菜单指令：群里发送 `菜单`、`操作手册`、`帮助`、`指令` 可回复机器人操作手册。
+- 屏幕指令：`屏幕最暗` 开启低亮防熄屏，`屏幕最亮` 关闭低亮窗口并尝试恢复系统亮度。
+- 续聊免 @：可按群持久化最初 @ 的发起人；只有“续聊控制人白名单”里的微信名能获得发起人锁，避免群友先 @ 后抢控制权。
 - 垃圾清理：定期清理截图、生成图、TTS 缓存等运行产物。
 
 ## 关键链路
@@ -67,6 +71,7 @@ POST /repos/00660/vxbot-handsets/actions/workflows/wechatbot-apk.yml/dispatches
 构建成功后：
 
 - 最新 APK：`apk-build-output` 分支的 `hs-wechatbot-latest.apk`
+- 下载页：GitHub Release `latest` 附件 `hs-wechatbot-latest.apk`
 - 构建信息：`apk-build-output` 分支的 `BUILD_INFO.txt`
 - Actions artifact：`hs-wechatbot-debug-apk`
 
@@ -97,8 +102,16 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `bot.start`：机器人启动结果。
 - `input.mode.whitelist.sync`：已按配置同步白名单群文字/语音输入态。
 - `input.mode.voice_point_rebuilt`：某群语音按压坐标重建成功。
+- `screen.dim.enable` / `screen.dim.disable`：低亮防熄屏开启或关闭。
+- `screen.brightness.set`：系统亮度写入成功。
+- `screen.brightness.skip`：未授权 `WRITE_SETTINGS`，只使用低亮窗口。
 - `notice.raw`：收到微信通知。
 - `send.text` / `voice.reply.done`：文字/语音发送完成。
+
+## 最近交接
+
+- 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 

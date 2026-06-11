@@ -59,6 +59,7 @@ public final class MainActivity extends Activity {
 
     private EditText botNames;
     private EditText allowedSessions;
+    private EditText followUpSenderWhitelist;
     private EditText chatEndpoint;
     private EditText apiKey;
     private EditText model;
@@ -120,6 +121,7 @@ public final class MainActivity extends Activity {
     private Switch enableWeather;
     private Switch enableLogOverlay;
     private Switch keepLogOverlayDuringOperation;
+    private Switch enableNoRootKeepAwake;
     private Switch enableExMode;
     private Switch enablePaymentListener;
     private Switch enableImageWarmupText;
@@ -129,6 +131,7 @@ public final class MainActivity extends Activity {
     private Switch normalReplyAsVoice;
     private Switch dropImageTaskOnError;
     private Switch lockActiveSender;
+    private Switch enableFollowUpWithoutMention;
     private Switch stayInCodexSession;
     private TextView logView;
     private TextView statusView;
@@ -243,10 +246,14 @@ public final class MainActivity extends Activity {
                 button("刷新状态", v -> refreshStatus())));
         statusPage.addView(buttonRow(
                 button("电池白名单", v -> openBatteryWhitelistSettings())));
+        statusPage.addView(buttonRow(
+                button("亮度权限", v -> openWriteSettingsPermission()),
+                button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
         allowedSessions = edit(basicPage, "白名单群，一行一个", "", true);
+        followUpSenderWhitelist = edit(basicPage, "续聊控制人白名单，一行一个微信名", "", true);
         activeMode = spinner(basicPage, "hs 启动方式", new String[]{"root", "shizuku"});
         hsPort = edit(basicPage, "hs 端口", "9010", false);
 
@@ -337,6 +344,7 @@ public final class MainActivity extends Activity {
         ttsVoice = spinner(featuresPage, "TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
         ttsSpeed = edit(featuresPage, "TTS 语速倍率 0.5-2.0", "1.0", false);
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
+        enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
         enableLogOverlay = switchRow(featuresPage, "悬浮实时日志");
         enableLogOverlay.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (loadingConfig) {
@@ -350,6 +358,7 @@ public final class MainActivity extends Activity {
         });
         keepLogOverlayDuringOperation = switchRow(featuresPage, "微信操作时仍显示悬浮日志");
         lockActiveSender = switchRow(featuresPage, "续聊锁定最初 @ 的群员");
+        enableFollowUpWithoutMention = switchRow(featuresPage, "续聊免 @ 记住发起人");
         stayInCodexSession = switchRow(featuresPage, "Codex 会话保持前台");
         featuresPage.addView(buttonRow(button("保存功能开关", v -> saveConfig())));
 
@@ -453,6 +462,7 @@ public final class MainActivity extends Activity {
             BotConfig config = BotConfig.load(this);
             botNames.setText(config.botNames);
             allowedSessions.setText(config.allowedSessions);
+            followUpSenderWhitelist.setText(config.followUpSenderWhitelist);
             activeMode.setSelection("shizuku".equals(config.activeMode) ? 1 : 0);
             chatEndpoint.setText(config.chatEndpoint);
             apiKey.setText(config.apiKey);
@@ -509,6 +519,7 @@ public final class MainActivity extends Activity {
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
             normalReplyAsVoice.setChecked(config.normalReplyAsVoice);
+            enableNoRootKeepAwake.setChecked(config.enableNoRootKeepAwake);
             enableLogOverlay.setChecked(config.enableLogOverlay);
             keepLogOverlayDuringOperation.setChecked(config.keepLogOverlayDuringOperation);
             enableExMode.setChecked(config.enableExMode);
@@ -519,6 +530,7 @@ public final class MainActivity extends Activity {
             imageAfterAsVoice.setChecked(config.imageAfterAsVoice);
             dropImageTaskOnError.setChecked(config.dropImageTaskOnError);
             lockActiveSender.setChecked(config.lockActiveSender);
+            enableFollowUpWithoutMention.setChecked(config.enableFollowUpWithoutMention);
             stayInCodexSession.setChecked(config.stayInCodexSession);
         } finally {
             loadingConfig = false;
@@ -536,6 +548,7 @@ public final class MainActivity extends Activity {
         SharedPreferences.Editor e = prefs.edit();
         e.putString("botNames", botNames.getText().toString());
         e.putString("allowedSessions", allowedSessions.getText().toString());
+        e.putString("followUpSenderWhitelist", followUpSenderWhitelist.getText().toString());
         e.putString("activeMode", activeMode.getSelectedItem().toString());
         e.putString("chatEndpoint", chatEndpoint.getText().toString());
         e.putString("apiKey", apiKey.getText().toString());
@@ -588,6 +601,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());
         e.putBoolean("normalReplyAsVoice", newNormalVoice);
+        e.putBoolean("enableNoRootKeepAwake", enableNoRootKeepAwake.isChecked());
         e.putBoolean("enableLogOverlay", enableLogOverlay.isChecked());
         e.putBoolean("keepLogOverlayDuringOperation", keepLogOverlayDuringOperation.isChecked());
         e.putBoolean("enableExMode", enableExMode.isChecked());
@@ -598,6 +612,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("imageAfterAsVoice", newAfterVoice);
         e.putBoolean("dropImageTaskOnError", dropImageTaskOnError.isChecked());
         e.putBoolean("lockActiveSender", lockActiveSender.isChecked());
+        e.putBoolean("enableFollowUpWithoutMention", enableFollowUpWithoutMention.isChecked());
         e.putBoolean("stayInCodexSession", stayInCodexSession.isChecked());
         e.apply();
         WechatDriver.syncAllowedSessionInputModes(this, BotConfig.load(this));
@@ -609,6 +624,7 @@ public final class MainActivity extends Activity {
         } else {
             MorningGreetingScheduler.cancel(this);
         }
+        ScreenControl.syncForConfig(this, BotConfig.load(this), "ui-save");
         BotLog.i(this, "config.save", "配置已保存");
         toast("配置已保存");
         refreshStatus();
@@ -1116,6 +1132,29 @@ public final class MainActivity extends Activity {
                 toast("无法打开电池白名单设置");
             }
         }
+    }
+
+    private void openWriteSettingsPermission() {
+        if (Build.VERSION.SDK_INT < 23) {
+            toast("当前系统无需亮度写入权限");
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            BotLog.e(this, "permission.write_settings.open.fail", e.getMessage());
+            toast("无法打开亮度权限设置");
+        }
+    }
+
+    private void restoreScreenBrightnessFromUi() {
+        ScreenControl.disableKeepAwake(this, "ui");
+        boolean ok = ScreenControl.trySetSystemBrightness(this, 255, "ui");
+        toast(ok ? "已尝试调到最亮" : "已关闭低亮窗口，系统亮度权限未开");
+        refreshLogs();
+        refreshStatus();
     }
 
     private void requestPostNotificationIfNeeded() {

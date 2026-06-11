@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 76
-        versionName "0.1.75-whitelist-input-mode-sync"
+        versionCode 77
+        versionName "0.1.76-boot-keepawake-manual"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

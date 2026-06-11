@@ -82,6 +82,7 @@ public final class BotConfig {
 
     public final String botNames;
     public final String allowedSessions;
+    public final String followUpSenderWhitelist;
     public final String activeMode;
     public final String chatEndpoint;
     public final String apiKey;
@@ -138,6 +139,7 @@ public final class BotConfig {
     public final boolean enableWeather;
     public final boolean enableLogOverlay;
     public final boolean keepLogOverlayDuringOperation;
+    public final boolean enableNoRootKeepAwake;
     public final boolean enablePaymentListener;
     public final boolean enableImageWarmupText;
     public final boolean imageWarmupAsVoice;
@@ -147,11 +149,13 @@ public final class BotConfig {
     public final boolean enableExMode;
     public final boolean dropImageTaskOnError;
     public final boolean lockActiveSender;
+    public final boolean enableFollowUpWithoutMention;
     public final boolean stayInCodexSession;
 
     private BotConfig(SharedPreferences prefs) {
         botNames = prefs.getString("botNames", "机器人");
         allowedSessions = prefs.getString("allowedSessions", "顶呱呱\n东海龙宫\n慢友羊毛群\n社会大学交流群");
+        followUpSenderWhitelist = prefs.getString("followUpSenderWhitelist", "");
         activeMode = prefs.getString("activeMode", "root");
         chatEndpoint = normalizeChatEndpoint(prefs.getString("chatEndpoint", DEFAULT_CHAT_ENDPOINT));
         apiKey = normalizeApiKey(prefs.getString("apiKey", DEFAULT_API_KEY));
@@ -208,6 +212,7 @@ public final class BotConfig {
         enableWeather = prefs.getBoolean("enableWeather", true);
         enableLogOverlay = prefs.getBoolean("enableLogOverlay", false);
         keepLogOverlayDuringOperation = prefs.getBoolean("keepLogOverlayDuringOperation", true);
+        enableNoRootKeepAwake = prefs.getBoolean("enableNoRootKeepAwake", true);
         enablePaymentListener = prefs.getBoolean("enablePaymentListener", true);
         enableImageWarmupText = prefs.getBoolean("enableImageWarmupText", true);
         imageWarmupAsVoice = prefs.getBoolean("imageWarmupAsVoice", false);
@@ -217,6 +222,7 @@ public final class BotConfig {
         enableExMode = prefs.getBoolean("enableExMode", false);
         dropImageTaskOnError = prefs.getBoolean("dropImageTaskOnError", true);
         lockActiveSender = prefs.getBoolean("lockActiveSender", true);
+        enableFollowUpWithoutMention = prefs.getBoolean("enableFollowUpWithoutMention", true);
         stayInCodexSession = prefs.getBoolean("stayInCodexSession", false);
     }
 
@@ -262,6 +268,21 @@ public final class BotConfig {
         for (String name : names) {
             String n = name.trim();
             if (!n.isEmpty() && (text.contains("@" + n) || text.contains(n))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean isFollowUpSenderAllowed(String senderName) {
+        String sender = senderName == null ? "" : senderName.trim();
+        if (sender.isEmpty()) {
+            return false;
+        }
+        String[] rows = followUpSenderWhitelist.split("[,，\\n\\r]+");
+        for (String row : rows) {
+            String value = row == null ? "" : row.trim();
+            if (!value.isEmpty() && sender.equals(value)) {
                 return true;
             }
         }

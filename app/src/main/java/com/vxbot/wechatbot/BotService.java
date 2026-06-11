@@ -52,6 +52,9 @@ public final class BotService extends Service {
             WechatDriver.syncAllowedSessionInputModes(this, BotConfig.load(this));
             BotLog.i(this, "input.mode.cache.sync", "语音/文字发送或白名单设置变化，已同步白名单输入态 key=" + key);
         }
+        if (key == null || "activeMode".equals(key) || "enableNoRootKeepAwake".equals(key)) {
+            ScreenControl.syncForConfig(this, BotConfig.load(this), "config-change");
+        }
     };
 
     @Override
@@ -66,6 +69,7 @@ public final class BotService extends Service {
         BotConfig.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
         BotConfig initialConfig = BotConfig.load(this);
         syncLogOverlay(initialConfig);
+        ScreenControl.syncForConfig(this, initialConfig, "service-create");
         WechatDriver.syncAllowedSessionInputModes(this, initialConfig);
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
@@ -85,6 +89,7 @@ public final class BotService extends Service {
             if (logOverlay != null) {
                 logOverlay.hide();
             }
+            ScreenControl.disableKeepAwake(this, "bot-stop");
             daemonManager.stop(this, config);
             BotLog.i(this, "bot.stop", "服务停止");
             stopForeground(STOP_FOREGROUND_REMOVE);
@@ -154,6 +159,7 @@ public final class BotService extends Service {
                 startupForegroundCleaned = true;
                 new WechatDriver(config.hsPort).leaveWechatIfForeground(this, "bot-start");
             }
+            ScreenControl.syncForConfig(this, config, "bot-start");
             BotLog.write(this, ok ? "INFO" : "ERROR", "bot.start", ok ? "机器人已启动" : "机器人启动失败");
         });
         return START_STICKY;
@@ -228,7 +234,7 @@ public final class BotService extends Service {
             BotLog.w(this, "notice.skip.whitelist", "群不在白名单 " + message.sessionName);
             return;
         }
-        if (!sessionStore.shouldHandle(message, config)) {
+        if (!sessionStore.shouldHandle(this, message, config)) {
             BotLog.i(this, "notice.skip.context", "未命中@或当前发起人锁 " + message.display());
             return;
         }
@@ -314,6 +320,19 @@ public final class BotService extends Service {
                 }
                 if (route.kind == MessageRouter.Kind.TTS) {
                     return "__TTS_FLOW__";
+                }
+                if (route.kind == MessageRouter.Kind.MANUAL) {
+                    return buildManualReply(config);
+                }
+                if (route.kind == MessageRouter.Kind.SCREEN_DIM) {
+                    ScreenControl.enableDimKeepAwake(this, "command");
+                    ScreenControl.trySetSystemBrightness(this, 1, "command-dim");
+                    return "低亮防熄屏开了。无 root 机型会用透明小窗口保持屏幕不灭，需要恢复就发“屏幕最亮”。";
+                }
+                if (route.kind == MessageRouter.Kind.SCREEN_BRIGHT) {
+                    ScreenControl.disableKeepAwake(this, "command");
+                    ScreenControl.trySetSystemBrightness(this, 255, "command-bright");
+                    return "屏幕亮度恢复指令已执行，低亮防熄屏也关了。";
                 }
                 if (route.exitCommand && route.kind == MessageRouter.Kind.TROLL) {
                     return "行，先收炮，喷子模式退了。";
@@ -429,6 +448,17 @@ public final class BotService extends Service {
                 || route.kind == MessageRouter.Kind.ANALYSIS
                 || route.kind == MessageRouter.Kind.REPORT
                 || route.kind == MessageRouter.Kind.SHUTUP;
+    }
+
+    private String buildManualReply(BotConfig config) {
+        String name = config == null ? "机器人" : config.primaryBotName();
+        return name + " 操作手册：\n"
+                + "1. 聊天：@" + name + " 后面直接说内容。\n"
+                + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
+                + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、来点羊毛。\n"
+                + "4. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
+                + "5. 语音：发语音 文字；机器人请报道可测在线。\n"
+                + "6. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
     }
 
     private boolean startTtsVoiceInCurrentChat(BotConfig config, WechatDriver driver, WxMessage message, String text, String reason) {

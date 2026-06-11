@@ -20,7 +20,10 @@ public final class MessageRouter {
         TTS,
         STICKER,
         REPORT,
-        SHUTUP
+        SHUTUP,
+        MANUAL,
+        SCREEN_DIM,
+        SCREEN_BRIGHT
     }
 
     public static final class Route {
@@ -57,6 +60,15 @@ public final class MessageRouter {
         }
         if (config.enableLover && isLoverExitCommand(command)) {
             return new Route(Kind.LOVER, "退出恋人模式。", "", true, true);
+        }
+        if (isManualCommand(command)) {
+            return new Route(Kind.MANUAL, "机器人操作手册。");
+        }
+        if (isScreenBrightCommand(command)) {
+            return new Route(Kind.SCREEN_BRIGHT, "关闭低亮防熄屏并把亮度调高。");
+        }
+        if (isScreenDimCommand(command)) {
+            return new Route(Kind.SCREEN_DIM, "开启低亮防熄屏。");
         }
         if (looksLikeLicenseRequest(command)) {
             return new Route(Kind.LICENSE, "注册机/授权码请求：按旧版 LicensePanelBot 逻辑本地分流处理。");
@@ -118,6 +130,9 @@ public final class MessageRouter {
         if (isRoastExitCommand(command) || isLoverExitCommand(command)) {
             return true;
         }
+        if (isManualCommand(command) || isScreenDimCommand(command) || isScreenBrightCommand(command)) {
+            return true;
+        }
         if (looksLikeLicenseRequest(command)) {
             return true;
         }
@@ -168,6 +183,25 @@ public final class MessageRouter {
         return compact.matches("^(强制)?(退出|关闭|停止|结束|取消|解除)(恋人模式|情侣模式|谈恋爱|谈情说爱|撒糖|互撩)$")
                 || compact.matches("^(恋人模式|情侣模式|撒糖|互撩)(退出|关闭|停止|结束|取消|解除)$")
                 || compact.matches("^(别撒糖了|不要撒糖了|不撒糖了|别腻歪了|停止撒糖|结束撒糖|退出情侣模式|退出恋人模式)$");
+    }
+
+    public static boolean isManualCommand(String text) {
+        String value = compact(text);
+        if (value.isEmpty()) {
+            return false;
+        }
+        return value.matches("^(机器人|bot|慢一点|韵味)?(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)$")
+                || value.matches("^(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)(机器人|bot|慢一点|韵味)?$");
+    }
+
+    public static boolean isScreenDimCommand(String text) {
+        String value = compact(text);
+        return value.matches(".*(屏幕最暗|亮度最低|调暗屏幕|屏幕调暗|开启防熄屏|打开防熄屏|低亮保活|无root保活|无root防熄屏).*");
+    }
+
+    public static boolean isScreenBrightCommand(String text) {
+        String value = compact(text);
+        return value.matches(".*(屏幕最亮|亮度最高|调亮屏幕|屏幕调亮|恢复亮度|关闭防熄屏|退出防熄屏|取消低亮保活|恢复屏幕亮度).*");
     }
 
     private static String extractRoastTarget(String text) {
