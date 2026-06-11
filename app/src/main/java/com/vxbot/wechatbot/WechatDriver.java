@@ -193,30 +193,14 @@ public final class WechatDriver {
         int count = 0;
         for (String sessionName : safeConfig.allowedSessionList()) {
             String key = inputModeKey(sessionName);
-            editor.putString(key, mode);
-            if (!voiceMode) {
-                editor.remove(key + ".pressX")
-                        .remove(key + ".pressY");
-            }
+            editor.putString(key, mode)
+                    .remove(key + ".pressX")
+                    .remove(key + ".pressY");
             count++;
         }
         editor.apply();
         BotLog.i(context, "input.mode.whitelist.sync", "已按配置同步白名单会话输入态 mode="
                 + mode + " count=" + count);
-    }
-
-    public int[] cachedVoicePressPoint(Context context, String sessionName) {
-        if (!MODE_VOICE.equals(storedInputMode(context, sessionName))) {
-            return null;
-        }
-        String key = inputModeKey(sessionName);
-        android.content.SharedPreferences prefs = context.getSharedPreferences(INPUT_MODE_PREFS, Context.MODE_PRIVATE);
-        int x = prefs.getInt(key + ".pressX", -1);
-        int y = prefs.getInt(key + ".pressY", -1);
-        if (x <= 0 || y <= 0) {
-            return null;
-        }
-        return new int[]{x, y};
     }
 
     private boolean ensureInputMode(Context context, BotConfig config, String sessionName, boolean needText, String reason) {
@@ -236,11 +220,6 @@ public final class WechatDriver {
                     + " mode=" + stored + " reason=" + reason + " " + detected.summary());
         }
         if (target.equals(stored)) {
-            if (MODE_VOICE.equals(target) && cachedVoicePressPoint(context, sessionName) == null) {
-                if (!rebuildVoiceInputMode(context, config, sessionName, reason)) {
-                    return false;
-                }
-            }
             BotLog.i(context, "input.mode.ready", "按会话状态机确认输入态 sessionName=" + sessionName
                     + " mode=" + stored + " reason=" + reason);
             return true;
@@ -268,7 +247,7 @@ public final class WechatDriver {
         if (MODE_VOICE.equals(target)) {
             confirmed = OcrHelper.inspectInputMode(context, hs);
             if (!isVoiceInputReady(confirmed) || confirmed.inputRect == null) {
-                BotLog.w(context, "input.mode.voice_confirm_failed", "切换到语音态后未识别到按住说话，不保存语音态 sessionName="
+                BotLog.w(context, "input.mode.voice_confirm_failed", "切换到语音态后未识别到按住/说话，不保存语音态 sessionName="
                         + sessionName + " reason=" + reason + " "
                         + (confirmed == null ? "state=null" : confirmed.summary()));
                 return false;
@@ -282,70 +261,6 @@ public final class WechatDriver {
         return true;
     }
 
-    private boolean rebuildVoiceInputMode(Context context, BotConfig config, String sessionName, String reason) {
-        BotLog.w(context, "input.mode.voice_point_missing", "会话语音态缺少按压坐标，先扫描按住说话，不切换输入态 sessionName="
-                + sessionName + " reason=" + reason);
-        OcrHelper.InputModeFeature state = scanVoicePressPointOnly(context, config, sessionName, reason + "-voice-point-rebuild");
-        if (isVoiceInputReady(state) && state.inputRect != null) {
-            saveInputMode(context, sessionName, MODE_VOICE, state);
-            BotLog.i(context, "input.mode.voice_point_rebuilt", "重新扫描命中语音态并保存按住说话坐标 sessionName="
-                    + sessionName + " reason=" + reason + " " + state.summary());
-            return true;
-        }
-        if (!isTextInputReady(state)) {
-            BotLog.w(context, "input.mode.voice_rebuild_state_unknown", "语音态缺坐标但未确认当前是文字态，停止切换避免乱点 sessionName="
-                    + sessionName + " reason=" + reason + " "
-                    + (state == null ? "state=null" : state.summary()));
-            return false;
-        }
-        if (state == null || state.toggleRect == null) {
-            BotLog.w(context, "input.mode.voice_rebuild_toggle_missing", "重建语音态时未找到切换按钮，取消发送 sessionName="
-                    + sessionName + " reason=" + reason + " "
-                    + (state == null ? "state=null" : state.summary()));
-            return false;
-        }
-        if (!tapInputModeToggle(context, MODE_VOICE, reason + "-voice-point-rebuild", state, false)) {
-            return false;
-        }
-        long settleMs = Math.max(800L, config == null ? 1200L : config.inputModeToggleSettleMs);
-        SystemClock.sleep(settleMs);
-        OcrHelper.InputModeFeature confirmed = scanVoicePressPointOnly(context, config, sessionName, reason + "-voice-point-confirm");
-        if (!isVoiceInputReady(confirmed) || confirmed.inputRect == null) {
-            BotLog.w(context, "input.mode.voice_rebuild_confirm_failed", "重建语音态后未识别到按住说话，不保存坐标 sessionName="
-                    + sessionName + " reason=" + reason + " settleMs=" + settleMs + " "
-                    + (confirmed == null ? "state=null" : confirmed.summary()));
-            return false;
-        }
-        saveInputMode(context, sessionName, MODE_VOICE, confirmed);
-        BotLog.write(context, "SUCCESS", "input.mode.voice_point_rebuilt",
-                "重建并保存该群按住说话坐标 sessionName=" + sessionName
-                        + " settleMs=" + settleMs + " reason=" + reason + " "
-                        + confirmed.summary());
-        return true;
-    }
-
-    private OcrHelper.InputModeFeature scanVoicePressPointOnly(Context context, BotConfig config,
-                                                               String sessionName, String reason) {
-        long waitMs = Math.max(500L, config == null ? 800L : config.wechatChatOcrPollMs);
-        OcrHelper.InputModeFeature lastState = null;
-        for (int i = 1; i <= 5; i++) {
-            OcrHelper.InputModeFeature state = OcrHelper.inspectInputMode(context, hs);
-            if (state != null) {
-                lastState = state;
-            }
-            if (isVoiceInputReady(state) && state.inputRect != null) {
-                BotLog.i(context, "input.mode.voice_point.scan_hit", "扫描命中按住说话 sessionName="
-                        + sessionName + " round=" + i + " reason=" + reason + " " + state.summary());
-                return state;
-            }
-            BotLog.i(context, "input.mode.voice_point.scan", "扫描未命中按住说话 sessionName="
-                    + sessionName + " round=" + i + " reason=" + reason + " "
-                    + (state == null ? "state=null" : state.summary()));
-            SystemClock.sleep(waitMs);
-        }
-        return lastState;
-    }
-
     private OcrHelper.InputModeFeature scanInitialInputMode(Context context, BotConfig config,
                                                             String sessionName, String reason) {
         long waitMs = Math.max(350L, config == null ? 600L : Math.min(1200L, config.wechatChatOcrPollMs));
@@ -357,25 +272,25 @@ public final class WechatDriver {
                 lastState = state;
             }
             if (isVoiceInputReady(state)) {
-                BotLog.i(context, "input.mode.initial.voice_hit", "首次状态机扫描命中按住说话 sessionName="
+                BotLog.i(context, "input.mode.initial.voice_hit", "首次状态机扫描命中按住/说话 sessionName="
                         + sessionName + " round=" + i + " reason=" + reason + " " + state.summary());
                 return state;
             }
             if (isTextInputReady(state) && textCandidate == null) {
                 textCandidate = state;
             }
-            BotLog.i(context, "input.mode.initial.scan", "首次状态机扫描未命中按住说话 sessionName="
+            BotLog.i(context, "input.mode.initial.scan", "首次状态机扫描未命中按住/说话 sessionName="
                     + sessionName + " round=" + i + " reason=" + reason + " "
                     + (state == null ? "state=null" : state.summary()));
             SystemClock.sleep(waitMs);
         }
         if (textCandidate != null) {
-            BotLog.i(context, "input.mode.initial.text_after_scans", "连续扫描未命中按住说话，记录文字态 sessionName="
+            BotLog.i(context, "input.mode.initial.text_after_scans", "连续扫描未命中按住/说话，记录文字态 sessionName="
                     + sessionName + " reason=" + reason + " " + textCandidate.summary());
             return textCandidate;
         }
         if (lastState != null) {
-            BotLog.i(context, "input.mode.initial.text_without_visual", "连续扫描未命中按住说话，按文字态记录 sessionName="
+            BotLog.i(context, "input.mode.initial.text_without_visual", "连续扫描未命中按住/说话，按文字态记录 sessionName="
                     + sessionName + " reason=" + reason + " " + lastState.summary());
         }
         return lastState;
@@ -421,14 +336,9 @@ public final class WechatDriver {
         String key = inputModeKey(sessionName);
         android.content.SharedPreferences.Editor editor = context.getSharedPreferences(INPUT_MODE_PREFS, Context.MODE_PRIVATE)
                 .edit()
-                .putString(key, mode == null ? "" : mode.trim());
-        if (MODE_VOICE.equals(mode) && feature != null && feature.inputRect != null) {
-            editor.putInt(key + ".pressX", feature.inputRect.centerX())
-                    .putInt(key + ".pressY", feature.inputRect.centerY());
-        } else {
-            editor.remove(key + ".pressX")
-                    .remove(key + ".pressY");
-        }
+                .putString(key, mode == null ? "" : mode.trim())
+                .remove(key + ".pressX")
+                .remove(key + ".pressY");
         editor.apply();
     }
 

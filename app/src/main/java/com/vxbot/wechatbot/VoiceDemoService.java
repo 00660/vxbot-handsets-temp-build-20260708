@@ -187,7 +187,7 @@ public final class VoiceDemoService extends Service {
     private PressHandle pressDown(Intent intent, String reason) {
         int[] point = resolvePressPoint(intent);
         if (point == null) {
-            BotLog.w(this, "voice.demo.press.abort", "reason=" + reason + " 未确认按住说话区域，取消按下动作");
+            BotLog.w(this, "voice.demo.press.abort", "reason=" + reason + " 未确认按住/说话区域，取消按下动作");
             return null;
         }
         int pressX = point[0];
@@ -228,23 +228,11 @@ public final class VoiceDemoService extends Service {
         HsClient client = new HsClient(hsPort);
         WechatDriver driver = new WechatDriver(hsPort);
         try {
-            int[] cached = driver.cachedVoicePressPoint(this, sessionName);
-            if (cached != null) {
-                BotLog.i(this, "voice.demo.press.point.cached", "使用会话缓存按住说话坐标 sessionName="
-                        + sessionName + " x=" + cached[0] + " y=" + cached[1]);
-                return cached;
-            }
-            if (!driver.ensureVoiceInputMode(this, BotConfig.load(this), sessionName, "voice-press-point-cache")) {
-                BotLog.w(this, "voice.demo.press.point.cache_prepare_fail", "首次准备语音态失败 sessionName=" + sessionName);
+            if (!driver.ensureVoiceInputMode(this, BotConfig.load(this), sessionName, "voice-press-realtime")) {
+                BotLog.w(this, "voice.demo.press.point.prepare_fail", "准备语音态失败 sessionName=" + sessionName);
                 return null;
             }
-            cached = driver.cachedVoicePressPoint(this, sessionName);
-            if (cached != null) {
-                BotLog.i(this, "voice.demo.press.point.cached", "首次扫描后使用会话缓存按住说话坐标 sessionName="
-                        + sessionName + " x=" + cached[0] + " y=" + cached[1]);
-                return cached;
-            }
-            OcrHelper.InputModeFeature state = OcrHelper.inspectInputMode(this, client);
+            OcrHelper.InputModeFeature state = scanRealtimePressPoint(intent, client, sessionName, "voice-press-realtime");
             if (state != null
                     && state.pressTalkTextHit
                     && state.isVoiceModeLikely()
@@ -252,12 +240,12 @@ public final class VoiceDemoService extends Service {
                 return pressPointFromState(state);
             }
             if (state != null && state.isTextModeLikely()) {
-                BotLog.w(this, "voice.demo.mode.cache.stale", "会话状态机缓存为语音，但实时页面是文字态，清缓存后重新切换 sessionName="
+                BotLog.w(this, "voice.demo.mode.cache.stale", "实时识别发现页面是文字态，清输入态缓存后重新切换 sessionName="
                         + sessionName + " " + state.summary());
                 driver.clearStoredInputMode(this, sessionName);
                 if (driver.ensureVoiceInputMode(this, BotConfig.load(this), sessionName, "voice-press-correct")) {
                     SystemClock.sleep(Math.max(500L, intExtra(intent, "afterToggleMs", 800)));
-                    state = OcrHelper.inspectInputMode(this, client);
+                    state = scanRealtimePressPoint(intent, client, sessionName, "voice-press-correct");
                     if (state != null
                             && state.pressTalkTextHit
                             && state.isVoiceModeLikely()
@@ -266,7 +254,7 @@ public final class VoiceDemoService extends Service {
                     }
                 }
             }
-            BotLog.w(this, "voice.demo.press.point.unconfirmed", "未确认按住说话区域，不使用兜底坐标 "
+            BotLog.w(this, "voice.demo.press.point.unconfirmed", "未确认按住/说话区域，不使用兜底坐标 "
                     + (state == null ? "state=null" : state.summary()));
         } catch (Exception e) {
             BotLog.w(this, "voice.demo.press.point.fail", e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -274,11 +262,41 @@ public final class VoiceDemoService extends Service {
         return null;
     }
 
+    private OcrHelper.InputModeFeature scanRealtimePressPoint(Intent intent, HsClient client,
+                                                              String sessionName, String reason) {
+        long waitMs = Math.max(350L, intExtra(intent, "afterToggleMs", 800));
+        OcrHelper.InputModeFeature lastState = null;
+        for (int i = 1; i <= 4; i++) {
+            try {
+                OcrHelper.InputModeFeature state = OcrHelper.inspectInputMode(this, client);
+                if (state != null) {
+                    lastState = state;
+                }
+                if (state != null
+                        && state.pressTalkTextHit
+                        && state.isVoiceModeLikely()
+                        && state.inputRect != null) {
+                    BotLog.i(this, "voice.demo.press.point.realtime.hit", "实时 OCR 命中按住/说话区域 sessionName="
+                            + sessionName + " round=" + i + " reason=" + reason + " " + state.summary());
+                    return state;
+                }
+                BotLog.i(this, "voice.demo.press.point.realtime.scan", "实时 OCR 未命中按住/说话区域 sessionName="
+                        + sessionName + " round=" + i + " reason=" + reason + " "
+                        + (state == null ? "state=null" : state.summary()));
+            } catch (Exception e) {
+                BotLog.w(this, "voice.demo.press.point.realtime.fail", "round=" + i
+                        + " reason=" + reason + " " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+            SystemClock.sleep(waitMs);
+        }
+        return lastState;
+    }
+
     private int[] pressPointFromState(OcrHelper.InputModeFeature state) {
         Rect rect = state.inputRect;
         int x = rect.centerX();
         int y = rect.centerY();
-        BotLog.i(this, "voice.demo.press.point", "使用按住说话区域中心 x=" + x
+        BotLog.i(this, "voice.demo.press.point", "使用实时按住/说话区域中心 x=" + x
                 + " y=" + y + " rect=" + rect.flattenToString() + " " + state.summary());
         return new int[]{x, y};
     }

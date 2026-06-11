@@ -1077,6 +1077,7 @@ public final class OcrHelper {
         boolean hasPress = false;
         boolean hasTalk = false;
         Rect union = null;
+        Rect singleHit = null;
         for (OcrItem item : items) {
             if (item.centerY < minY || item.centerY > maxY) {
                 continue;
@@ -1091,16 +1092,18 @@ public final class OcrHelper {
             if (value.contains("按住")) {
                 hasPress = true;
                 union = unionRect(union, item.rect);
+                singleHit = unionRect(singleHit, item.rect);
             }
             if (value.contains("说话") || value.contains("說話")) {
                 hasTalk = true;
                 union = unionRect(union, item.rect);
+                singleHit = unionRect(singleHit, item.rect);
             }
             if (hasPress && hasTalk && union != null) {
                 return expandRect(union, Math.round(width * 0.05f), Math.round(height * 0.012f), width, height);
             }
         }
-        return null;
+        return singleHit == null ? null : expandRect(singleHit, Math.round(width * 0.05f), Math.round(height * 0.012f), width, height);
     }
 
     private static Rect unionRect(Rect current, Rect next) {

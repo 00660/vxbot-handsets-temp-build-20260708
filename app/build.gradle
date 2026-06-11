@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 80
-        versionName "0.1.79-input-mode-visual-sync-switch"
+        versionCode 81
+        versionName "0.1.80-realtime-voice-press-ocr"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
