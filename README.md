@@ -11,14 +11,15 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`84`
-- `versionName`：`0.1.83-bili-cid-fix`
+- `versionCode`：`85`
+- `versionName`：`0.1.84-emoji-name-normalize`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
 ## 已实现功能
 
 - 微信通知监听：从系统通知提取群名、发送人、消息文本，按白名单群处理。
+- 名字匹配归一化：白名单、续聊发起人、喷子/恋人目标、OCR 会话名、图片/视频分享目标统一过滤括号表情、真实 emoji 和非文字符号。
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持发音人和语速配置。
@@ -45,6 +46,7 @@
 
 - 配置面板：`app/src/main/java/com/vxbot/wechatbot/MainActivity.java`
 - 配置读取：`app/src/main/java/com/vxbot/wechatbot/BotConfig.java`
+- 名字归一化：`app/src/main/java/com/vxbot/wechatbot/NameNormalizer.java`
 - 前台服务：`app/src/main/java/com/vxbot/wechatbot/BotService.java`
 - 通知监听：`app/src/main/java/com/vxbot/wechatbot/WxNotificationListener.java`
 - 消息分类：`app/src/main/java/com/vxbot/wechatbot/MessageRouter.java`
@@ -130,14 +132,16 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-11：语音按压点改为发送前实时 OCR 识别当前屏幕的 `按住` 或 `说话`，不再读取或保存会话缓存坐标；兼容微信 OCR 把 `按住 说话` 拆开的情况。
 - 2026-06-12：新增短视频/图集解析完整链路。`MessageRouter` 识别 parse-video 支持平台分享链接，`InlineVideoParser` 将 parse-video 的平台解析逻辑内置到 APK，不依赖 Docker/3001/外部解析服务；`VideoParseFlow` 下载 `video_url`、`images[].url`、`images[].live_photo_url` 或封面，复用 `ImageFlow.shareExistingMedia` 发回群。
 - 2026-06-12：修复 B 站解析 `cid` 溢出。B 站新视频 `cid` 可能超过 32 位，Java `optInt()` 会把 `39010699439` 溢出成错误值，导致播放接口返回“啥都木有”；现改为字符串读取并写入 `video.bili.ids` 日志。
+- 2026-06-12：修复群名/人名带表情导致 OCR 和通知匹配不一致。新增 `NameNormalizer`，比较前只保留文字和数字，过滤 `[表情]`、`(表情)`、真实 emoji、零宽连接符和其他符号；白名单、续聊发起人、喷子/恋人目标、会话标题、群发搜索、图片/视频分享目标均复用同一规则。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`、`.backup-20260612-203115-emoji-name-normalize`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 
 - 不要把 `*.bak-*`、调试截图、日志、APK 产物、临时 dump、交接草稿提交进仓库。
 - 修改微信操作链路前，优先在真机小 demo 或单步截图验证，不要直接重写主链路。
 - 微信 UI 控件很多不可读，判断会话页、通知栏、输入态、发送按钮时优先用 OCR/找色/找图，避免写死坐标。
+- 群名和人名比较必须走 `NameNormalizer`，不要在各链路里重新写清洗规则；通知里的括号表情和微信界面的真实 emoji 要归一成同一个名字。
 - 语音输入态按白名单群独立缓存；默认不要用语音开关批量覆盖缓存。只有明确打开“语音开关批量同步输入态”时，才按普通聊天/前置/后置语音开关批量写入白名单群输入态。语音按压点必须发送前实时识别，不能复用旧坐标。
 - 短视频解析必须保持 APK 内置，不依赖 Docker、3001 或局域网解析服务。视频和图集分享复用图片分享链路，改分享逻辑前必须同时回归图片和视频。
 - 图片、表情、分析、群发、TTS、普通聊天共用 `BotService` 单队列，避免多个并发链路抢微信前台。

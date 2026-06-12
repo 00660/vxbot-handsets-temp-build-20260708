@@ -31,11 +31,11 @@ public final class SessionStore {
         }
         ModeTarget roast = activeRoastTarget(session);
         if (roast != null) {
-            return roast.targetName.equals(message.senderName) || MessageRouter.isRoastExitCommand(message.text);
+            return NameNormalizer.sameName(roast.targetName, message.senderName) || MessageRouter.isRoastExitCommand(message.text);
         }
         ModeTarget lover = activeLoverTarget(session);
         if (lover != null) {
-            return lover.targetName.equals(message.senderName) || MessageRouter.isLoverExitCommand(message.text);
+            return NameNormalizer.sameName(lover.targetName, message.senderName) || MessageRouter.isLoverExitCommand(message.text);
         }
         boolean mentioned = config.isBotMentioned(message.text);
         boolean reportCommand = MessageRouter.isReportCommand(message.text);
@@ -70,7 +70,7 @@ public final class SessionStore {
                 active = "";
             }
         }
-        return active != null && active.equals(message.senderName);
+        return active != null && NameNormalizer.sameName(active, message.senderName);
     }
 
     private static boolean canLockActiveSender(WxMessage message, BotConfig config) {
@@ -187,7 +187,7 @@ public final class SessionStore {
     }
 
     private static String activeSenderKey(String sessionName) {
-        String normalized = sessionName == null ? "" : sessionName.trim();
+        String normalized = NameNormalizer.nameKey(sessionName);
         return KEY_ACTIVE_PREFIX + Integer.toHexString(normalized.hashCode());
     }
 

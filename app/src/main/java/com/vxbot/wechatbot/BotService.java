@@ -288,11 +288,11 @@ public final class BotService extends Service {
             return route;
         }
         String roastTarget = sessionStore.roastTargetName(message.sessionName);
-        if (!roastTarget.isEmpty() && roastTarget.equals(message.senderName)) {
+        if (!roastTarget.isEmpty() && NameNormalizer.sameName(roastTarget, message.senderName)) {
             return new MessageRouter.Route(MessageRouter.Kind.TROLL, "", roastTarget, false, false);
         }
         String loverTarget = sessionStore.loverTargetName(message.sessionName);
-        if (!loverTarget.isEmpty() && loverTarget.equals(message.senderName)) {
+        if (!loverTarget.isEmpty() && NameNormalizer.sameName(loverTarget, message.senderName)) {
             return new MessageRouter.Route(MessageRouter.Kind.LOVER, MessageRouter.loverInstruction(loverTarget), loverTarget, false, false);
         }
         return route;

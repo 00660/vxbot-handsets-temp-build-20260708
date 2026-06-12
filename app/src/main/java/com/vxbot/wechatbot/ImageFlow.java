@@ -1056,14 +1056,7 @@ public final class ImageFlow {
     }
 
     private static String normalizeShareTargetName(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replaceAll("[（(]\\d+\\s*人?[）)]", "")
-                .replaceAll("[（(]\\d+[）)]$", "")
-                .replaceAll("\\s+", "")
-                .replace(" ", "")
-                .trim();
+        return NameNormalizer.nameKey(value);
     }
 
     private OcrHelper.OcrItem findText(OcrHelper.Screen screen, String text, float minX, float maxX, float minY, float maxY) {
@@ -1206,7 +1199,7 @@ public final class ImageFlow {
     }
 
     private static String normalize(String value) {
-        return value == null ? "" : value.replaceAll("[（(]\\d+\\s*人?[）)]", "").replaceAll("\\s+", "").trim();
+        return NameNormalizer.nameKey(value);
     }
 
     private static int clamp(int value, int min, int max) {

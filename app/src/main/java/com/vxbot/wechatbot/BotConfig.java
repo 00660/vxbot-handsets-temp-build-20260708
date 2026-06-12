@@ -246,10 +246,10 @@ public final class BotConfig {
         if (session == null || session.trim().isEmpty()) {
             return false;
         }
-        String normalized = session.trim();
+        String normalized = NameNormalizer.nameKey(session);
         String[] rows = allowedSessions.split("[,，\\n\\r]+");
         for (String row : rows) {
-            if (normalized.equals(row.trim())) {
+            if (normalized.equals(NameNormalizer.nameKey(row))) {
                 return true;
             }
         }
@@ -272,10 +272,13 @@ public final class BotConfig {
         if (text == null) {
             return false;
         }
+        String normalizedText = NameNormalizer.nameKey(text);
         String[] names = botNames.split("[,，\\n\\r]+");
         for (String name : names) {
             String n = name.trim();
-            if (!n.isEmpty() && (text.contains("@" + n) || text.contains(n))) {
+            String clean = NameNormalizer.nameKey(n);
+            if (!n.isEmpty() && (text.contains("@" + n) || text.contains(n)
+                    || (!clean.isEmpty() && (normalizedText.contains("@" + clean) || normalizedText.contains(clean))))) {
                 return true;
             }
         }
@@ -283,13 +286,13 @@ public final class BotConfig {
     }
 
     public boolean isFollowUpSenderAllowed(String senderName) {
-        String sender = senderName == null ? "" : senderName.trim();
+        String sender = NameNormalizer.nameKey(senderName);
         if (sender.isEmpty()) {
             return false;
         }
         String[] rows = followUpSenderWhitelist.split("[,，\\n\\r]+");
         for (String row : rows) {
-            String value = row == null ? "" : row.trim();
+            String value = NameNormalizer.nameKey(row);
             if (!value.isEmpty() && sender.equals(value)) {
                 return true;
             }

@@ -1236,7 +1236,7 @@ public final class OcrHelper {
     }
 
     private static String normalize(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", "").replace("：", ":");
+        return NameNormalizer.nameKey(value);
     }
 
     private static String snippets(List<OcrItem> items) {
