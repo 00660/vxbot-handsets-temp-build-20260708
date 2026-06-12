@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`83`
-- `versionName`：`0.1.82-inline-video-parser`
+- `versionCode`：`84`
+- `versionName`：`0.1.83-bili-cid-fix`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -111,6 +111,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `voice.demo.press.point.realtime.hit`：语音按下前实时 OCR 命中 `按住` 或 `说话` 区域。
 - `video.parse.start` / `video.parse.done`：短视频或图集解析开始和完成。
 - `video.inline.http`：APK 内置解析器请求平台页面/API 的 HTTP 返回状态和响应体大小。
+- `video.bili.ids`：B 站解析到的 `bvid` 和 `cid`，`cid` 必须按字符串/long 处理，不能用 32 位 int。
 - `video.media.download`：解析出的媒体文件已下载到本机缓存。
 - `media.share.done`：视频、图集或封面通过微信分享链路发送完成。
 - `screen.dim.enable` / `screen.dim.disable`：低亮防熄屏开启或关闭。
@@ -128,8 +129,9 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-11：新增“语音开关批量同步输入态”开关，默认关闭。关闭时普通聊天/前置/后置语音开关不会批量覆盖白名单群输入态缓存，继续使用每群自动识别。
 - 2026-06-11：语音按压点改为发送前实时 OCR 识别当前屏幕的 `按住` 或 `说话`，不再读取或保存会话缓存坐标；兼容微信 OCR 把 `按住 说话` 拆开的情况。
 - 2026-06-12：新增短视频/图集解析完整链路。`MessageRouter` 识别 parse-video 支持平台分享链接，`InlineVideoParser` 将 parse-video 的平台解析逻辑内置到 APK，不依赖 Docker/3001/外部解析服务；`VideoParseFlow` 下载 `video_url`、`images[].url`、`images[].live_photo_url` 或封面，复用 `ImageFlow.shareExistingMedia` 发回群。
+- 2026-06-12：修复 B 站解析 `cid` 溢出。B 站新视频 `cid` 可能超过 32 位，Java `optInt()` 会把 `39010699439` 溢出成错误值，导致播放接口返回“啥都木有”；现改为字符串读取并写入 `video.bili.ids` 日志。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 

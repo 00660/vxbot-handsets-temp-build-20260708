@@ -297,13 +297,17 @@ final class InlineVideoParser {
             throw new IllegalStateException("B站接口错误: " + view.optString("message"));
         }
         JSONObject data = view.optJSONObject("data");
-        int cid = objectAt(data, "pages", "0") == null ? 0 : objectAt(data, "pages", "0").optInt("cid");
+        String cid = firstNonEmpty(stringAt(data, "cid"), stringAt(data, "pages", "0", "cid"));
+        if (cid.isEmpty() || "0".equals(cid)) {
+            throw new IllegalStateException("B站 cid 为空");
+        }
+        BotLog.i(context, "video.bili.ids", "bvid=" + bvid + " cid=" + cid);
         JSONObject play = new JSONObject(request("GET",
                 "https://api.bilibili.com/x/player/playurl?otype=json&fnver=0&fnval=0&qn=80&bvid=" + bvid
                         + "&cid=" + cid + "&platform=html5",
                 headers(PC_UA, "Referer", "https://www.bilibili.com/"), null, true).body);
         if (play.optInt("code") != 0) {
-            throw new IllegalStateException("B站播放接口错误: " + play.optString("message"));
+            throw new IllegalStateException("B站播放接口错误: " + play.optString("message") + " cid=" + cid);
         }
         ParseInfo out = new ParseInfo();
         out.title = stringAt(data, "title");
