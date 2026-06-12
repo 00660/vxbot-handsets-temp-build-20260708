@@ -21,7 +21,7 @@ public final class ChatClient {
         }
         Exception last = null;
         String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);
-        if (shouldReplyWithToolContext(route.kind, toolContext)) {
+        if (shouldReplyWithToolContext(route.kind, toolContext, message.text)) {
             BotLog.i(context, "chat.tool.direct", "实时工具直出 mode=" + route.kind
                     + " bytes=" + toolContext.getBytes(StandardCharsets.UTF_8).length);
             return stripToolLabels(formatToolReply(route.kind, toolContext));
@@ -43,13 +43,18 @@ public final class ChatClient {
         throw last == null ? new IllegalStateException("请求失败") : last;
     }
 
-    private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext) {
+    private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext, String userText) {
         if (isBlank(toolContext)) {
+            return false;
+        }
+        if (kind == MessageRouter.Kind.SPORTS && looksLikeSportsAnalysis(userText)) {
             return false;
         }
         return kind == MessageRouter.Kind.NEWS
                 || kind == MessageRouter.Kind.FINANCE
-                || kind == MessageRouter.Kind.WEATHER;
+                || kind == MessageRouter.Kind.WEATHER
+                || kind == MessageRouter.Kind.SPORTS
+                || kind == MessageRouter.Kind.UTILITY;
     }
 
     private static String formatToolReply(MessageRouter.Kind kind, String toolContext) {
@@ -64,8 +69,29 @@ public final class ChatClient {
             if (kind == MessageRouter.Kind.WEATHER) {
                 return "天气这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
             }
+            if (kind == MessageRouter.Kind.SPORTS) {
+                return "赛事这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
+            }
+            if (kind == MessageRouter.Kind.UTILITY) {
+                return "这个工具算崩了：" + text.substring("实时工具失败：".length()).trim();
+            }
         }
         return text;
+    }
+
+    private static boolean looksLikeSportsAnalysis(String text) {
+        String value = text == null ? "" : text.toLowerCase();
+        return value.contains("分析")
+                || value.contains("预测")
+                || value.contains("怎么看")
+                || value.contains("看法")
+                || value.contains("谁强")
+                || value.contains("谁赢")
+                || value.contains("胜率")
+                || value.contains("盘口")
+                || value.contains("推荐")
+                || value.contains("买谁")
+                || value.contains("能不能赢");
     }
 
     public String requestVisionReply(Context context, BotConfig config, WxMessage message, List<String> history, String imageDataUrl) throws Exception {

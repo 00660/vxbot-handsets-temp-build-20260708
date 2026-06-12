@@ -463,6 +463,8 @@ public final class BotService extends Service {
                 || route.kind == MessageRouter.Kind.TROLL
                 || route.kind == MessageRouter.Kind.LOVER
                 || route.kind == MessageRouter.Kind.FINANCE
+                || route.kind == MessageRouter.Kind.SPORTS
+                || route.kind == MessageRouter.Kind.UTILITY
                 || route.kind == MessageRouter.Kind.NEWS
                 || route.kind == MessageRouter.Kind.WEATHER
                 || route.kind == MessageRouter.Kind.ANALYSIS
@@ -475,7 +477,7 @@ public final class BotService extends Service {
         return name + " 操作手册：\n"
                 + "1. 聊天：@" + name + " 后面直接说内容。\n"
                 + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
-                + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、来点羊毛、短视频/图集链接解析。\n"
+                + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、赛事比分/赛事分析、来点羊毛、短视频/图集链接解析。\n"
                 + "4. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
                 + "5. 语音：发语音 文字；机器人请报道可测在线。\n"
                 + "6. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";

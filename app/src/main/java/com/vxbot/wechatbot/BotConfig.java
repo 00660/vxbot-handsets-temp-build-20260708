@@ -16,8 +16,26 @@ public final class BotConfig {
     public static final String DEFAULT_LICENSE_PANEL_BASE_URL = "http://192.168.2.204:18088";
     public static final String DEFAULT_YUAN_PACKAGE = "com.wxjc.newworld.debug";
     public static final String DEFAULT_PAYMENT_CALLBACK_URL = "http://192.168.2.204:18090/api/payment/wechat";
+    public static final String TTS_PROVIDER_QWEN = "qwen";
+    public static final String TTS_PROVIDER_DOUBAO = "doubao_web";
+    public static final String TTS_PROVIDER_MIMO = "mimo";
+    public static final String DEFAULT_TTS_PROVIDER = TTS_PROVIDER_QWEN;
+    public static final String[] TTS_PROVIDER_IDS = {
+            TTS_PROVIDER_QWEN, TTS_PROVIDER_DOUBAO, TTS_PROVIDER_MIMO
+    };
+    public static final String[] TTS_PROVIDER_LABELS = {
+            "千问 TTS",
+            "豆包 TTS",
+            "小米 MiMo TTS"
+    };
     public static final String DEFAULT_TTS_VOICE = "Cherry";
     public static final float DEFAULT_TTS_SPEED = 1.0f;
+    public static final String DEFAULT_DOUBAO_TTS_VOICE = "zh_female_taozi_conversation_v4_wvae_bigtts";
+    public static final String DEFAULT_MIMO_TTS_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
+    public static final String DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts";
+    public static final String DEFAULT_MIMO_TTS_VOICE = "冰糖";
+    public static final String DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL = "用轻快上扬的语调说话，语气自然，像微信里随口发语音。";
+    public static final String DEFAULT_MIMO_AUDIO_TAG_CONTROL = "台湾腔";
     public static final String[] TTS_VOICE_IDS = {
             "Cherry", "Serena", "Ethan", "Chelsie", "Momo", "Vivian",
             "Moon", "Maia", "Kai", "Nofish", "Bella", "Jennifer",
@@ -79,6 +97,41 @@ public final class BotConfig {
             "Jada / 上海-阿珍",
             "Dylan / 北京-晓东"
     };
+    public static final String[] DOUBAO_TTS_VOICE_IDS = {
+            "zh_female_taozi_conversation_v4_wvae_bigtts",
+            "zh_female_shuangkuai_emo_v3_wvae_bigtts",
+            "zh_female_tianmei_conversation_v4_wvae_bigtts",
+            "zh_female_qingche_moon_bigtts",
+            "zh_male_yangguang_conversation_v4_wvae_bigtts",
+            "zh_male_chenwen_moon_bigtts",
+            "zh_male_rap_mars_bigtts",
+            "en_female_sarah_conversation_bigtts",
+            "en_male_adam_conversation_bigtts"
+    };
+    public static final String[] DOUBAO_TTS_VOICE_LABELS = {
+            "桃子 / 女声对话",
+            "爽快 / 女声情绪",
+            "甜美 / 女声对话",
+            "清澈 / 女声",
+            "阳光 / 男声对话",
+            "沉稳 / 男声",
+            "说唱 / 男声",
+            "Sarah / 英文女声",
+            "Adam / 英文男声"
+    };
+    public static final String[] MIMO_TTS_VOICE_IDS = {
+            "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"
+    };
+    public static final String[] MIMO_TTS_VOICE_LABELS = {
+            "冰糖 / 中文",
+            "茉莉 / 中文",
+            "苏打 / 中文",
+            "白桦 / 中文",
+            "Mia / 英文",
+            "Chloe / 英文",
+            "Milo / 英文",
+            "Dean / 英文"
+    };
 
     public final String botNames;
     public final String allowedSessions;
@@ -98,8 +151,18 @@ public final class BotConfig {
     public final String defaultYuanPackage;
     public final String paymentCallbackUrl;
     public final String paymentCallbackSecret;
+    public final String ttsProvider;
     public final String ttsVoice;
     public final float ttsSpeed;
+    public final String doubaoTtsVoice;
+    public final String doubaoSessionId;
+    public final String doubaoSidGuard;
+    public final String doubaoUidTt;
+    public final String mimoTtsEndpoint;
+    public final String mimoTtsApiKey;
+    public final String mimoTtsVoice;
+    public final String mimoNaturalLanguageControl;
+    public final String mimoAudioTagControl;
     public final String exName;
     public final String exPhotoPath;
     public final String exManualText;
@@ -137,6 +200,7 @@ public final class BotConfig {
     public final boolean enableMorningGreeting;
     public final boolean enableShutupCooldown;
     public final boolean enableFinance;
+    public final boolean enableSports;
     public final boolean enableNews;
     public final boolean enableWeather;
     public final boolean enableVideoParse;
@@ -175,8 +239,22 @@ public final class BotConfig {
         defaultYuanPackage = normalizePackageName(prefs.getString("defaultYuanPackage", DEFAULT_YUAN_PACKAGE));
         paymentCallbackUrl = prefs.getString("paymentCallbackUrl", DEFAULT_PAYMENT_CALLBACK_URL).trim();
         paymentCallbackSecret = prefs.getString("paymentCallbackSecret", "").trim();
+        ttsProvider = normalizeTtsProvider(prefs.getString("ttsProvider", DEFAULT_TTS_PROVIDER));
         ttsVoice = normalizeTtsVoice(prefs.getString("ttsVoice", DEFAULT_TTS_VOICE));
         ttsSpeed = normalizeTtsSpeed(prefs.getFloat("ttsSpeed", DEFAULT_TTS_SPEED));
+        doubaoTtsVoice = normalizeDoubaoTtsVoice(prefs.getString("doubaoTtsVoice", DEFAULT_DOUBAO_TTS_VOICE));
+        doubaoSessionId = prefs.getString("doubaoSessionId", "").trim();
+        doubaoSidGuard = prefs.getString("doubaoSidGuard", "").trim();
+        doubaoUidTt = prefs.getString("doubaoUidTt", "").trim();
+        mimoTtsEndpoint = normalizeBaseUrl(prefs.getString("mimoTtsEndpoint", DEFAULT_MIMO_TTS_ENDPOINT), DEFAULT_MIMO_TTS_ENDPOINT);
+        mimoTtsApiKey = prefs.getString("mimoTtsApiKey", "").trim();
+        mimoTtsVoice = normalizeMimoTtsVoice(prefs.getString("mimoTtsVoice", DEFAULT_MIMO_TTS_VOICE));
+        mimoNaturalLanguageControl = normalizeTextFallback(
+                prefs.getString("mimoNaturalLanguageControl", DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL),
+                DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL);
+        mimoAudioTagControl = normalizeTextFallback(
+                prefs.getString("mimoAudioTagControl", DEFAULT_MIMO_AUDIO_TAG_CONTROL),
+                DEFAULT_MIMO_AUDIO_TAG_CONTROL);
         exName = prefs.getString("exName", "前任").trim();
         exPhotoPath = prefs.getString("exPhotoPath", "").trim();
         exManualText = prefs.getString("exManualText", "").trim();
@@ -214,6 +292,7 @@ public final class BotConfig {
         enableMorningGreeting = prefs.getBoolean("enableMorningGreeting", true);
         enableShutupCooldown = prefs.getBoolean("enableShutupCooldown", true);
         enableFinance = prefs.getBoolean("enableFinance", true);
+        enableSports = prefs.getBoolean("enableSports", true);
         enableNews = prefs.getBoolean("enableNews", true);
         enableWeather = prefs.getBoolean("enableWeather", true);
         enableVideoParse = prefs.getBoolean("enableVideoParse", true);
@@ -381,6 +460,67 @@ public final class BotConfig {
             }
         }
         return DEFAULT_TTS_VOICE;
+    }
+
+    public static String normalizeTtsProvider(String value) {
+        String provider = value == null ? "" : value.trim();
+        for (int i = 0; i < TTS_PROVIDER_IDS.length; i++) {
+            if (provider.equalsIgnoreCase(TTS_PROVIDER_IDS[i])
+                    || provider.equalsIgnoreCase(TTS_PROVIDER_LABELS[i])) {
+                return TTS_PROVIDER_IDS[i];
+            }
+        }
+        return DEFAULT_TTS_PROVIDER;
+    }
+
+    public static String normalizeDoubaoTtsVoice(String value) {
+        String voice = value == null ? "" : value.trim();
+        if (voice.isEmpty()) {
+            return DEFAULT_DOUBAO_TTS_VOICE;
+        }
+        for (int i = 0; i < DOUBAO_TTS_VOICE_IDS.length; i++) {
+            if (voice.equalsIgnoreCase(DOUBAO_TTS_VOICE_IDS[i])) {
+                return DOUBAO_TTS_VOICE_IDS[i];
+            }
+            String label = DOUBAO_TTS_VOICE_LABELS[i];
+            int slash = label.indexOf(" / ");
+            String shortName = slash > 0 ? label.substring(0, slash).trim() : label;
+            if (voice.equalsIgnoreCase(label) || voice.equalsIgnoreCase(shortName)) {
+                return DOUBAO_TTS_VOICE_IDS[i];
+            }
+        }
+        return DEFAULT_DOUBAO_TTS_VOICE;
+    }
+
+    public String doubaoCookie() {
+        if (doubaoSessionId.isEmpty() || doubaoSidGuard.isEmpty() || doubaoUidTt.isEmpty()) {
+            return "";
+        }
+        return "sessionid=" + doubaoSessionId + "; sid_guard=" + doubaoSidGuard + "; uid_tt=" + doubaoUidTt;
+    }
+
+    public static String normalizeMimoTtsVoice(String value) {
+        String voice = value == null ? "" : value.trim();
+        if (voice.isEmpty()) {
+            return DEFAULT_MIMO_TTS_VOICE;
+        }
+        for (int i = 0; i < MIMO_TTS_VOICE_IDS.length; i++) {
+            if (voice.equalsIgnoreCase(MIMO_TTS_VOICE_IDS[i])) {
+                return MIMO_TTS_VOICE_IDS[i];
+            }
+            String label = MIMO_TTS_VOICE_LABELS[i];
+            int slash = label.indexOf(" / ");
+            String shortName = slash > 0 ? label.substring(0, slash).trim() : label;
+            if (voice.equalsIgnoreCase(label) || voice.equalsIgnoreCase(shortName)) {
+                return MIMO_TTS_VOICE_IDS[i];
+            }
+        }
+        return DEFAULT_MIMO_TTS_VOICE;
+    }
+
+    private static String normalizeTextFallback(String value, String fallback) {
+        String text = value == null ? "" : value.trim();
+        return text.isEmpty() ? fallback : text;
     }
 
     public static float normalizeTtsSpeed(float value) {

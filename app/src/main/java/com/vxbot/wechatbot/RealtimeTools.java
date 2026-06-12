@@ -12,6 +12,10 @@ import java.net.URLEncoder;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -35,6 +39,12 @@ public final class RealtimeTools {
             }
             if (kind == MessageRouter.Kind.FINANCE) {
                 return finance(text);
+            }
+            if (kind == MessageRouter.Kind.SPORTS) {
+                return sports(text);
+            }
+            if (kind == MessageRouter.Kind.UTILITY) {
+                return utility(text);
             }
             return "";
         } catch (Exception e) {
@@ -142,15 +152,384 @@ public final class RealtimeTools {
         if (!symbol.isEmpty()) {
             return yahooQuote(symbol);
         }
+        if (looksLikeCryptoQuery(value)) {
+            String crypto = coinGeckoQuote(value);
+            if (!crypto.isEmpty()) {
+                return crypto;
+            }
+            if (looksLikeGenericCryptoOverview(value)) {
+                return yahooQuote("BTC-USD") + "\n" + yahooQuote("ETH-USD");
+            }
+            String query = cryptoSearchQuery(value);
+            return "金融工具：没查到这个代币"
+                    + (query.isEmpty() ? "" : "（" + query + "）")
+                    + "，请换成币种英文简称或 CoinGecko 名称。";
+        }
         String stockCode = extractChinaStock(value);
         if (!stockCode.isEmpty()) {
             return tencentQuote(stockCode);
+        }
+        String searchedStock = stockSearchQuote(value);
+        if (!searchedStock.isEmpty()) {
+            return searchedStock;
         }
         String overview = marketOverview(value);
         if (!overview.isEmpty()) {
             return overview;
         }
-        return yahooQuote("BTC-USD") + "\n" + yahooQuote("ETH-USD");
+        return "金融工具：没识别到具体标的，请带上股票代码、币种简称、汇率对或市场名。";
+    }
+
+    private static boolean looksLikeCryptoQuery(String text) {
+        String value = clean(text);
+        String lower = value.toLowerCase(Locale.ROOT);
+        return matchesAny(value, "虚拟币", "加密货币", "数字货币", "币价", "币圈", "代币", "链上", "合约地址", "市值", "24h")
+                || value.matches(".*[\\u4e00-\\u9fa5A-Za-z0-9]{1,24}(币|代币).*")
+                || lower.matches(".*\\b(token|coin|crypto|usdt|usdc)\\b.*");
+    }
+
+    private static boolean looksLikeGenericCryptoOverview(String text) {
+        String value = clean(text);
+        String stripped = value.replaceAll("(?i)@?[A-Za-z0-9_\\-]{1,20}", "")
+                .replaceAll("[\\s，。,.?!？！:：；;、]", "");
+        return matchesAny(stripped, "虚拟币", "加密货币", "数字货币", "币圈", "币价", "代币行情")
+                && cryptoSearchQuery(value).isEmpty();
+    }
+
+    private static String coinGeckoQuote(String text) throws Exception {
+        String query = cryptoSearchQuery(text);
+        if (query.isEmpty()) {
+            return "";
+        }
+        JSONObject search = new JSONObject(getUtf8("https://api.coingecko.com/api/v3/search?query=" + enc(query), 12000));
+        JSONArray coins = search.optJSONArray("coins");
+        if (coins == null || coins.length() == 0) {
+            return "";
+        }
+        JSONObject best = chooseCoinGeckoCoin(coins, query);
+        if (best == null) {
+            return "";
+        }
+        String id = best.optString("id", "");
+        if (id.isEmpty()) {
+            return "";
+        }
+        JSONObject priceData = new JSONObject(getUtf8("https://api.coingecko.com/api/v3/simple/price?ids="
+                + enc(id)
+                + "&vs_currencies=usd,cny&include_24hr_change=true&include_market_cap=true", 12000));
+        JSONObject price = priceData.optJSONObject(id);
+        if (price == null) {
+            return "";
+        }
+        String name = best.optString("name", id);
+        String symbol = best.optString("symbol", "").toUpperCase(Locale.ROOT);
+        double usd = price.optDouble("usd", Double.NaN);
+        double cny = price.optDouble("cny", Double.NaN);
+        double change = price.optDouble("usd_24h_change", Double.NaN);
+        double marketCap = price.optDouble("usd_market_cap", Double.NaN);
+        StringBuilder out = new StringBuilder("金融工具：").append(name);
+        if (!symbol.isEmpty()) {
+            out.append("(").append(symbol).append(")");
+        }
+        out.append(" 现价 ");
+        if (!Double.isNaN(usd)) {
+            out.append("$").append(fmt(usd));
+        }
+        if (!Double.isNaN(cny)) {
+            if (!Double.isNaN(usd)) {
+                out.append(" / ");
+            }
+            out.append("¥").append(fmt(cny));
+        }
+        if (!Double.isNaN(change)) {
+            out.append("，24h ").append(signed(change)).append("%");
+        }
+        if (!Double.isNaN(marketCap) && marketCap > 0) {
+            out.append("，市值 $").append(compactMoney(marketCap));
+        }
+        out.append("，来源 CoinGecko");
+        return out.toString();
+    }
+
+    private static JSONObject chooseCoinGeckoCoin(JSONArray coins, String query) {
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        JSONObject first = null;
+        for (int i = 0; i < coins.length(); i++) {
+            JSONObject coin = coins.optJSONObject(i);
+            if (coin == null) {
+                continue;
+            }
+            if (first == null) {
+                first = coin;
+            }
+            String id = coin.optString("id", "").toLowerCase(Locale.ROOT);
+            String symbol = coin.optString("symbol", "").toLowerCase(Locale.ROOT);
+            String name = coin.optString("name", "").toLowerCase(Locale.ROOT);
+            if (q.equals(symbol) || q.equals(id) || q.equals(name)) {
+                return coin;
+            }
+        }
+        return first;
+    }
+
+    private static String cryptoSearchQuery(String text) {
+        String value = clean(text);
+        String upper = value.toUpperCase(Locale.ROOT);
+        Matcher ticker = Pattern.compile("\\b([A-Z0-9]{2,16})\\b").matcher(upper);
+        while (ticker.find()) {
+            String token = ticker.group(1);
+            if (!isFinanceNoiseToken(token)) {
+                return token.toLowerCase(Locale.ROOT);
+            }
+        }
+        Matcher mixed = Pattern.compile("([A-Za-z][A-Za-z0-9_\\-]{1,24})\\s*(?:币|代币|coin|token)?", Pattern.CASE_INSENSITIVE).matcher(value);
+        while (mixed.find()) {
+            String token = mixed.group(1);
+            if (!isFinanceNoiseToken(token.toUpperCase(Locale.ROOT))) {
+                return token.toLowerCase(Locale.ROOT);
+            }
+        }
+        Matcher chinese = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{2,24})(?:币|代币)").matcher(value);
+        if (chinese.find()) {
+            String token = chinese.group(1).trim();
+            token = token.replaceAll("(看看|查询|查一下|一下|今天|现在|实时|最新|价格|行情|多少|虚拟|加密|数字)$", "");
+            if (!token.isEmpty() && !matchesAny(token, "虚拟", "加密", "数字")) {
+                return token;
+            }
+        }
+        String compact = value.replaceAll("(?i)(@?慢一点|@?机器人|@?韵味|查询|查一下|看看|一下|今天|现在|实时|最新|币价|价格|行情|多少|多少钱|涨跌|市值|代币|虚拟币|加密货币|数字货币|币圈|coin|token|crypto|usdt|usdc)", "")
+                .replaceAll("[\\s，。,.?!？！:：；;、]", "")
+                .trim();
+        return compact.length() >= 2 && compact.length() <= 24 ? compact : "";
+    }
+
+    private static boolean isFinanceNoiseToken(String token) {
+        return matchesAny(token, "USD", "CNY", "RMB", "API", "HTTP", "HTTPS", "AI", "A股", "HK", "ETF", "24H", "TOKEN", "COIN", "CRYPTO");
+    }
+
+    private static String sports(String text) throws Exception {
+        String value = clean(text);
+        SportsLeague league = sportsLeague(value);
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Shanghai"));
+        String dates = today.minusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)
+                + "-" + today.plusDays(7).format(DateTimeFormatter.BASIC_ISO_DATE);
+        String url = "https://site.api.espn.com/apis/site/v2/sports/" + league.path
+                + "/scoreboard?dates=" + dates + "&limit=20";
+        JSONObject data = new JSONObject(getUtf8(url, 12000));
+        JSONArray events = data.optJSONArray("events");
+        String leagueName = data.optJSONArray("leagues") == null || data.optJSONArray("leagues").length() == 0
+                ? league.label : data.optJSONArray("leagues").optJSONObject(0).optString("name", league.label);
+        if (events == null || events.length() == 0) {
+            return "赛事工具：" + leagueName + " 最近一周没取到比赛。";
+        }
+        StringBuilder out = new StringBuilder("赛事工具：").append(leagueName);
+        int count = 0;
+        for (int i = 0; i < events.length() && count < 8; i++) {
+            JSONObject event = events.optJSONObject(i);
+            if (event == null) {
+                continue;
+            }
+            JSONObject competition = event.optJSONArray("competitions") == null
+                    || event.optJSONArray("competitions").length() == 0
+                    ? null : event.optJSONArray("competitions").optJSONObject(0);
+            if (competition == null) {
+                continue;
+            }
+            JSONArray competitors = competition.optJSONArray("competitors");
+            String home = "";
+            String away = "";
+            String homeScore = "";
+            String awayScore = "";
+            if (competitors != null) {
+                for (int j = 0; j < competitors.length(); j++) {
+                    JSONObject c = competitors.optJSONObject(j);
+                    if (c == null) {
+                        continue;
+                    }
+                    String name = c.optJSONObject("team") == null
+                            ? c.optString("displayName", "")
+                            : c.optJSONObject("team").optString("displayName", c.optJSONObject("team").optString("shortDisplayName", ""));
+                    if ("home".equals(c.optString("homeAway"))) {
+                        home = name;
+                        homeScore = c.optString("score", "");
+                    } else if ("away".equals(c.optString("homeAway"))) {
+                        away = name;
+                        awayScore = c.optString("score", "");
+                    }
+                }
+            }
+            JSONObject type = competition.optJSONObject("status") == null
+                    ? null : competition.optJSONObject("status").optJSONObject("type");
+            String state = type == null ? "" : type.optString("state", "");
+            String detail = type == null ? "" : type.optString("shortDetail", type.optString("detail", ""));
+            String time = formatBeijingTime(event.optString("date", ""));
+            out.append("\n").append(++count).append(". ");
+            if (!away.isEmpty() || !home.isEmpty()) {
+                out.append(away.isEmpty() ? event.optString("shortName") : away)
+                        .append(" vs ")
+                        .append(home.isEmpty() ? "" : home);
+            } else {
+                out.append(event.optString("name", event.optString("shortName", "比赛")));
+            }
+            if ("in".equals(state) || "post".equals(state)) {
+                out.append(" ").append(awayScore).append("-").append(homeScore);
+            }
+            if (!time.isEmpty()) {
+                out.append(" / ").append(time);
+            }
+            if (!detail.isEmpty()) {
+                out.append(" / ").append(detail);
+            }
+        }
+        return out.toString();
+    }
+
+    private static String utility(String text) throws Exception {
+        String value = clean(text);
+        if (matchesAny(value, "北京时间", "现在几点", "几点了", "今天几号", "今天星期几", "今天周几", "当前时间", "当前日期")) {
+            ZonedDateTime now = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"));
+            return "本地工具：北京时间 " + now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss EEEE", Locale.CHINA));
+        }
+        String conversion = unitConvert(value);
+        if (!conversion.isEmpty()) {
+            return conversion;
+        }
+        String expr = extractExpression(value);
+        if (!expr.isEmpty()) {
+            double result = new ExpressionParser(expr).parse();
+            return "本地工具：" + expr + " = " + fmt(result);
+        }
+        return "本地工具：没识别到可计算内容。";
+    }
+
+    private static SportsLeague sportsLeague(String text) {
+        String value = clean(text).toLowerCase(Locale.ROOT);
+        if (matchesAny(value, "nba")) return new SportsLeague("basketball/nba", "NBA");
+        if (matchesAny(value, "wnba")) return new SportsLeague("basketball/wnba", "WNBA");
+        if (matchesAny(value, "nfl")) return new SportsLeague("football/nfl", "NFL");
+        if (matchesAny(value, "nhl")) return new SportsLeague("hockey/nhl", "NHL");
+        if (matchesAny(value, "mlb")) return new SportsLeague("baseball/mlb", "MLB");
+        if (matchesAny(value, "欧冠", "champions")) return new SportsLeague("soccer/uefa.champions", "欧冠");
+        if (matchesAny(value, "英超")) return new SportsLeague("soccer/eng.1", "英超");
+        if (matchesAny(value, "西甲")) return new SportsLeague("soccer/esp.1", "西甲");
+        if (matchesAny(value, "意甲")) return new SportsLeague("soccer/ita.1", "意甲");
+        if (matchesAny(value, "德甲")) return new SportsLeague("soccer/ger.1", "德甲");
+        if (matchesAny(value, "法甲")) return new SportsLeague("soccer/fra.1", "法甲");
+        if (matchesAny(value, "世界杯", "world cup")) return new SportsLeague("soccer/fifa.world", "FIFA World Cup");
+        if (matchesAny(value, "足球")) return new SportsLeague("soccer/fifa.world", "FIFA World Cup");
+        if (matchesAny(value, "篮球")) return new SportsLeague("basketball/nba", "NBA");
+        return new SportsLeague("soccer/fifa.world", "FIFA World Cup");
+    }
+
+    private static String formatBeijingTime(String iso) {
+        try {
+            ZonedDateTime time = ZonedDateTime.parse(iso).withZoneSameInstant(ZoneId.of("Asia/Shanghai"));
+            return time.format(DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.CHINA));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private static String unitConvert(String text) {
+        Matcher matcher = Pattern.compile("(-?\\d+(?:\\.\\d+)?)\\s*([\\u4e00-\\u9fa5A-Za-z]+).*?(?:等于|换算|是多少|多少|转)\\s*([\\u4e00-\\u9fa5A-Za-z]+)").matcher(text);
+        if (!matcher.find()) {
+            matcher = Pattern.compile("(-?\\d+(?:\\.\\d+)?)\\s*([\\u4e00-\\u9fa5A-Za-z]+)\\s*(?:to|=|->)\\s*([\\u4e00-\\u9fa5A-Za-z]+)", Pattern.CASE_INSENSITIVE).matcher(text);
+            if (!matcher.find()) {
+                return "";
+            }
+        }
+        double value = Double.parseDouble(matcher.group(1));
+        String from = normalizeUnit(matcher.group(2));
+        String to = normalizeUnit(matcher.group(3));
+        UnitType type = unitType(from);
+        if (type == UnitType.UNKNOWN || type != unitType(to)) {
+            return "";
+        }
+        double base = toBase(value, from, type);
+        double result = fromBase(base, to, type);
+        return "本地工具：" + fmt(value) + unitLabel(from) + " = " + fmt(result) + unitLabel(to);
+    }
+
+    private static String normalizeUnit(String raw) {
+        String unit = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (unit.equals("千米")) return "公里";
+        if (unit.equals("kg") || unit.equals("千克")) return "公斤";
+        if (unit.equals("g")) return "克";
+        if (unit.equals("l")) return "升";
+        if (unit.equals("ml")) return "毫升";
+        if (unit.equals("c") || unit.equals("摄氏度")) return "℃";
+        if (unit.equals("f") || unit.equals("华氏度")) return "℉";
+        if (unit.equals("rmb") || unit.equals("cny")) return "人民币";
+        if (unit.equals("usd")) return "美元";
+        return unit;
+    }
+
+    private static UnitType unitType(String unit) {
+        if (matchesAny(unit, "公里", "米", "厘米", "毫米")) return UnitType.LENGTH;
+        if (matchesAny(unit, "吨", "公斤", "斤", "克")) return UnitType.WEIGHT;
+        if (matchesAny(unit, "升", "毫升")) return UnitType.VOLUME;
+        if (matchesAny(unit, "℃", "℉")) return UnitType.TEMPERATURE;
+        return UnitType.UNKNOWN;
+    }
+
+    private static double toBase(double value, String unit, UnitType type) {
+        if (type == UnitType.LENGTH) {
+            if (unit.equals("公里")) return value * 1000.0;
+            if (unit.equals("厘米")) return value / 100.0;
+            if (unit.equals("毫米")) return value / 1000.0;
+            return value;
+        }
+        if (type == UnitType.WEIGHT) {
+            if (unit.equals("吨")) return value * 1000.0;
+            if (unit.equals("斤")) return value * 0.5;
+            if (unit.equals("克")) return value / 1000.0;
+            return value;
+        }
+        if (type == UnitType.VOLUME) {
+            return unit.equals("毫升") ? value / 1000.0 : value;
+        }
+        if (type == UnitType.TEMPERATURE) {
+            return unit.equals("℉") ? (value - 32.0) * 5.0 / 9.0 : value;
+        }
+        return value;
+    }
+
+    private static double fromBase(double base, String unit, UnitType type) {
+        if (type == UnitType.LENGTH) {
+            if (unit.equals("公里")) return base / 1000.0;
+            if (unit.equals("厘米")) return base * 100.0;
+            if (unit.equals("毫米")) return base * 1000.0;
+            return base;
+        }
+        if (type == UnitType.WEIGHT) {
+            if (unit.equals("吨")) return base / 1000.0;
+            if (unit.equals("斤")) return base / 0.5;
+            if (unit.equals("克")) return base * 1000.0;
+            return base;
+        }
+        if (type == UnitType.VOLUME) {
+            return unit.equals("毫升") ? base * 1000.0 : base;
+        }
+        if (type == UnitType.TEMPERATURE) {
+            return unit.equals("℉") ? base * 9.0 / 5.0 + 32.0 : base;
+        }
+        return base;
+    }
+
+    private static String unitLabel(String unit) {
+        return unit;
+    }
+
+    private static String extractExpression(String text) {
+        Matcher matcher = Pattern.compile("([-+*/×÷().\\d\\s]+)").matcher(text);
+        String best = "";
+        while (matcher.find()) {
+            String candidate = matcher.group(1).trim();
+            if (candidate.length() > best.length() && candidate.matches(".*\\d.*") && candidate.matches(".*[+\\-*/×÷].*")) {
+                best = candidate;
+            }
+        }
+        return best.replace('×', '*').replace('÷', '/').replaceAll("\\s+", "");
     }
 
     private static String metalGramPrices(String text) throws Exception {
@@ -355,15 +734,126 @@ public final class RealtimeTools {
         int first = raw.indexOf('"');
         int last = raw.lastIndexOf('"');
         if (first < 0 || last <= first) {
-            return "金融工具：未取到 A 股行情 " + code;
+            return "金融工具：未取到行情 " + code;
         }
         String[] parts = raw.substring(first + 1, last).split("~");
         if (parts.length < 40) {
-            return "金融工具：A 股行情格式异常 " + code;
+            return "金融工具：行情格式异常 " + code;
         }
         return "金融工具：" + parts[1] + "(" + code + ") 最新 " + parts[3]
                 + "，涨跌 " + parts[31] + "（" + parts[32] + "%）"
                 + "，成交额 " + parts[37];
+    }
+
+    private static String stockSearchQuote(String text) throws Exception {
+        String query = stockSearchQuery(text);
+        if (query.isEmpty()) {
+            return "";
+        }
+        String raw = getUtf8("https://smartbox.gtimg.cn/s3/?q=" + enc(query) + "&t=all", 10000);
+        int first = raw.indexOf('"');
+        int last = raw.lastIndexOf('"');
+        if (first < 0 || last <= first) {
+            return "";
+        }
+        String[] rows = decodeUnicodeEscapes(raw.substring(first + 1, last)).split("\\^");
+        StockCandidate candidate = chooseStockCandidate(rows, text);
+        if (candidate == null) {
+            return "";
+        }
+        if ("sh".equals(candidate.market) || "sz".equals(candidate.market) || "hk".equals(candidate.market)) {
+            return tencentQuote(candidate.market, candidate.code);
+        }
+        if ("us".equals(candidate.market)) {
+            String symbol = usYahooSymbol(candidate.code);
+            return symbol.isEmpty() ? "" : yahooQuote(symbol);
+        }
+        return "";
+    }
+
+    private static StockCandidate chooseStockCandidate(String[] rows, String text) {
+        String value = clean(text);
+        StockCandidate first = null;
+        StockCandidate firstChina = null;
+        StockCandidate firstHongKong = null;
+        StockCandidate firstUs = null;
+        for (String row : rows) {
+            String[] parts = row.split("~");
+            if (parts.length < 3) {
+                continue;
+            }
+            StockCandidate c = new StockCandidate(parts[0].trim().toLowerCase(Locale.ROOT), parts[1].trim(), parts[2].trim());
+            if (c.market.isEmpty() || c.code.isEmpty() || c.name.isEmpty()) {
+                continue;
+            }
+            if (first == null) {
+                first = c;
+            }
+            if (firstChina == null && ("sh".equals(c.market) || "sz".equals(c.market))) {
+                firstChina = c;
+            }
+            if (firstHongKong == null && "hk".equals(c.market)) {
+                firstHongKong = c;
+            }
+            if (firstUs == null && "us".equals(c.market)) {
+                firstUs = c;
+            }
+        }
+        if (matchesAny(value, "港股", "港交所", "hk", "HK")) {
+            return firstHongKong != null ? firstHongKong : first;
+        }
+        if (matchesAny(value, "美股", "纳斯达克", "纽交所", "NASDAQ", "NYSE", "us", "US")) {
+            return firstUs != null ? firstUs : first;
+        }
+        if (matchesAny(value, "A股", "a股", "沪股", "深股", "上交所", "深交所")) {
+            return firstChina != null ? firstChina : first;
+        }
+        return firstChina != null ? firstChina : first;
+    }
+
+    private static String stockSearchQuery(String text) {
+        String value = clean(text);
+        if (value.matches(".*(虚拟币|加密货币|数字货币|币价|币圈|代币|token|coin|crypto).*")) {
+            return "";
+        }
+        String cleaned = value.replaceAll("(?i)@?慢一点|@?机器人|@?韵味", "")
+                .replaceAll("(?i)(查询|查一下|看看|看一下|帮我看|分析|预测|现在|今天|实时|最新|股价|股票|个股|行情|价格|涨跌|走势|多少|多少钱|A股|a股|美股|港股|沪股|深股|纳斯达克|纽交所|上交所|深交所|hk|us|market)", "")
+                .replaceAll("[\\s，。,.?!？！:：；;、]", "")
+                .trim();
+        if (cleaned.matches("\\d{6}") || cleaned.matches("(?i)[A-Z]{1,8}(\\.[A-Z]{1,4})?")) {
+            return "";
+        }
+        return cleaned.length() >= 2 && cleaned.length() <= 30 ? cleaned : "";
+    }
+
+    private static String usYahooSymbol(String code) {
+        String value = code == null ? "" : code.trim().toUpperCase(Locale.ROOT);
+        int dot = value.indexOf('.');
+        if (dot > 0) {
+            value = value.substring(0, dot);
+        }
+        return value.replaceAll("[^A-Z0-9.-]", "");
+    }
+
+    private static String decodeUnicodeEscapes(String raw) {
+        if (raw == null || raw.indexOf("\\u") < 0) {
+            return raw == null ? "" : raw;
+        }
+        StringBuilder out = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '\\' && i + 5 < raw.length() && raw.charAt(i + 1) == 'u') {
+                String hex = raw.substring(i + 2, i + 6);
+                try {
+                    out.append((char) Integer.parseInt(hex, 16));
+                    i += 5;
+                    continue;
+                } catch (Exception ignored) {
+                }
+            }
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     private static String marketOverview(String text) throws Exception {
@@ -407,6 +897,8 @@ public final class RealtimeTools {
         if (upper.contains("BTC") || text.contains("比特币")) return "BTC-USD";
         if (upper.contains("BNB") || text.contains("币安币")) return "BNB-USD";
         if (upper.contains("ETH") || text.contains("以太坊")) return "ETH-USD";
+        if (upper.contains("USDT") || text.contains("泰达币")) return "USDT-USD";
+        if (upper.contains("USDC")) return "USDC-USD";
         if (upper.contains("SOL")) return "SOL-USD";
         if (upper.contains("XRP") || text.contains("瑞波")) return "XRP-USD";
         if (upper.contains("ADA") || text.contains("艾达币") || text.contains("卡尔达诺")) return "ADA-USD";
@@ -579,11 +1071,136 @@ public final class RealtimeTools {
         return String.format(Locale.US, "%.8f", value);
     }
 
+    private static String compactMoney(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return "--";
+        }
+        double abs = Math.abs(value);
+        if (abs >= 1_000_000_000_000.0) {
+            return String.format(Locale.US, "%.2fT", value / 1_000_000_000_000.0);
+        }
+        if (abs >= 1_000_000_000.0) {
+            return String.format(Locale.US, "%.2fB", value / 1_000_000_000.0);
+        }
+        if (abs >= 1_000_000.0) {
+            return String.format(Locale.US, "%.2fM", value / 1_000_000.0);
+        }
+        return fmt(value);
+    }
+
     private static String signed(double value) {
         if (Double.isNaN(value) || Double.isInfinite(value)) {
             return "--";
         }
         return (value >= 0 ? "+" : "-") + fmt(Math.abs(value));
+    }
+
+    private enum UnitType {
+        LENGTH,
+        WEIGHT,
+        VOLUME,
+        TEMPERATURE,
+        UNKNOWN
+    }
+
+    private static final class SportsLeague {
+        final String path;
+        final String label;
+
+        SportsLeague(String path, String label) {
+            this.path = path;
+            this.label = label;
+        }
+    }
+
+    private static final class ExpressionParser {
+        private final String input;
+        private int index;
+
+        ExpressionParser(String input) {
+            this.input = input == null ? "" : input;
+        }
+
+        double parse() {
+            index = 0;
+            double value = parseExpression();
+            if (index < input.length()) {
+                throw new IllegalArgumentException("表达式多余字符: " + input.substring(index));
+            }
+            return value;
+        }
+
+        private double parseExpression() {
+            double value = parseTerm();
+            while (index < input.length()) {
+                char op = input.charAt(index);
+                if (op != '+' && op != '-') {
+                    break;
+                }
+                index++;
+                double right = parseTerm();
+                value = op == '+' ? value + right : value - right;
+            }
+            return value;
+        }
+
+        private double parseTerm() {
+            double value = parseFactor();
+            while (index < input.length()) {
+                char op = input.charAt(index);
+                if (op != '*' && op != '/') {
+                    break;
+                }
+                index++;
+                double right = parseFactor();
+                if (op == '/') {
+                    if (Math.abs(right) < 1e-12) {
+                        throw new IllegalArgumentException("除数不能为 0");
+                    }
+                    value /= right;
+                } else {
+                    value *= right;
+                }
+            }
+            return value;
+        }
+
+        private double parseFactor() {
+            if (index >= input.length()) {
+                throw new IllegalArgumentException("表达式不完整");
+            }
+            char ch = input.charAt(index);
+            if (ch == '+') {
+                index++;
+                return parseFactor();
+            }
+            if (ch == '-') {
+                index++;
+                return -parseFactor();
+            }
+            if (ch == '(') {
+                index++;
+                double value = parseExpression();
+                if (index >= input.length() || input.charAt(index) != ')') {
+                    throw new IllegalArgumentException("括号未闭合");
+                }
+                index++;
+                return value;
+            }
+            int start = index;
+            while (index < input.length()) {
+                char c = input.charAt(index);
+                if ((c >= '0' && c <= '9') || c == '.') {
+                    index++;
+                } else {
+                    break;
+                }
+            }
+            if (start == index) {
+                throw new IllegalArgumentException("数字格式错误");
+            }
+            return Double.parseDouble(input.substring(start, index));
+        }
     }
 
     private static final class Quote {
@@ -601,6 +1218,18 @@ public final class RealtimeTools {
             this.price = price;
             this.change = change;
             this.percent = percent;
+        }
+    }
+
+    private static final class StockCandidate {
+        final String market;
+        final String code;
+        final String name;
+
+        StockCandidate(String market, String code, String name) {
+            this.market = market == null ? "" : market;
+            this.code = code == null ? "" : code;
+            this.name = name == null ? "" : name;
         }
     }
 }

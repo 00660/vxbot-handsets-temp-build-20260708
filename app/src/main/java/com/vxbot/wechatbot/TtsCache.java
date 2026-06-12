@@ -24,6 +24,24 @@ final class TtsCache {
             BotLog.e(context, "tts.prepare.abort", "TTS 内容为空 reason=" + reason);
             return null;
         }
+        if (config != null && BotConfig.TTS_PROVIDER_DOUBAO.equals(config.ttsProvider)) {
+            File file = DoubaoWebTtsClient.synthesize(context, config, payload, reason, timeoutMs);
+            if (file != null && file.isFile() && file.length() > 128) {
+                return file;
+            }
+            BotLog.w(context, "tts.prepare.fallback", "豆包 TTS 未生成音频，回退千问 TTS reason=" + reason);
+        }
+        if (config != null && BotConfig.TTS_PROVIDER_MIMO.equals(config.ttsProvider)) {
+            File file = MimoTtsClient.synthesize(context, config, payload, reason, timeoutMs);
+            if (file != null && file.isFile() && file.length() > 128) {
+                return file;
+            }
+            BotLog.w(context, "tts.prepare.fallback", "MiMo TTS 未生成音频，回退千问 TTS reason=" + reason);
+        }
+        return prepareQwen(context, config, payload, reason, timeoutMs, attempts);
+    }
+
+    private static File prepareQwen(Context context, BotConfig config, String payload, String reason, int timeoutMs, int attempts) {
         String voice = config == null ? BotConfig.DEFAULT_TTS_VOICE : config.ttsVoice;
         float speed = config == null ? BotConfig.DEFAULT_TTS_SPEED : config.ttsSpeed;
         int waitMs = Math.max(8000, timeoutMs);

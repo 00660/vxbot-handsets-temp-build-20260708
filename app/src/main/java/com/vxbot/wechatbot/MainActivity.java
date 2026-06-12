@@ -12,6 +12,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
@@ -86,8 +87,18 @@ public final class MainActivity extends Activity {
     private EditText paymentCallbackUrl;
     private EditText paymentCallbackSecret;
     private EditText paymentCallbackTimeoutMs;
+    private Spinner ttsProvider;
     private Spinner ttsVoice;
     private EditText ttsSpeed;
+    private Spinner doubaoTtsVoice;
+    private EditText doubaoSessionId;
+    private EditText doubaoSidGuard;
+    private EditText doubaoUidTt;
+    private Spinner mimoTtsVoice;
+    private EditText mimoTtsEndpoint;
+    private EditText mimoTtsApiKey;
+    private EditText mimoNaturalLanguageControl;
+    private EditText mimoAudioTagControl;
     private EditText hsPort;
     private EditText replyTimeoutMs;
     private EditText imageTimeoutMs;
@@ -119,6 +130,7 @@ public final class MainActivity extends Activity {
     private Switch enableMorningGreeting;
     private Switch enableShutupCooldown;
     private Switch enableFinance;
+    private Switch enableSports;
     private Switch enableNews;
     private Switch enableWeather;
     private Switch enableVideoParse;
@@ -140,6 +152,7 @@ public final class MainActivity extends Activity {
     private TextView logView;
     private TextView statusView;
     private boolean loadingConfig;
+    private MediaPlayer previewPlayer;
 
     private final BroadcastReceiver logReceiver = new BroadcastReceiver() {
         @Override
@@ -179,6 +192,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        releasePreviewPlayer();
         uiWorker.shutdownNow();
         super.onDestroy();
     }
@@ -345,11 +359,23 @@ public final class MainActivity extends Activity {
         enableMorningGreeting = switchRow(featuresPage, "每天早安问好");
         enableShutupCooldown = switchRow(featuresPage, "闭嘴后本群 30 分钟忽略");
         enableFinance = switchRow(featuresPage, "金融/股票/虚拟币查询");
+        enableSports = switchRow(featuresPage, "体育赛事/比分/赛程查询");
         enableNews = switchRow(featuresPage, "新闻/微博热点");
         enableWeather = switchRow(featuresPage, "天气查询");
         enableVideoParse = switchRow(featuresPage, "短视频/图集解析");
-        ttsVoice = spinner(featuresPage, "TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
+        ttsProvider = spinner(featuresPage, "TTS 引擎", BotConfig.TTS_PROVIDER_LABELS);
+        ttsVoice = spinner(featuresPage, "千问 TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
         ttsSpeed = edit(featuresPage, "TTS 语速倍率 0.5-2.0", "1.0", false);
+        doubaoTtsVoice = spinner(featuresPage, "豆包 TTS 语音角色", BotConfig.DOUBAO_TTS_VOICE_LABELS);
+        doubaoSessionId = edit(featuresPage, "豆包 sessionid", "", false);
+        doubaoSidGuard = edit(featuresPage, "豆包 sid_guard", "", false);
+        doubaoUidTt = edit(featuresPage, "豆包 uid_tt", "", false);
+        mimoTtsVoice = spinner(featuresPage, "MiMo TTS 语音角色", BotConfig.MIMO_TTS_VOICE_LABELS);
+        mimoTtsEndpoint = edit(featuresPage, "MiMo TTS 接口", BotConfig.DEFAULT_MIMO_TTS_ENDPOINT, false);
+        mimoTtsApiKey = edit(featuresPage, "MiMo API Key", "", false);
+        mimoNaturalLanguageControl = edit(featuresPage, "MiMo 自然语言控制", BotConfig.DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL, true);
+        mimoAudioTagControl = edit(featuresPage, "MiMo 音频标签控制", BotConfig.DEFAULT_MIMO_AUDIO_TAG_CONTROL, false);
+        featuresPage.addView(buttonRow(button("试听 TTS", v -> previewTts())));
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
@@ -495,8 +521,18 @@ public final class MainActivity extends Activity {
             paymentCallbackUrl.setText(config.paymentCallbackUrl);
             paymentCallbackSecret.setText(config.paymentCallbackSecret);
             paymentCallbackTimeoutMs.setText(String.valueOf(config.paymentCallbackTimeoutMs));
+            ttsProvider.setSelection(ttsProviderIndex(config.ttsProvider));
             ttsVoice.setSelection(ttsVoiceIndex(config.ttsVoice));
             ttsSpeed.setText(String.valueOf(config.ttsSpeed));
+            doubaoTtsVoice.setSelection(doubaoTtsVoiceIndex(config.doubaoTtsVoice));
+            doubaoSessionId.setText(config.doubaoSessionId);
+            doubaoSidGuard.setText(config.doubaoSidGuard);
+            doubaoUidTt.setText(config.doubaoUidTt);
+            mimoTtsVoice.setSelection(mimoTtsVoiceIndex(config.mimoTtsVoice));
+            mimoTtsEndpoint.setText(config.mimoTtsEndpoint);
+            mimoTtsApiKey.setText(config.mimoTtsApiKey);
+            mimoNaturalLanguageControl.setText(config.mimoNaturalLanguageControl);
+            mimoAudioTagControl.setText(config.mimoAudioTagControl);
             hsPort.setText(String.valueOf(config.hsPort));
             replyTimeoutMs.setText(String.valueOf(config.replyTimeoutMs));
             imageTimeoutMs.setText(String.valueOf(config.imageTimeoutMs));
@@ -526,6 +562,7 @@ public final class MainActivity extends Activity {
             enableMorningGreeting.setChecked(config.enableMorningGreeting);
             enableShutupCooldown.setChecked(config.enableShutupCooldown);
             enableFinance.setChecked(config.enableFinance);
+            enableSports.setChecked(config.enableSports);
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
             enableVideoParse.setChecked(config.enableVideoParse);
@@ -576,8 +613,18 @@ public final class MainActivity extends Activity {
         e.putString("defaultYuanPackage", defaultYuanPackage.getText().toString());
         e.putString("paymentCallbackUrl", paymentCallbackUrl.getText().toString());
         e.putString("paymentCallbackSecret", paymentCallbackSecret.getText().toString());
+        e.putString("ttsProvider", selectedTtsProviderId());
         e.putString("ttsVoice", selectedTtsVoiceId());
         e.putFloat("ttsSpeed", BotConfig.normalizeTtsSpeed(floatValue(ttsSpeed, BotConfig.DEFAULT_TTS_SPEED)));
+        e.putString("doubaoTtsVoice", selectedDoubaoTtsVoiceId());
+        e.putString("doubaoSessionId", doubaoSessionId.getText().toString());
+        e.putString("doubaoSidGuard", doubaoSidGuard.getText().toString());
+        e.putString("doubaoUidTt", doubaoUidTt.getText().toString());
+        e.putString("mimoTtsVoice", selectedMimoTtsVoiceId());
+        e.putString("mimoTtsEndpoint", mimoTtsEndpoint.getText().toString());
+        e.putString("mimoTtsApiKey", mimoTtsApiKey.getText().toString());
+        e.putString("mimoNaturalLanguageControl", mimoNaturalLanguageControl.getText().toString());
+        e.putString("mimoAudioTagControl", mimoAudioTagControl.getText().toString());
         e.putString("exName", exName.getText().toString());
         e.putString("exManualText", exManualText.getText().toString());
         e.putString("exProfilePrompt", exProfilePrompt.getText().toString());
@@ -614,6 +661,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableMorningGreeting", enableMorningGreeting.isChecked());
         e.putBoolean("enableShutupCooldown", enableShutupCooldown.isChecked());
         e.putBoolean("enableFinance", enableFinance.isChecked());
+        e.putBoolean("enableSports", enableSports.isChecked());
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());
         e.putBoolean("enableVideoParse", enableVideoParse.isChecked());
@@ -1029,6 +1077,81 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void previewTts() {
+        saveConfig();
+        toast("正在生成试听语音");
+        uiWorker.execute(() -> {
+            File file = null;
+            try {
+                BotConfig config = BotConfig.load(this);
+                file = TtsCache.prepare(this, config, "这是机器人语音试听，当前角色已生效。", "tts-preview", 60000, 1);
+                if (file == null || !file.isFile() || file.length() <= 44) {
+                    throw new IllegalStateException("TTS 没有生成可播放音频");
+                }
+                File audio = file;
+                runOnUiThread(() -> playPreviewAudio(audio));
+            } catch (Exception e) {
+                if (file != null) {
+                    TtsCache.cleanup(this, file, "tts-preview-failed");
+                }
+                BotLog.e(this, "tts.preview.fail", e.getMessage());
+                runOnUiThread(() -> {
+                    refreshLogs();
+                    toast("试听失败，看日志");
+                });
+            }
+        });
+    }
+
+    private void playPreviewAudio(File file) {
+        try {
+            releasePreviewPlayer();
+            MediaPlayer player = new MediaPlayer();
+            previewPlayer = player;
+            player.setDataSource(file.getAbsolutePath());
+            player.setOnCompletionListener(mp -> {
+                if (previewPlayer == mp) {
+                    previewPlayer = null;
+                }
+                mp.release();
+                TtsCache.cleanup(this, file, "tts-preview");
+                refreshLogs();
+            });
+            player.setOnErrorListener((mp, what, extra) -> {
+                if (previewPlayer == mp) {
+                    previewPlayer = null;
+                }
+                mp.release();
+                TtsCache.cleanup(this, file, "tts-preview-error");
+                BotLog.e(this, "tts.preview.play.fail", "what=" + what + " extra=" + extra);
+                refreshLogs();
+                toast("试听播放失败，看日志");
+                return true;
+            });
+            player.prepare();
+            player.start();
+            toast("正在播放试听");
+            refreshLogs();
+        } catch (Exception e) {
+            releasePreviewPlayer();
+            TtsCache.cleanup(this, file, "tts-preview-open-failed");
+            BotLog.e(this, "tts.preview.open.fail", e.getMessage());
+            refreshLogs();
+            toast("试听播放失败，看日志");
+        }
+    }
+
+    private void releasePreviewPlayer() {
+        if (previewPlayer == null) {
+            return;
+        }
+        try {
+            previewPlayer.release();
+        } catch (Exception ignored) {
+        }
+        previewPlayer = null;
+    }
+
     private void refreshLogs() {
         if (logView != null) {
             logView.setText(BotLog.readTailNewestFirst(this, 16000));
@@ -1238,12 +1361,66 @@ public final class MainActivity extends Activity {
         return 0;
     }
 
+    private int ttsProviderIndex(String provider) {
+        String normalized = BotConfig.normalizeTtsProvider(provider);
+        for (int i = 0; i < BotConfig.TTS_PROVIDER_IDS.length; i++) {
+            if (BotConfig.TTS_PROVIDER_IDS[i].equals(normalized)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private String selectedTtsProviderId() {
+        int index = ttsProvider == null ? 0 : ttsProvider.getSelectedItemPosition();
+        if (index < 0 || index >= BotConfig.TTS_PROVIDER_IDS.length) {
+            return BotConfig.DEFAULT_TTS_PROVIDER;
+        }
+        return BotConfig.TTS_PROVIDER_IDS[index];
+    }
+
     private String selectedTtsVoiceId() {
         int index = ttsVoice == null ? 0 : ttsVoice.getSelectedItemPosition();
         if (index < 0 || index >= BotConfig.TTS_VOICE_IDS.length) {
             return BotConfig.DEFAULT_TTS_VOICE;
         }
         return BotConfig.TTS_VOICE_IDS[index];
+    }
+
+    private int doubaoTtsVoiceIndex(String voice) {
+        String normalized = BotConfig.normalizeDoubaoTtsVoice(voice);
+        for (int i = 0; i < BotConfig.DOUBAO_TTS_VOICE_IDS.length; i++) {
+            if (BotConfig.DOUBAO_TTS_VOICE_IDS[i].equals(normalized)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private String selectedDoubaoTtsVoiceId() {
+        int index = doubaoTtsVoice == null ? 0 : doubaoTtsVoice.getSelectedItemPosition();
+        if (index < 0 || index >= BotConfig.DOUBAO_TTS_VOICE_IDS.length) {
+            return BotConfig.DEFAULT_DOUBAO_TTS_VOICE;
+        }
+        return BotConfig.DOUBAO_TTS_VOICE_IDS[index];
+    }
+
+    private int mimoTtsVoiceIndex(String voice) {
+        String normalized = BotConfig.normalizeMimoTtsVoice(voice);
+        for (int i = 0; i < BotConfig.MIMO_TTS_VOICE_IDS.length; i++) {
+            if (BotConfig.MIMO_TTS_VOICE_IDS[i].equals(normalized)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private String selectedMimoTtsVoiceId() {
+        int index = mimoTtsVoice == null ? 0 : mimoTtsVoice.getSelectedItemPosition();
+        if (index < 0 || index >= BotConfig.MIMO_TTS_VOICE_IDS.length) {
+            return BotConfig.DEFAULT_MIMO_TTS_VOICE;
+        }
+        return BotConfig.MIMO_TTS_VOICE_IDS[index];
     }
 
     private Switch switchRow(LinearLayout root, String label) {

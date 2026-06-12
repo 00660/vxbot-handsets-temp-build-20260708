@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 86
-        versionName "0.1.85-selfie-batch-queue"
+        versionCode 88
+        versionName "0.1.87-tools-tts"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
@@ -48,4 +48,5 @@ dependencies {
     implementation "dev.rikka.shizuku:provider:13.1.5"
     implementation "androidx.core:core:1.13.1"
     implementation "com.google.mlkit:text-recognition-chinese:16.0.1"
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
 }

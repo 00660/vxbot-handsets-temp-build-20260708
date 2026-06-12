@@ -14,6 +14,8 @@ public final class MessageRouter {
         CODEX,
         LICENSE,
         FINANCE,
+        SPORTS,
+        UTILITY,
         NEWS,
         WEATHER,
         VIDEO,
@@ -96,6 +98,12 @@ public final class MessageRouter {
         if (config.enableFinance && looksLikeFinanceRequest(command)) {
             return new Route(Kind.FINANCE, "金融查询：给出简洁结果和必要风险提示，不编造实时行情。");
         }
+        if (config.enableSports && looksLikeSportsRequest(command)) {
+            return new Route(Kind.SPORTS, "体育赛事查询/分析：查询比赛赛程、比分和状态；分析类问题基于实时赛事结果给上游判断。");
+        }
+        if (looksLikeUtilityRequest(command)) {
+            return new Route(Kind.UTILITY, "本地工具：时间日期、简单计算和单位换算。");
+        }
         if (looksLikeWoolRequest(command)) {
             return new Route(Kind.WOOL, "羊毛线报：抓取赚客吧最新线报并生成榜单图片发群。");
         }
@@ -156,6 +164,12 @@ public final class MessageRouter {
             return true;
         }
         if (config.enableFinance && looksLikeFinanceRequest(command)) {
+            return true;
+        }
+        if (config.enableSports && looksLikeSportsRequest(command)) {
+            return true;
+        }
+        if (looksLikeUtilityRequest(command)) {
             return true;
         }
         if (looksLikeWoolRequest(command)) {
@@ -292,6 +306,7 @@ public final class MessageRouter {
     private static boolean looksLikeFinanceRequest(String text) {
         return matchesAny(text,
                 "股票", "基金", "虚拟币", "加密货币", "数字货币", "币价", "币圈",
+                "代币", "token", "coin", "crypto",
                 "比特币", "大饼", "以太坊", "狗狗币", "瑞波", "波场", "币安币", "波卡", "莱特币", "柴犬币",
                 "btc", "eth", "sol", "doge", "xrp", "bnb", "ada", "trx", "avax", "link", "dot", "ltc", "bch", "ton", "shib", "pepe", "uni", "matic", "pol", "etc", "fil", "icp", "atom", "near", "arb", "apt", "sui", "aave", "okb",
                 "行情", "汇率", "外汇", "美元", "人民币", "港币", "港元", "欧元", "日元", "英镑", "澳元", "加元", "新加坡元", "瑞郎", "离岸人民币",
@@ -308,8 +323,35 @@ public final class MessageRouter {
                 || looksLikeImageRequest(text)
                 || looksLikeVideoParseRequest(text)
                 || looksLikeFinanceRequest(text)
+                || looksLikeSportsRequest(text)
+                || looksLikeUtilityRequest(text)
                 || looksLikeWoolRequest(text)
                 || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "codex", "代码", "报错", "bug", "修复");
+    }
+
+    private static boolean looksLikeSportsRequest(String text) {
+        String value = compact(text).toLowerCase(Locale.ROOT);
+        return matchesAny(value,
+                "世界杯", "世俱杯", "欧洲杯", "亚洲杯", "美洲杯", "欧冠", "欧联", "英超", "西甲", "意甲", "德甲", "法甲", "中超",
+                "nba", "wnba", "cba", "nfl", "nhl", "mlb", "f1", "ufc",
+                "足球", "篮球", "网球", "羽毛球", "乒乓球", "排球",
+                "赛程", "赛事", "比分", "战绩", "排名", "积分榜", "对阵", "谁赢", "几比几", "比赛结果", "今日比赛", "今晚比赛", "明天比赛")
+                || value.matches(".*(\\w+vs\\w+|\\w+v\\w+).*");
+    }
+
+    private static boolean looksLikeUtilityRequest(String text) {
+        String value = compact(text);
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (value.matches(".*(北京时间|现在几点|几点了|今天几号|今天星期几|今天周几|现在日期|当前时间|当前日期).*")) {
+            return true;
+        }
+        if (matchesAny(value, "计算", "算一下", "等于多少", "单位换算", "换算一下")) {
+            return true;
+        }
+        if (lower.matches(".*\\d+\\s*[+\\-*/×÷]\\s*\\d+.*")) {
+            return true;
+        }
+        return value.matches(".*\\d+(\\.\\d+)?\\s*(公里|千米|米|厘米|毫米|斤|公斤|千克|克|吨|升|毫升|摄氏度|华氏度|美元|人民币).*?(等于|换算|是多少|多少).*");
     }
 
     public static boolean isReportCommand(String text) {
