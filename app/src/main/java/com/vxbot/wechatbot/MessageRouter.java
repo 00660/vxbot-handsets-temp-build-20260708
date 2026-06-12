@@ -16,6 +16,7 @@ public final class MessageRouter {
         FINANCE,
         NEWS,
         WEATHER,
+        VIDEO,
         WOOL,
         TTS,
         STICKER,
@@ -83,6 +84,9 @@ public final class MessageRouter {
         if (config.enableImage && looksLikeStickerRequest(command)) {
             return new Route(Kind.STICKER, "EmojiCut 表情包：生成 16 格白底贴纸图，切图保存后发群。");
         }
+        if (config.enableVideoParse && looksLikeVideoParseRequest(command)) {
+            return new Route(Kind.VIDEO, "短视频/图集解析：解析分享链接，下载无水印视频或图集，并通过微信分享链路发回当前群。");
+        }
         if (config.enableImageAnalysis && looksLikeImageAnalysis(command)) {
             return new Route(Kind.ANALYSIS, "图片分析：分析当前会话截图里用户要求看的图片，只输出微信群里要回复的内容。");
         }
@@ -143,6 +147,9 @@ public final class MessageRouter {
             return true;
         }
         if (config.enableImage && looksLikeStickerRequest(command)) {
+            return true;
+        }
+        if (config.enableVideoParse && looksLikeVideoParseRequest(command)) {
             return true;
         }
         if ((config.enableImageAnalysis && looksLikeImageAnalysis(command)) || (config.enableImage && looksLikeImageRequest(command))) {
@@ -299,6 +306,7 @@ public final class MessageRouter {
         return looksLikeLicenseRequest(text)
                 || looksLikeImageAnalysis(text)
                 || looksLikeImageRequest(text)
+                || looksLikeVideoParseRequest(text)
                 || looksLikeFinanceRequest(text)
                 || looksLikeWoolRequest(text)
                 || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "codex", "代码", "报错", "bug", "修复");
@@ -327,6 +335,43 @@ public final class MessageRouter {
             return false;
         }
         return value.matches(".*(表情包|贴纸|微信表情|表情图|做表情|生成表情|生成贴纸|做一套表情|做一套贴纸|emojicut|emoji包|stickers?|stickerpack).*");
+    }
+
+    public static boolean looksLikeVideoParseRequest(String text) {
+        String value = text == null ? "" : text.trim();
+        if (value.isEmpty()) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (!lower.matches("(?s).*(https?://|www\\.).*")) {
+            return false;
+        }
+        String[] domains = {
+                "v.douyin.com", "iesdouyin.com", "douyin.com",
+                "v.kuaishou.com", "kuaishou.com",
+                "xiaohongshu.com", "xhslink.com",
+                "h5.pipix.com", "pipix.com",
+                "h5.pipigx.com", "pipigx.com",
+                "weibo.com", "weibo.cn",
+                "isee.weishi.qq.com",
+                "v.ixigua.com", "ixigua.com",
+                "share.huoshan.com", "huoshan.com",
+                "share.xiaochuankeji.cn",
+                "xspshare.baidu.com", "haokan.baidu.com", "haokan.hao123.com",
+                "www.pearvideo.com", "pearvideo.com",
+                "v.huya.com", "huya.com",
+                "www.acfun.cn", "acfun.cn",
+                "doupai.cc", "meipai.com", "kg.qq.com", "6.cn",
+                "xinpianchang.com", "bilibili.com", "b23.tv",
+                "x.com", "twitter.com", "t.co",
+                "v.qq.com", "tv.sohu.com", "m.tv.sohu.com", "cctv.com"
+        };
+        for (String domain : domains) {
+            if (lower.contains(domain)) {
+                return true;
+            }
+        }
+        return matchesAny(value, "解析视频", "视频解析", "去水印", "无水印", "解析图集", "解析小红书");
     }
 
     public static String extractTtsText(String text) {

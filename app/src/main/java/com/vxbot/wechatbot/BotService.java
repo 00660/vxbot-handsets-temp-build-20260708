@@ -325,6 +325,9 @@ public final class BotService extends Service {
                 if (route.kind == MessageRouter.Kind.WOOL) {
                     return "__WOOL_FLOW__";
                 }
+                if (route.kind == MessageRouter.Kind.VIDEO) {
+                    return "__VIDEO_FLOW__";
+                }
                 if (route.kind == MessageRouter.Kind.STICKER) {
                     return "__STICKER_FLOW__";
                 }
@@ -392,6 +395,13 @@ public final class BotService extends Service {
                 boolean ok = new WoolHotFlow().handle(this, config, message, driver);
                 if (!ok) {
                     BotLog.e(this, "wool.flow.fail", "羊毛榜流程失败 " + message.display());
+                }
+                return;
+            }
+            if ("__VIDEO_FLOW__".equals(reply)) {
+                boolean ok = new VideoParseFlow().handle(this, config, message, driver);
+                if (!ok) {
+                    BotLog.e(this, "video.flow.fail", "视频解析流程失败 " + message.display());
                 }
                 return;
             }
@@ -465,7 +475,7 @@ public final class BotService extends Service {
         return name + " 操作手册：\n"
                 + "1. 聊天：@" + name + " 后面直接说内容。\n"
                 + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
-                + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、来点羊毛。\n"
+                + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、来点羊毛、短视频/图集链接解析。\n"
                 + "4. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
                 + "5. 语音：发语音 文字；机器人请报道可测在线。\n"
                 + "6. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
@@ -515,6 +525,7 @@ public final class BotService extends Service {
         return "__IMAGE_FLOW__".equals(reply)
                 || "__VISION_FLOW__".equals(reply)
                 || "__WOOL_FLOW__".equals(reply)
+                || "__VIDEO_FLOW__".equals(reply)
                 || "__STICKER_FLOW__".equals(reply)
                 || "__TTS_FLOW__".equals(reply);
     }

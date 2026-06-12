@@ -108,6 +108,8 @@ public final class BotConfig {
     public final int replyTimeoutMs;
     public final int imageTimeoutMs;
     public final int licensePanelTimeoutMs;
+    public final int videoParseTimeoutMs;
+    public final int videoDownloadMaxBytesMb;
     public final int paymentCallbackTimeoutMs;
     public final int notificationSettleMs;
     public final int sendButtonDelayMs;
@@ -137,6 +139,7 @@ public final class BotConfig {
     public final boolean enableFinance;
     public final boolean enableNews;
     public final boolean enableWeather;
+    public final boolean enableVideoParse;
     public final boolean enableLogOverlay;
     public final boolean keepLogOverlayDuringOperation;
     public final boolean enableNoRootKeepAwake;
@@ -168,7 +171,7 @@ public final class BotConfig {
         imageApiKey = normalizeApiKey(prefs.getString("imageApiKey", DEFAULT_API_KEY));
         imageModel = prefs.getString("imageModel", DEFAULT_IMAGE_MODEL);
         imageSize = prefs.getString("imageSize", "941x1672");
-        licensePanelBaseUrl = normalizeBaseUrl(prefs.getString("licensePanelBaseUrl", DEFAULT_LICENSE_PANEL_BASE_URL));
+        licensePanelBaseUrl = normalizeBaseUrl(prefs.getString("licensePanelBaseUrl", DEFAULT_LICENSE_PANEL_BASE_URL), DEFAULT_LICENSE_PANEL_BASE_URL);
         defaultYuanPackage = normalizePackageName(prefs.getString("defaultYuanPackage", DEFAULT_YUAN_PACKAGE));
         paymentCallbackUrl = prefs.getString("paymentCallbackUrl", DEFAULT_PAYMENT_CALLBACK_URL).trim();
         paymentCallbackSecret = prefs.getString("paymentCallbackSecret", "").trim();
@@ -182,6 +185,8 @@ public final class BotConfig {
         replyTimeoutMs = clampInt(prefs.getInt("replyTimeoutMs", 60000), 5000, 180000);
         imageTimeoutMs = clampInt(prefs.getInt("imageTimeoutMs", 180000), 10000, 300000);
         licensePanelTimeoutMs = clampInt(prefs.getInt("licensePanelTimeoutMs", 30000), 5000, 120000);
+        videoParseTimeoutMs = clampInt(prefs.getInt("videoParseTimeoutMs", 45000), 5000, 180000);
+        videoDownloadMaxBytesMb = clampInt(prefs.getInt("videoDownloadMaxBytesMb", 80), 5, 500);
         paymentCallbackTimeoutMs = clampInt(prefs.getInt("paymentCallbackTimeoutMs", 10000), 3000, 60000);
         notificationSettleMs = clampInt(prefs.getInt("notificationSettleMs", 2600), 300, 15000);
         sendButtonDelayMs = clampInt(prefs.getInt("sendButtonDelayMs", 500), 0, 5000);
@@ -211,6 +216,7 @@ public final class BotConfig {
         enableFinance = prefs.getBoolean("enableFinance", true);
         enableNews = prefs.getBoolean("enableNews", true);
         enableWeather = prefs.getBoolean("enableWeather", true);
+        enableVideoParse = prefs.getBoolean("enableVideoParse", true);
         enableLogOverlay = prefs.getBoolean("enableLogOverlay", false);
         keepLogOverlayDuringOperation = prefs.getBoolean("keepLogOverlayDuringOperation", true);
         enableNoRootKeepAwake = prefs.getBoolean("enableNoRootKeepAwake", true);
@@ -342,9 +348,10 @@ public final class BotConfig {
         return endpoint.replaceAll("/+$", "");
     }
 
-    private static String normalizeBaseUrl(String value) {
+    private static String normalizeBaseUrl(String value, String fallback) {
         String endpoint = value == null ? "" : value.trim();
-        return endpoint.isEmpty() ? DEFAULT_LICENSE_PANEL_BASE_URL : endpoint.replaceAll("/+$", "");
+        String defaultValue = fallback == null || fallback.trim().isEmpty() ? DEFAULT_LICENSE_PANEL_BASE_URL : fallback.trim();
+        return endpoint.isEmpty() ? defaultValue : endpoint.replaceAll("/+$", "");
     }
 
     private static String normalizePackageName(String value) {

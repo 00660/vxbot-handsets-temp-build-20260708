@@ -80,6 +80,8 @@ public final class MainActivity extends Activity {
     private EditText imageSize;
     private EditText licensePanelBaseUrl;
     private EditText licensePanelTimeoutMs;
+    private EditText videoParseTimeoutMs;
+    private EditText videoDownloadMaxBytesMb;
     private EditText defaultYuanPackage;
     private EditText paymentCallbackUrl;
     private EditText paymentCallbackSecret;
@@ -119,6 +121,7 @@ public final class MainActivity extends Activity {
     private Switch enableFinance;
     private Switch enableNews;
     private Switch enableWeather;
+    private Switch enableVideoParse;
     private Switch enableLogOverlay;
     private Switch keepLogOverlayDuringOperation;
     private Switch enableNoRootKeepAwake;
@@ -266,6 +269,8 @@ public final class MainActivity extends Activity {
         replyTimeoutMs = edit(upstreamPage, "回复超时毫秒", "60000", false);
         licensePanelBaseUrl = edit(upstreamPage, "注册机面板", BotConfig.DEFAULT_LICENSE_PANEL_BASE_URL, false);
         licensePanelTimeoutMs = edit(upstreamPage, "注册机超时毫秒", "30000", false);
+        videoParseTimeoutMs = edit(upstreamPage, "短视频解析超时毫秒", "45000", false);
+        videoDownloadMaxBytesMb = edit(upstreamPage, "短视频下载上限 MB", "80", false);
         defaultYuanPackage = edit(upstreamPage, "元统计默认包名", BotConfig.DEFAULT_YUAN_PACKAGE, false);
 
         LinearLayout personaPage = page(content, "人物形象");
@@ -342,6 +347,7 @@ public final class MainActivity extends Activity {
         enableFinance = switchRow(featuresPage, "金融/股票/虚拟币查询");
         enableNews = switchRow(featuresPage, "新闻/微博热点");
         enableWeather = switchRow(featuresPage, "天气查询");
+        enableVideoParse = switchRow(featuresPage, "短视频/图集解析");
         ttsVoice = spinner(featuresPage, "TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
         ttsSpeed = edit(featuresPage, "TTS 语速倍率 0.5-2.0", "1.0", false);
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
@@ -483,6 +489,8 @@ public final class MainActivity extends Activity {
             imageSize.setText(config.imageSize);
             licensePanelBaseUrl.setText(config.licensePanelBaseUrl);
             licensePanelTimeoutMs.setText(String.valueOf(config.licensePanelTimeoutMs));
+            videoParseTimeoutMs.setText(String.valueOf(config.videoParseTimeoutMs));
+            videoDownloadMaxBytesMb.setText(String.valueOf(config.videoDownloadMaxBytesMb));
             defaultYuanPackage.setText(config.defaultYuanPackage);
             paymentCallbackUrl.setText(config.paymentCallbackUrl);
             paymentCallbackSecret.setText(config.paymentCallbackSecret);
@@ -520,6 +528,7 @@ public final class MainActivity extends Activity {
             enableFinance.setChecked(config.enableFinance);
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
+            enableVideoParse.setChecked(config.enableVideoParse);
             normalReplyAsVoice.setChecked(config.normalReplyAsVoice);
             syncInputModeFromVoiceSwitch.setChecked(config.syncInputModeFromVoiceSwitch);
             enableNoRootKeepAwake.setChecked(config.enableNoRootKeepAwake);
@@ -576,6 +585,8 @@ public final class MainActivity extends Activity {
         e.putInt("replyTimeoutMs", intValue(replyTimeoutMs, 60000));
         e.putInt("imageTimeoutMs", intValue(imageTimeoutMs, 180000));
         e.putInt("licensePanelTimeoutMs", intValue(licensePanelTimeoutMs, 30000));
+        e.putInt("videoParseTimeoutMs", intValue(videoParseTimeoutMs, 45000));
+        e.putInt("videoDownloadMaxBytesMb", intValue(videoDownloadMaxBytesMb, 80));
         e.putInt("paymentCallbackTimeoutMs", intValue(paymentCallbackTimeoutMs, 10000));
         e.putInt("notificationSettleMs", intValue(notificationSettleMs, 2600));
         e.putInt("sendButtonDelayMs", intValue(sendButtonDelayMs, 500));
@@ -605,6 +616,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableFinance", enableFinance.isChecked());
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());
+        e.putBoolean("enableVideoParse", enableVideoParse.isChecked());
         e.putBoolean("normalReplyAsVoice", newNormalVoice);
         e.putBoolean("syncInputModeFromVoiceSwitch", newSyncInputMode);
         e.putBoolean("enableNoRootKeepAwake", enableNoRootKeepAwake.isChecked());

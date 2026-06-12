@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`81`
-- `versionName`：`0.1.80-realtime-voice-press-ocr`
+- `versionCode`：`83`
+- `versionName`：`0.1.82-inline-video-parser`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -28,6 +28,7 @@
 - 群发消息：从配置面板向白名单群依次发送自定义消息。
 - 每日问好：定时向白名单群发送随机问好。
 - 金融/天气/新闻/羊毛：内置实时工具分流与回复。
+- 短视频/图集解析：命中抖音、快手、小红书、微博、B站等分享链接后，APK 内置 parse-video 平台解析逻辑直接解析，下载无水印视频、图集或 LivePhoto，并复用图片分享链路发回当前群。
 - 注册机：对接注册码/授权码查询链路，固定文字回复。
 - 赛博喷子模式：支持触发、目标锁定、退出指令。
 - 恋人模式：支持 `撩一下$name`、`表白$name`、`跟$name表白` 等触发。
@@ -51,6 +52,8 @@
 - 微信操作：`app/src/main/java/com/vxbot/wechatbot/WechatDriver.java`
 - OCR/找图找色：`app/src/main/java/com/vxbot/wechatbot/OcrHelper.java`
 - 图片流程：`app/src/main/java/com/vxbot/wechatbot/ImageFlow.java`
+- 短视频解析：`app/src/main/java/com/vxbot/wechatbot/VideoParseFlow.java`
+- 内置平台解析器：`app/src/main/java/com/vxbot/wechatbot/InlineVideoParser.java`
 - 表情流程：`app/src/main/java/com/vxbot/wechatbot/StickerFlow.java`
 - 语音流程：`app/src/main/java/com/vxbot/wechatbot/VoiceReply.java`、`VoiceDemoService.java`
 - hs 启动：`app/src/main/java/com/vxbot/wechatbot/HsDaemonManager.java`
@@ -106,6 +109,10 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `input.mode.current_matches`：缓存输入态与现场不一致时，现场已是目标态，已更新缓存并跳过切换。
 - `voice.demo.press.point.realtime.scan`：语音按下前实时 OCR 未命中 `按住` 或 `说话` 区域。
 - `voice.demo.press.point.realtime.hit`：语音按下前实时 OCR 命中 `按住` 或 `说话` 区域。
+- `video.parse.start` / `video.parse.done`：短视频或图集解析开始和完成。
+- `video.inline.http`：APK 内置解析器请求平台页面/API 的 HTTP 返回状态和响应体大小。
+- `video.media.download`：解析出的媒体文件已下载到本机缓存。
+- `media.share.done`：视频、图集或封面通过微信分享链路发送完成。
 - `screen.dim.enable` / `screen.dim.disable`：低亮防熄屏开启或关闭。
 - `screen.brightness.set`：系统亮度写入成功。
 - `screen.brightness.skip`：未授权 `WRITE_SETTINGS`，只使用低亮窗口。
@@ -120,8 +127,9 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-11：增强输入态识别为三态判断：OCR `按住说话`、底部输入栏像素/颜色特征、输入法窗口可见状态共同判断语音态、文字态和输入法弹出态。
 - 2026-06-11：新增“语音开关批量同步输入态”开关，默认关闭。关闭时普通聊天/前置/后置语音开关不会批量覆盖白名单群输入态缓存，继续使用每群自动识别。
 - 2026-06-11：语音按压点改为发送前实时 OCR 识别当前屏幕的 `按住` 或 `说话`，不再读取或保存会话缓存坐标；兼容微信 OCR 把 `按住 说话` 拆开的情况。
+- 2026-06-12：新增短视频/图集解析完整链路。`MessageRouter` 识别 parse-video 支持平台分享链接，`InlineVideoParser` 将 parse-video 的平台解析逻辑内置到 APK，不依赖 Docker/3001/外部解析服务；`VideoParseFlow` 下载 `video_url`、`images[].url`、`images[].live_photo_url` 或封面，复用 `ImageFlow.shareExistingMedia` 发回群。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 
@@ -129,4 +137,5 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 修改微信操作链路前，优先在真机小 demo 或单步截图验证，不要直接重写主链路。
 - 微信 UI 控件很多不可读，判断会话页、通知栏、输入态、发送按钮时优先用 OCR/找色/找图，避免写死坐标。
 - 语音输入态按白名单群独立缓存；默认不要用语音开关批量覆盖缓存。只有明确打开“语音开关批量同步输入态”时，才按普通聊天/前置/后置语音开关批量写入白名单群输入态。语音按压点必须发送前实时识别，不能复用旧坐标。
+- 短视频解析必须保持 APK 内置，不依赖 Docker、3001 或局域网解析服务。视频和图集分享复用图片分享链路，改分享逻辑前必须同时回归图片和视频。
 - 图片、表情、分析、群发、TTS、普通聊天共用 `BotService` 单队列，避免多个并发链路抢微信前台。

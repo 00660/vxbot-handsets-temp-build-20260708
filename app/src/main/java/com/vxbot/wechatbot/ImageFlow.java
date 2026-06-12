@@ -444,6 +444,39 @@ public final class ImageFlow {
         return shareImageTo(context, config, file, sessionName);
     }
 
+    public boolean shareExistingMedia(Context context, BotConfig config, File file, String sessionName, String prefix) {
+        long start = SystemClock.uptimeMillis();
+        String flowPrefix = prefix == null || prefix.trim().isEmpty() ? "MediaShare" : prefix.trim();
+        HsClient hs = new HsClient(config.hsPort);
+        ShareAsset asset = null;
+        try {
+            prepareShareStart(context, hs, flowPrefix);
+            asset = createShareAsset(context, file);
+            boolean selectReady = openWechatShareSelectCompatible(context, config, hs, asset, sessionName, flowPrefix);
+            boolean ok = selectReady
+                    && clickShareTargetByOcr(context, config, hs, sessionName)
+                    && clickShareSendByOcr(context, config, hs, sessionName, flowPrefix);
+            if (ok) {
+                ok = finishShareAfterSend(context, config, hs, flowPrefix);
+            }
+            BotLog.write(context, ok ? "SUCCESS" : "ERROR", "media.share.done",
+                    (ok ? "媒体已分享进群" : "媒体分享失败")
+                            + " sessionName=" + sessionName
+                            + " mime=" + (asset == null ? "" : asset.mime)
+                            + " costMs=" + (SystemClock.uptimeMillis() - start));
+            if (!ok) {
+                closeShareRemainder(context, hs, flowPrefix);
+            }
+            return ok;
+        } catch (Exception e) {
+            BotLog.e(context, "media.share.error", "媒体分享流程异常 sessionName=" + sessionName + " error=" + e.getMessage());
+            closeShareRemainder(context, hs, flowPrefix);
+            return false;
+        } finally {
+            cleanupShareAsset(context, asset);
+        }
+    }
+
     private boolean openWechatShareSelectCompatible(Context context, BotConfig config, HsClient hs, ShareAsset asset,
                                                     String sessionName, String prefix) throws Exception {
         if (asset == null) {
@@ -546,28 +579,41 @@ public final class ImageFlow {
             throw new IllegalStateException("file not found: " + (file == null ? "" : file.getAbsolutePath()));
         }
         String mime = shareMimeFromPath(file);
+        boolean video = mime.startsWith("video/");
         String publicName = "vxbot_share_" + System.currentTimeMillis() + extensionForMime(mime);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Uri mediaUri = null;
             try {
                 ContentValues values = new ContentValues();
-                values.put(MediaStore.Images.Media.DISPLAY_NAME, publicName);
-                values.put(MediaStore.Images.Media.MIME_TYPE, mime);
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/VXBotShare");
-                values.put(MediaStore.Images.Media.IS_PENDING, 1);
-                mediaUri = context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                if (video) {
+                    values.put(MediaStore.Video.Media.DISPLAY_NAME, publicName);
+                    values.put(MediaStore.Video.Media.MIME_TYPE, mime);
+                    values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/VXBotShare");
+                    values.put(MediaStore.Video.Media.IS_PENDING, 1);
+                    mediaUri = context.getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+                } else {
+                    values.put(MediaStore.Images.Media.DISPLAY_NAME, publicName);
+                    values.put(MediaStore.Images.Media.MIME_TYPE, mime);
+                    values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/VXBotShare");
+                    values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                    mediaUri = context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                }
                 if (mediaUri == null) {
                     throw new IllegalStateException("MediaStore insert returned null");
                 }
                 copyFileToUri(context, file, mediaUri);
                 ContentValues done = new ContentValues();
-                done.put(MediaStore.Images.Media.IS_PENDING, 0);
+                if (video) {
+                    done.put(MediaStore.Video.Media.IS_PENDING, 0);
+                } else {
+                    done.put(MediaStore.Images.Media.IS_PENDING, 0);
+                }
                 context.getContentResolver().update(mediaUri, done, null, null);
-                File publicFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                File publicFile = new File(Environment.getExternalStoragePublicDirectory(video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES),
                         "VXBotShare/" + publicName);
                 Uri fileUri = Uri.fromFile(publicFile);
-                BotLog.i(context, "image.share.public.copy", "已复制图片到公共媒体库 name=" + publicName
-                        + " contentUri=" + mediaUri + " fileUri=" + fileUri);
+                BotLog.i(context, "image.share.public.copy", "已复制分享媒体到公共媒体库 name=" + publicName
+                        + " mime=" + mime + " contentUri=" + mediaUri + " fileUri=" + fileUri);
                 return new ShareAsset(mediaUri, fileUri, mime, publicName, true);
             } catch (Exception e) {
                 if (mediaUri != null) {
@@ -617,6 +663,12 @@ public final class ImageFlow {
         }
         if ("image/webp".equals(mime)) {
             return ".webp";
+        }
+        if ("video/quicktime".equals(mime)) {
+            return ".mov";
+        }
+        if (mime != null && mime.startsWith("video/")) {
+            return ".mp4";
         }
         return ".png";
     }
@@ -1020,6 +1072,15 @@ public final class ImageFlow {
 
     private String shareMimeFromPath(File file) {
         String lower = file == null ? "" : file.getName().toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".mp4") || lower.endsWith(".m4v")) {
+            return "video/mp4";
+        }
+        if (lower.endsWith(".mov")) {
+            return "video/quicktime";
+        }
+        if (lower.endsWith(".webm")) {
+            return "video/webm";
+        }
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
             return "image/jpeg";
         }
