@@ -37,10 +37,13 @@ import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class ImageFlow {
     private static final Random RANDOM = new Random();
     private static final long IMAGE_CONTEXT_TTL_MS = 15 * 60 * 1000L;
+    private static final int MAX_BATCH_SELFIES = 7;
     private static final Map<String, ImageMemory> IMAGE_CONTEXTS = new HashMap<>();
 
     public boolean handle(Context context, BotConfig config, WxMessage message, SessionStore store, WechatDriver driver) {
@@ -57,6 +60,11 @@ public final class ImageFlow {
             boolean selfie = revision && previous != null ? "persona_selfie".equals(previous.kind) : looksSelfie(request);
             boolean hasPersona = hasFile(config.selfieReferencePhotoPath());
             boolean hasStyle = coolStyle && (hasFile(config.styleReferencePath) || hasRawCoolStyleReference(context));
+            List<String> imageRequests = buildImageRequestQueue(request, selfie, revision, incomingReference);
+            if (imageRequests.size() > 1) {
+                BotLog.i(context, "image.batch.start", "自拍批量队列启动 count=" + imageRequests.size()
+                        + " sessionName=" + message.sessionName + " request=" + request);
+            }
             List<ReferenceImage> sourceImages = new ArrayList<>();
             if (incomingReference) {
                 ReferenceImage ref = captureLatestWechatImageReference(context, config, "image");
@@ -96,22 +104,27 @@ public final class ImageFlow {
                     store.rememberBot(message.sessionName, config.primaryBotName(), warmup);
                 }
             }
-            String prompt = buildImagePrompt(config, message, request, coolStyle, selfie, hasPersona, hasStyle, revision, incomingReference, previous);
-            BotLog.i(context, "image.api.start", "开始请求 3002 图片接口 base=" + config.imageEndpoint
-                    + " model=" + config.imageModel + " size=" + config.imageSize
-                    + " revision=" + revision + " incomingReference=" + incomingReference
-                    + " sourceImages=" + sourceImages.size());
-            String image = requestImage(context, config, prompt, coolStyle, selfie, sourceImages);
-            File file = saveImage(context, image);
-            rememberImageMemory(message.sessionName, request, selfie ? "persona_selfie" : "general", file, image);
-            BotLog.i(context, "image.save", "图片已保存 path=" + file.getAbsolutePath());
-            boolean shared = shareImageTo(context, config, file, message.sessionName);
-            if (!shared) {
-                if (config != null && config.dropImageTaskOnError) {
-                    BotLog.w(context, "image.share.discard", "图片分享失败，按配置丢弃任务并退后台 sessionName=" + message.sessionName);
-                    driver.leaveWechatIfForeground(context, "image-share-failed-drop");
+            for (int i = 0; i < imageRequests.size(); i++) {
+                String itemRequest = imageRequests.get(i);
+                String prompt = buildImagePrompt(config, message, itemRequest, coolStyle, selfie, hasPersona, hasStyle, revision, incomingReference, previous);
+                BotLog.i(context, "image.api.start", "开始请求 3002 图片接口 base=" + config.imageEndpoint
+                        + " model=" + config.imageModel + " size=" + config.imageSize
+                        + " revision=" + revision + " incomingReference=" + incomingReference
+                        + " sourceImages=" + sourceImages.size()
+                        + " batchIndex=" + (i + 1) + "/" + imageRequests.size());
+                String image = requestImage(context, config, prompt, coolStyle, selfie, sourceImages);
+                File file = saveImage(context, image);
+                rememberImageMemory(message.sessionName, itemRequest, selfie ? "persona_selfie" : "general", file, image);
+                BotLog.i(context, "image.save", "图片已保存 path=" + file.getAbsolutePath()
+                        + " batchIndex=" + (i + 1) + "/" + imageRequests.size());
+                boolean shared = shareImageTo(context, config, file, message.sessionName);
+                if (!shared) {
+                    if (config != null && config.dropImageTaskOnError) {
+                        BotLog.w(context, "image.share.discard", "图片分享失败，按配置丢弃任务并退后台 sessionName=" + message.sessionName);
+                        driver.leaveWechatIfForeground(context, "image-share-failed-drop");
+                    }
+                    return false;
                 }
-                return false;
             }
             if (!after.isEmpty() && config.enableImageAfterText) {
                 if (config.imageAfterAsVoice) {
@@ -1188,6 +1201,75 @@ public final class ImageFlow {
     private static boolean looksSelfie(String text) {
         String value = text == null ? "" : text.toLowerCase(Locale.ROOT);
         return value.contains("自拍") || value.contains("照片") || value.contains("露脸") || value.contains("selfie") || value.contains("photo");
+    }
+
+    private static List<String> buildImageRequestQueue(String request, boolean selfie, boolean revision, boolean incomingReference) {
+        List<String> list = new ArrayList<>();
+        String base = request == null ? "" : request.trim();
+        if (!selfie || revision || incomingReference) {
+            list.add(base);
+            return list;
+        }
+        List<String> emotions = sevenEmotionRequests(base);
+        if (!emotions.isEmpty()) {
+            return emotions;
+        }
+        int count = requestedSelfieCount(base);
+        if (count <= 1) {
+            list.add(base);
+            return list;
+        }
+        count = Math.min(count, MAX_BATCH_SELFIES);
+        for (int i = 0; i < count; i++) {
+            list.add(base + "。批量自拍第" + (i + 1) + "张：" + SELFIE_BATCH_VARIANTS[i % SELFIE_BATCH_VARIANTS.length]);
+        }
+        return list;
+    }
+
+    private static List<String> sevenEmotionRequests(String request) {
+        List<String> list = new ArrayList<>();
+        String value = compactRaw(request);
+        if (!(value.contains("七情") || value.contains("7情") || value.contains("喜怒哀乐悲") || value.contains("喜怒哀乐"))) {
+            return list;
+        }
+        for (String emotion : SELFIE_SEVEN_EMOTIONS) {
+            list.add(request + "。七情自拍：" + emotion);
+        }
+        return list;
+    }
+
+    private static int requestedSelfieCount(String request) {
+        String value = compactRaw(request);
+        Matcher matcher = Pattern.compile("([2-7])(?:张|套|组|个)").matcher(value);
+        if (matcher.find()) {
+            return clamp(parseInt(matcher.group(1), 1), 1, MAX_BATCH_SELFIES);
+        }
+        String[] chinese = {"零", "一", "二", "三", "四", "五", "六", "七"};
+        for (int i = 2; i < chinese.length; i++) {
+            if (value.contains(chinese[i] + "张") || value.contains(chinese[i] + "套")
+                    || value.contains(chinese[i] + "组") || value.contains(chinese[i] + "个")) {
+                return i;
+            }
+        }
+        if (value.contains("两张") || value.contains("两套") || value.contains("两组") || value.contains("两个")) {
+            return 2;
+        }
+        if (value.contains("几张") || value.contains("多张") || value.contains("一组自拍") || value.contains("组自拍")) {
+            return 3;
+        }
+        return 1;
+    }
+
+    private static int parseInt(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static String compactRaw(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
     }
 
     private static String normalizeSize(String value) {
@@ -2329,6 +2411,26 @@ public final class ImageFlow {
             "本次自拍变化约束：镜头距离、手臂位置、头部角度和视线方向要随机变化，像真实手机临时拍出来。",
             "本次自拍变化约束：服装材质从季节适配材质里随机选，不要默认毛衣、针织开衫或厚实绒感。",
             "本次自拍变化约束：可以自然微笑、抿嘴害羞、轻轻皱眉、歪头、托腮、比小手势、侧身回头，但动作必须自然。"
+    };
+
+    private static final String[] SELFIE_BATCH_VARIANTS = {
+            "开心自然笑，眼睛有光，像朋友刚逗笑时随手拍。",
+            "轻微害羞脸红，抿嘴看镜头，动作收一点但不僵硬。",
+            "酷一点，表情克制，侧脸或微微低头，穿搭更利落。",
+            "温柔放松，托腮或靠近窗边，眼神软一点。",
+            "微微发呆，像刚走神被喊了一下，生活感要强。",
+            "轻轻皱眉或小委屈，动作自然，不要夸张哭脸。",
+            "惊讶回头或睁大眼，像临时被拍到的真实反应。"
+    };
+
+    private static final String[] SELFIE_SEVEN_EMOTIONS = {
+            "喜：明亮开心，笑容自然，像看到熟人时下意识举手机自拍。",
+            "怒：轻微生气或微恼，皱眉但不狰狞，像熟人玩笑惹急了。",
+            "哀：低落委屈，眼神软，动作收住，像安静发一张状态照。",
+            "乐：开怀一点，嘴角和眼神都放松，像聊天聊开心了。",
+            "悲：眼眶微红或失落感，克制表达，不要夸张哭喊。",
+            "恐：轻微惊怕，身体微缩或回头看，像被突然吓了一下。",
+            "惊：睁大眼、微张嘴或抬手遮一下，像听到意外消息。"
     };
 
     private static final String[] SELFIE_PERSONA_LINES = {

@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`85`
-- `versionName`：`0.1.84-emoji-name-normalize`
+- `versionCode`：`86`
+- `versionName`：`0.1.85-selfie-batch-queue`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -24,7 +24,7 @@
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持发音人和语速配置。
 - 输入态缓存：默认按每个白名单群自动识别文字/语音/输入法弹出态并缓存；语音真正按下前每次实时 OCR 当前屏幕的 `按住` 或 `说话` 区域，不使用缓存按压坐标。
-- 图片自拍：支持人物参考图、清凉/泳装风格参考图、前置/后置话术、图片发送。
+- 图片自拍：支持人物参考图、清凉/泳装风格参考图、前置/后置话术、图片发送；`几张自拍` 默认串行生成 3 张，`2-7张自拍` 按数量排队，`七情自拍/喜怒哀乐悲恐惊自拍` 串行生成 7 张不同情绪自拍。
 - 图片分析/表情：支持引用图点开截图后传上游分析或生成表情图。
 - 群发消息：从配置面板向白名单群依次发送自定义消息。
 - 每日问好：定时向白名单群发送随机问好。
@@ -116,6 +116,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `video.bili.ids`：B 站解析到的 `bvid` 和 `cid`，`cid` 必须按字符串/long 处理，不能用 32 位 int。
 - `video.media.download`：解析出的媒体文件已下载到本机缓存。
 - `media.share.done`：视频、图集或封面通过微信分享链路发送完成。
+- `image.batch.start`：批量自拍队列启动，后续每张仍走 `image.api.start`、`image.save` 和图片分享链路。
 - `screen.dim.enable` / `screen.dim.disable`：低亮防熄屏开启或关闭。
 - `screen.brightness.set`：系统亮度写入成功。
 - `screen.brightness.skip`：未授权 `WRITE_SETTINGS`，只使用低亮窗口。
@@ -133,8 +134,9 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-12：新增短视频/图集解析完整链路。`MessageRouter` 识别 parse-video 支持平台分享链接，`InlineVideoParser` 将 parse-video 的平台解析逻辑内置到 APK，不依赖 Docker/3001/外部解析服务；`VideoParseFlow` 下载 `video_url`、`images[].url`、`images[].live_photo_url` 或封面，复用 `ImageFlow.shareExistingMedia` 发回群。
 - 2026-06-12：修复 B 站解析 `cid` 溢出。B 站新视频 `cid` 可能超过 32 位，Java `optInt()` 会把 `39010699439` 溢出成错误值，导致播放接口返回“啥都木有”；现改为字符串读取并写入 `video.bili.ids` 日志。
 - 2026-06-12：修复群名/人名带表情导致 OCR 和通知匹配不一致。新增 `NameNormalizer`，比较前只保留文字和数字，过滤 `[表情]`、`(表情)`、真实 emoji、零宽连接符和其他符号；白名单、续聊发起人、喷子/恋人目标、会话标题、群发搜索、图片/视频分享目标均复用同一规则。
+- 2026-06-12：新增批量自拍串行队列。`几张/多张自拍` 默认 3 张，`2-7张自拍` 按数量生成，`七情/7情/喜怒哀乐悲恐惊自拍` 拆成 7 个情绪子任务；一次请求只发一次前置和一次后置，中间图片按 `BotService` 单队列串行生成并分享。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
-- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`、`.backup-20260612-203115-emoji-name-normalize`。备份目录仅供本机回滚，不提交到仓库。
+- 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`、`.backup-20260612-203115-emoji-name-normalize`、`.backup-20260612-213125-selfie-batch-queue`。备份目录仅供本机回滚，不提交到仓库。
 
 ## 维护注意
 
