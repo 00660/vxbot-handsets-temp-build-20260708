@@ -3,6 +3,9 @@ package com.vxbot.wechatbot;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +34,17 @@ public final class BotConfig {
     public static final String DEFAULT_TTS_VOICE = "Cherry";
     public static final float DEFAULT_TTS_SPEED = 1.0f;
     public static final String DEFAULT_DOUBAO_TTS_VOICE = "zh_female_taozi_conversation_v4_wvae_bigtts";
+    public static final String[] DOUBAO_TTS_VOICE_ALIASES = {
+            "taozi",
+            "shuangkuai",
+            "tianmei",
+            "qingche",
+            "yangguang",
+            "chenwen",
+            "rap",
+            "en_female",
+            "en_male"
+    };
     public static final String DEFAULT_MIMO_TTS_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions";
     public static final String DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts";
     public static final String DEFAULT_MIMO_TTS_VOICE = "冰糖";
@@ -109,15 +123,15 @@ public final class BotConfig {
             "en_male_adam_conversation_bigtts"
     };
     public static final String[] DOUBAO_TTS_VOICE_LABELS = {
-            "桃子 / 女声对话",
-            "爽快 / 女声情绪",
-            "甜美 / 女声对话",
-            "清澈 / 女声",
-            "阳光 / 男声对话",
-            "沉稳 / 男声",
-            "说唱 / 男声",
-            "Sarah / 英文女声",
-            "Adam / 英文男声"
+            "taozi / 桃子 / 女声对话",
+            "shuangkuai / 爽快 / 女声情绪",
+            "tianmei / 甜美 / 女声对话",
+            "qingche / 清澈 / 女声",
+            "yangguang / 阳光 / 男声对话",
+            "chenwen / 沉稳 / 男声",
+            "rap / 说唱 / 男声",
+            "en_female / Sarah / 英文女声",
+            "en_male / Adam / 英文男声"
     };
     public static final String[] MIMO_TTS_VOICE_IDS = {
             "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"
@@ -155,6 +169,7 @@ public final class BotConfig {
     public final String ttsVoice;
     public final float ttsSpeed;
     public final String doubaoTtsVoice;
+    public final String doubaoCookieHeader;
     public final String doubaoSessionId;
     public final String doubaoSidGuard;
     public final String doubaoUidTt;
@@ -243,6 +258,7 @@ public final class BotConfig {
         ttsVoice = normalizeTtsVoice(prefs.getString("ttsVoice", DEFAULT_TTS_VOICE));
         ttsSpeed = normalizeTtsSpeed(prefs.getFloat("ttsSpeed", DEFAULT_TTS_SPEED));
         doubaoTtsVoice = normalizeDoubaoTtsVoice(prefs.getString("doubaoTtsVoice", DEFAULT_DOUBAO_TTS_VOICE));
+        doubaoCookieHeader = normalizeDoubaoCookieHeader(prefs.getString("doubaoCookieHeader", ""));
         doubaoSessionId = prefs.getString("doubaoSessionId", "").trim();
         doubaoSidGuard = prefs.getString("doubaoSidGuard", "").trim();
         doubaoUidTt = prefs.getString("doubaoUidTt", "").trim();
@@ -482,10 +498,19 @@ public final class BotConfig {
             if (voice.equalsIgnoreCase(DOUBAO_TTS_VOICE_IDS[i])) {
                 return DOUBAO_TTS_VOICE_IDS[i];
             }
+            if (i < DOUBAO_TTS_VOICE_ALIASES.length
+                    && voice.equalsIgnoreCase(DOUBAO_TTS_VOICE_ALIASES[i])) {
+                return DOUBAO_TTS_VOICE_IDS[i];
+            }
             String label = DOUBAO_TTS_VOICE_LABELS[i];
             int slash = label.indexOf(" / ");
-            String shortName = slash > 0 ? label.substring(0, slash).trim() : label;
-            if (voice.equalsIgnoreCase(label) || voice.equalsIgnoreCase(shortName)) {
+            String alias = slash > 0 ? label.substring(0, slash).trim() : label;
+            String rest = slash > 0 ? label.substring(slash + 3).trim() : label;
+            int secondSlash = rest.indexOf(" / ");
+            String shortName = secondSlash > 0 ? rest.substring(0, secondSlash).trim() : rest;
+            if (voice.equalsIgnoreCase(label)
+                    || voice.equalsIgnoreCase(alias)
+                    || voice.equalsIgnoreCase(shortName)) {
                 return DOUBAO_TTS_VOICE_IDS[i];
             }
         }
@@ -493,10 +518,56 @@ public final class BotConfig {
     }
 
     public String doubaoCookie() {
+        if (!doubaoCookieHeader.isEmpty()) {
+            return doubaoCookieHeader;
+        }
         if (doubaoSessionId.isEmpty() || doubaoSidGuard.isEmpty() || doubaoUidTt.isEmpty()) {
             return "";
         }
         return "sessionid=" + doubaoSessionId + "; sid_guard=" + doubaoSidGuard + "; uid_tt=" + doubaoUidTt;
+    }
+
+    public static String normalizeDoubaoCookieHeader(String value) {
+        String cookie = value == null ? "" : value.trim();
+        if (cookie.startsWith("[")) {
+            String parsed = doubaoCookieFromJsonExport(cookie);
+            if (!parsed.isEmpty()) {
+                return parsed;
+            }
+        }
+        if (cookie.regionMatches(true, 0, "cookie:", 0, "cookie:".length())) {
+            cookie = cookie.substring("cookie:".length()).trim();
+        }
+        cookie = cookie.replace('\r', ' ').replace('\n', ' ').trim();
+        while (cookie.contains("  ")) {
+            cookie = cookie.replace("  ", " ");
+        }
+        return cookie;
+    }
+
+    private static String doubaoCookieFromJsonExport(String value) {
+        try {
+            JSONArray array = new JSONArray(value);
+            StringBuilder out = new StringBuilder(value.length());
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String name = item.optString("name", "").trim();
+                String cookieValue = item.optString("value", "");
+                if (name.isEmpty() || cookieValue.isEmpty()) {
+                    continue;
+                }
+                if (out.length() > 0) {
+                    out.append("; ");
+                }
+                out.append(name).append('=').append(cookieValue);
+            }
+            return out.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     public static String normalizeMimoTtsVoice(String value) {

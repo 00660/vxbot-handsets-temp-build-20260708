@@ -1,6 +1,7 @@
 package com.vxbot.wechatbot;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.SystemClock;
 
 import org.json.JSONObject;
@@ -59,17 +60,18 @@ final class DoubaoWebTtsClient {
                 .callTimeout(waitMs + 5000L, TimeUnit.MILLISECONDS)
                 .build();
         Request request = new Request.Builder()
-                .url(buildUrl(config))
+                .url(buildUrl(context, config))
                 .addHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                 .addHeader("Cache-Control", "no-cache")
                 .addHeader("Pragma", "no-cache")
                 .addHeader("Origin", "https://www.doubao.com")
-                .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36 VXBotWechatBot/0.1")
+                .addHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .addHeader("Cookie", cookie)
                 .build();
         BotLog.i(context, "tts.doubao.start", "reason=" + reason
                 + " speaker=" + (config == null ? BotConfig.DEFAULT_DOUBAO_TTS_VOICE : config.doubaoTtsVoice)
                 + " speed=" + (config == null ? BotConfig.DEFAULT_TTS_SPEED : BotConfig.normalizeTtsSpeed(config.ttsSpeed))
+                + " cookieMode=" + (config != null && !config.doubaoCookieHeader.isEmpty() ? "full" : "triple")
                 + " length=" + payload.length());
         WebSocket socket = client.newWebSocket(request, new WebSocketListener() {
             @Override
@@ -125,7 +127,7 @@ final class DoubaoWebTtsClient {
                 if (!dir.isDirectory() && !dir.mkdirs()) {
                     throw new IllegalStateException("mkdir failed: " + dir.getAbsolutePath());
                 }
-                File file = new File(dir, "vxbot-doubao-tts-" + SystemClock.uptimeMillis() + ".mp3");
+                File file = new File(dir, "vxbot-doubao-tts-" + SystemClock.uptimeMillis() + ".aac");
                 try (FileOutputStream out = new FileOutputStream(file)) {
                     out.write(bytes);
                 }
@@ -185,10 +187,11 @@ final class DoubaoWebTtsClient {
         }
     }
 
-    private static String buildUrl(BotConfig config) {
+    private static String buildUrl(Context context, BotConfig config) {
+        DoubaoFingerprint fingerprint = loadFingerprint(context);
         Map<String, String> params = new LinkedHashMap<>();
         params.put("speaker", config == null ? BotConfig.DEFAULT_DOUBAO_TTS_VOICE : config.doubaoTtsVoice);
-        params.put("format", "mp3");
+        params.put("format", "aac");
         params.put("speech_rate", String.valueOf(toDoubaoRate(config == null ? BotConfig.DEFAULT_TTS_SPEED : config.ttsSpeed)));
         params.put("pitch", "0");
         params.put("version_code", "20800");
@@ -197,11 +200,10 @@ final class DoubaoWebTtsClient {
         params.put("aid", "497858");
         params.put("real_aid", "497858");
         params.put("pkg_type", "release_version");
-        String webId = randomWebId();
-        params.put("device_id", randomWebId());
+        params.put("device_id", fingerprint.deviceId);
         params.put("pc_version", "2.46.3");
-        params.put("web_id", webId);
-        params.put("tea_uuid", webId);
+        params.put("web_id", fingerprint.webId);
+        params.put("tea_uuid", fingerprint.webId);
         params.put("region", "");
         params.put("sys_region", "");
         params.put("samantha_web", "1");
@@ -219,6 +221,32 @@ final class DoubaoWebTtsClient {
         return url.toString();
     }
 
+    private static DoubaoFingerprint loadFingerprint(Context context) {
+        SharedPreferences prefs = BotConfig.prefs(context);
+        String deviceId = prefs.getString("doubaoDeviceId", "");
+        String webId = prefs.getString("doubaoWebId", "");
+        boolean changed = false;
+        if (!isDoubaoId(deviceId)) {
+            deviceId = randomWebId();
+            changed = true;
+        }
+        if (!isDoubaoId(webId)) {
+            webId = randomWebId();
+            changed = true;
+        }
+        if (changed) {
+            prefs.edit()
+                    .putString("doubaoDeviceId", deviceId)
+                    .putString("doubaoWebId", webId)
+                    .apply();
+        }
+        return new DoubaoFingerprint(deviceId, webId);
+    }
+
+    private static boolean isDoubaoId(String value) {
+        return value != null && value.matches("7[0-9]{18}");
+    }
+
     private static int toDoubaoRate(float speed) {
         float normalized = BotConfig.normalizeTtsSpeed(speed);
         return Math.max(-100, Math.min(100, Math.round((normalized - 1.0f) * 100.0f)));
@@ -230,6 +258,16 @@ final class DoubaoWebTtsClient {
             offset = Math.floorMod(RANDOM.nextLong(), RANDOM_ID_RANGE);
         }
         return Long.toString(RANDOM_ID_BASE + offset);
+    }
+
+    private static final class DoubaoFingerprint {
+        final String deviceId;
+        final String webId;
+
+        DoubaoFingerprint(String deviceId, String webId) {
+            this.deviceId = deviceId;
+            this.webId = webId;
+        }
     }
 
     private static String jsonEvent(String event, String text) {

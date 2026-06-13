@@ -143,6 +143,7 @@ public final class VoiceDemoService extends Service {
             if (press == null) {
                 throw new IllegalStateException("WeChat voice press point not confirmed");
             }
+            delayAfterPressBeforePlayback(intent, "system-tts");
             speakSystemTts(intent, text);
         } finally {
             if (press != null) {
@@ -400,6 +401,7 @@ public final class VoiceDemoService extends Service {
             if (press == null) {
                 throw new IllegalStateException("WeChat voice press point not confirmed");
             }
+            delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
             player.start();
             while (player.isPlaying()) {
@@ -414,6 +416,15 @@ public final class VoiceDemoService extends Service {
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, oldVolume, 0);
             }
         }
+    }
+
+    private void delayAfterPressBeforePlayback(Intent intent, String reason) {
+        long delayMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
+        if (delayMs <= 0) {
+            return;
+        }
+        BotLog.i(this, "voice.demo.preplay.delay", "reason=" + reason + " delayMs=" + delayMs);
+        SystemClock.sleep(delayMs);
     }
 
     private void delayBeforeRelease(Intent intent, String reason) {

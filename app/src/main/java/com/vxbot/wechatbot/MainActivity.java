@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_EX_PHOTO = 6605;
     private static final int REQ_EX_SOURCE_IMAGE = 6606;
     private static final int REQ_EX_SOURCE_FILE = 6607;
+    private static final int REQ_DOUBAO_COOKIE_FILE = 6608;
     private static final int BG = 0xFFF6F8FB;
     private static final int INK = 0xFF182033;
     private static final int MUTED = 0xFF5E6B82;
@@ -88,9 +89,13 @@ public final class MainActivity extends Activity {
     private EditText paymentCallbackSecret;
     private EditText paymentCallbackTimeoutMs;
     private Spinner ttsProvider;
+    private LinearLayout qwenTtsConfigGroup;
+    private LinearLayout doubaoTtsConfigGroup;
+    private LinearLayout mimoTtsConfigGroup;
     private Spinner ttsVoice;
     private EditText ttsSpeed;
     private Spinner doubaoTtsVoice;
+    private TextView doubaoCookieInfo;
     private EditText doubaoSessionId;
     private EditText doubaoSidGuard;
     private EditText doubaoUidTt;
@@ -364,17 +369,37 @@ public final class MainActivity extends Activity {
         enableWeather = switchRow(featuresPage, "天气查询");
         enableVideoParse = switchRow(featuresPage, "短视频/图集解析");
         ttsProvider = spinner(featuresPage, "TTS 引擎", BotConfig.TTS_PROVIDER_LABELS);
-        ttsVoice = spinner(featuresPage, "千问 TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
-        ttsSpeed = edit(featuresPage, "TTS 语速倍率 0.5-2.0", "1.0", false);
-        doubaoTtsVoice = spinner(featuresPage, "豆包 TTS 语音角色", BotConfig.DOUBAO_TTS_VOICE_LABELS);
-        doubaoSessionId = edit(featuresPage, "豆包 sessionid", "", false);
-        doubaoSidGuard = edit(featuresPage, "豆包 sid_guard", "", false);
-        doubaoUidTt = edit(featuresPage, "豆包 uid_tt", "", false);
-        mimoTtsVoice = spinner(featuresPage, "MiMo TTS 语音角色", BotConfig.MIMO_TTS_VOICE_LABELS);
-        mimoTtsEndpoint = edit(featuresPage, "MiMo TTS 接口", BotConfig.DEFAULT_MIMO_TTS_ENDPOINT, false);
-        mimoTtsApiKey = edit(featuresPage, "MiMo API Key", "", false);
-        mimoNaturalLanguageControl = edit(featuresPage, "MiMo 自然语言控制", BotConfig.DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL, true);
-        mimoAudioTagControl = edit(featuresPage, "MiMo 音频标签控制", BotConfig.DEFAULT_MIMO_AUDIO_TAG_CONTROL, false);
+        ttsProvider.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateTtsConfigVisibility();
+                refreshStatus();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        qwenTtsConfigGroup = configGroup(featuresPage);
+        ttsVoice = spinner(qwenTtsConfigGroup, "千问 TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
+        ttsSpeed = edit(qwenTtsConfigGroup, "TTS 语速倍率 0.5-2.0", "1.0", false);
+        doubaoTtsConfigGroup = configGroup(featuresPage);
+        doubaoTtsVoice = spinner(doubaoTtsConfigGroup, "豆包 TTS 语音角色", BotConfig.DOUBAO_TTS_VOICE_LABELS);
+        doubaoCookieInfo = text("未导入完整 Cookie，留空时使用下面三段。", 13, MUTED, Typeface.NORMAL);
+        doubaoCookieInfo.setPadding(0, dp(8), 0, dp(6));
+        doubaoTtsConfigGroup.addView(doubaoCookieInfo);
+        doubaoTtsConfigGroup.addView(buttonRow(
+                button("导入 Cookie 文件", v -> chooseDoubaoCookieFile()),
+                button("清除完整 Cookie", v -> clearDoubaoCookieHeader())));
+        doubaoSessionId = edit(doubaoTtsConfigGroup, "豆包 sessionid", "", false);
+        doubaoSidGuard = edit(doubaoTtsConfigGroup, "豆包 sid_guard", "", false);
+        doubaoUidTt = edit(doubaoTtsConfigGroup, "豆包 uid_tt", "", false);
+        mimoTtsConfigGroup = configGroup(featuresPage);
+        mimoTtsVoice = spinner(mimoTtsConfigGroup, "MiMo TTS 语音角色", BotConfig.MIMO_TTS_VOICE_LABELS);
+        mimoTtsEndpoint = edit(mimoTtsConfigGroup, "MiMo TTS 接口", BotConfig.DEFAULT_MIMO_TTS_ENDPOINT, false);
+        mimoTtsApiKey = edit(mimoTtsConfigGroup, "MiMo API Key", "", false);
+        mimoNaturalLanguageControl = edit(mimoTtsConfigGroup, "MiMo 自然语言控制", BotConfig.DEFAULT_MIMO_NATURAL_LANGUAGE_CONTROL, true);
+        mimoAudioTagControl = edit(mimoTtsConfigGroup, "MiMo 音频标签控制", BotConfig.DEFAULT_MIMO_AUDIO_TAG_CONTROL, false);
         featuresPage.addView(buttonRow(button("试听 TTS", v -> previewTts())));
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
@@ -525,6 +550,7 @@ public final class MainActivity extends Activity {
             ttsVoice.setSelection(ttsVoiceIndex(config.ttsVoice));
             ttsSpeed.setText(String.valueOf(config.ttsSpeed));
             doubaoTtsVoice.setSelection(doubaoTtsVoiceIndex(config.doubaoTtsVoice));
+            refreshDoubaoCookieInfo(config.doubaoCookieHeader);
             doubaoSessionId.setText(config.doubaoSessionId);
             doubaoSidGuard.setText(config.doubaoSidGuard);
             doubaoUidTt.setText(config.doubaoUidTt);
@@ -533,6 +559,7 @@ public final class MainActivity extends Activity {
             mimoTtsApiKey.setText(config.mimoTtsApiKey);
             mimoNaturalLanguageControl.setText(config.mimoNaturalLanguageControl);
             mimoAudioTagControl.setText(config.mimoAudioTagControl);
+            updateTtsConfigVisibility();
             hsPort.setText(String.valueOf(config.hsPort));
             replyTimeoutMs.setText(String.valueOf(config.replyTimeoutMs));
             imageTimeoutMs.setText(String.valueOf(config.imageTimeoutMs));
@@ -750,7 +777,68 @@ public final class MainActivity extends Activity {
             saveExSource(data.getData(), "screenshot");
         } else if (requestCode == REQ_EX_SOURCE_FILE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             saveExSource(data.getData(), "file");
+        } else if (requestCode == REQ_DOUBAO_COOKIE_FILE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            importDoubaoCookieFile(data.getData());
         }
+    }
+
+    private void chooseDoubaoCookieFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("*/*");
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, REQ_DOUBAO_COOKIE_FILE);
+        } catch (Exception e) {
+            Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+            fallback.setType("*/*");
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivityForResult(fallback, REQ_DOUBAO_COOKIE_FILE);
+        }
+    }
+
+    private void importDoubaoCookieFile(Uri uri) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new IllegalStateException("无法读取 Cookie 文件");
+            }
+            byte[] buf = new byte[8192];
+            StringBuilder raw = new StringBuilder();
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                raw.append(new String(buf, 0, n, java.nio.charset.StandardCharsets.UTF_8));
+            }
+            String cookie = BotConfig.normalizeDoubaoCookieHeader(raw.toString());
+            if (cookie.isEmpty() || !cookie.contains("=")) {
+                throw new IllegalStateException("Cookie 文件未解析到 name=value");
+            }
+            BotConfig.prefs(this).edit().putString("doubaoCookieHeader", cookie).apply();
+            refreshDoubaoCookieInfo(cookie);
+            BotLog.i(this, "tts.doubao.cookie.import", "已导入豆包 Cookie 文件 fields=" + cookie.split(";").length);
+            toast("豆包 Cookie 已导入");
+        } catch (Exception e) {
+            BotLog.e(this, "tts.doubao.cookie.import.fail", e.getMessage());
+            toast("Cookie 导入失败，看日志");
+        }
+    }
+
+    private void clearDoubaoCookieHeader() {
+        BotConfig.prefs(this).edit().putString("doubaoCookieHeader", "").apply();
+        refreshDoubaoCookieInfo("");
+        BotLog.i(this, "tts.doubao.cookie.clear", "已清除豆包完整 Cookie Header");
+        toast("豆包完整 Cookie 已清除");
+    }
+
+    private void refreshDoubaoCookieInfo(String cookie) {
+        if (doubaoCookieInfo == null) {
+            return;
+        }
+        String normalized = BotConfig.normalizeDoubaoCookieHeader(cookie);
+        if (normalized.isEmpty()) {
+            doubaoCookieInfo.setText("未导入完整 Cookie，留空时使用下面三段。");
+            return;
+        }
+        doubaoCookieInfo.setText("已导入完整 Cookie：" + normalized.split(";").length + " 个字段；界面不显示内容。");
     }
 
     private void savePersonaPhoto(Uri uri) {
@@ -1349,6 +1437,32 @@ public final class MainActivity extends Activity {
         });
         root.addView(spinner, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return spinner;
+    }
+
+    private LinearLayout configGroup(LinearLayout root) {
+        LinearLayout group = new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setPadding(dp(12), dp(8), dp(12), dp(12));
+        group.setBackground(round(Color.rgb(248, 250, 252), dp(12), 1, Color.rgb(226, 232, 240)));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(8), 0, dp(8));
+        root.addView(group, lp);
+        return group;
+    }
+
+    private void updateTtsConfigVisibility() {
+        String provider = selectedTtsProviderId();
+        if (qwenTtsConfigGroup != null) {
+            qwenTtsConfigGroup.setVisibility(BotConfig.TTS_PROVIDER_QWEN.equals(provider) ? View.VISIBLE : View.GONE);
+        }
+        if (doubaoTtsConfigGroup != null) {
+            doubaoTtsConfigGroup.setVisibility(BotConfig.TTS_PROVIDER_DOUBAO.equals(provider) ? View.VISIBLE : View.GONE);
+        }
+        if (mimoTtsConfigGroup != null) {
+            mimoTtsConfigGroup.setVisibility(BotConfig.TTS_PROVIDER_MIMO.equals(provider) ? View.VISIBLE : View.GONE);
+        }
     }
 
     private int ttsVoiceIndex(String voice) {

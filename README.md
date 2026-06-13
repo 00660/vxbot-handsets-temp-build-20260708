@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`88`
-- `versionName`：`0.1.87-tools-tts`
+- `versionCode`：`94`
+- `versionName`：`0.1.93-doubao-cookie-file-only`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -22,7 +22,7 @@
 - 名字匹配归一化：白名单、续聊发起人、喷子/恋人目标、OCR 会话名、图片/视频分享目标统一过滤括号表情、真实 emoji 和非文字符号。
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
-- 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持千问/豆包/MiMo TTS 下拉切换、发音人和语速配置；豆包为手动三段 Cookie 实验模式，MiMo 使用 `api-key` 调用小米 `mimo-v2.5-tts`，失败自动回退千问。
+- 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持千问/豆包/MiMo TTS 下拉切换、发音人和语速配置；豆包支持浏览器 Cookie JSON 文件或完整 Cookie 文件导入，界面不展示 Cookie 原文，三段 Cookie 仅作兜底，MiMo 使用 `api-key` 调用小米 `mimo-v2.5-tts`，失败自动回退千问。
 - TTS 试听：功能页提供 `试听 TTS`，按当前 provider、角色、语速或控制参数生成一句测试语并在 APK 内播放。
 - 输入态缓存：默认按每个白名单群自动识别文字/语音/输入法弹出态并缓存；语音真正按下前每次实时 OCR 当前屏幕的 `按住` 或 `说话` 区域，不使用缓存按压坐标。
 - 图片自拍：支持人物参考图、清凉/泳装风格参考图、前置/后置话术、图片发送；`几张自拍` 默认串行生成 3 张，`2-7张自拍` 按数量排队，`七情自拍/喜怒哀乐悲恐惊自拍` 串行生成 7 张不同情绪自拍。
@@ -132,6 +132,12 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-13：豆包 TTS Cookie 支持浏览器导出的 JSON 数组文件导入。配置页新增“导入 Cookie 文件”按钮，导入后将 JSON 内所有 `name/value` 转成完整 Cookie Header 保存；已用用户提供的浏览器导出 Cookie 转换后跑通原始 `doubao-tts.zip` 客户端，生成 `taozi.aac` 大小 `10639` 字节。
+- 2026-06-13：豆包 TTS 增加完整 Cookie Header 输入，完整 Cookie 优先，三段 `sessionid/sid_guard/uid_tt` 仅作兜底；同时把豆包 `device_id/web_id` 改为 SharedPreferences 持久化，首次生成后长期复用，避免每次请求随机设备指纹触发风控。
+- 2026-06-13：豆包 TTS 角色配置按 `doubao-tts.zip` 原客户端 `SPEAKERS` 映射修正，面板显示 `taozi/shuangkuai/tianmei/qingche/yangguang/chenwen/rap/en_female/en_male` alias，保存时仍写完整 speaker id；旧配置若填 alias 也能正确归一化。当前实测手机里的三段 Cookie 调原客户端返回 `710022002 block`，这是服务端认证/频率/IP 阻断，不是单个角色 ID 拼写错误。
+- 2026-06-13：TTS 配置 UI 改为按 provider 动态显示，只展示当前选择的千问/豆包/MiMo 配置表单；语音发送改为按住微信说话后先等待 500ms 再播放 TTS，避免漏开头；长回复会按微信 60 秒语音限制估算切分，多段之间等待 800ms 后连续发送。
+- 2026-06-13：修复豆包 TTS 握手失败。旧 APK 使用 Android UA 和 mp3 参数会让豆包 WSS 返回 HTTP 200 而不是 101；已按本地跑通的 `doubao-tts.zip` 客户端对齐为 Mac Chrome UA、aac 输出和同款参数，失败仍回退千问。
+- 2026-06-13：本次修改前本地备份目录：`.backup-20260613-074857-doubao-websocket-fix`、`.backup-20260613-075039-doubao-version-handoff`、`.backup-20260613-080253-tts-ui-voice-split`、`.backup-20260613-083057-doubao-voice-alias`、`.backup-20260613-085421-doubao-persistent-fingerprint`。
 - 2026-06-11：修正图片自拍 prompt 拼接，移除发给图片上游的内部“提示词整理器”身份头、`用户原话：自拍` 字段和单条固定场景硬约束；自拍场景改为多地点候选策略，避免固定室内/客厅背景。
 - 2026-06-11：修正语音输入态坐标重建。会话已记录为语音态但缺少 `按住说话` 坐标时，先多轮 OCR 扫描并缓存坐标；只有确认当前是文字态才允许切换，避免在已处于语音态时误点左下角切换按钮。
 - 2026-06-11：修正输入态缓存与现场不一致导致反向切换的问题。发送文字/语音前先用 OCR 判断当前底部输入态，若现场已是目标态则更新该群缓存并跳过切换。
@@ -142,11 +148,13 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 2026-06-12：修复 B 站解析 `cid` 溢出。B 站新视频 `cid` 可能超过 32 位，Java `optInt()` 会把 `39010699439` 溢出成错误值，导致播放接口返回“啥都木有”；现改为字符串读取并写入 `video.bili.ids` 日志。
 - 2026-06-12：修复群名/人名带表情导致 OCR 和通知匹配不一致。新增 `NameNormalizer`，比较前只保留文字和数字，过滤 `[表情]`、`(表情)`、真实 emoji、零宽连接符和其他符号；白名单、续聊发起人、喷子/恋人目标、会话标题、群发搜索、图片/视频分享目标均复用同一规则。
 - 2026-06-12：新增批量自拍串行队列。`几张/多张自拍` 默认 3 张，`2-7张自拍` 按数量生成，`七情/7情/喜怒哀乐悲恐惊自拍` 拆成 7 个情绪子任务；一次请求只发一次前置和一次后置，中间图片按 `BotService` 单队列串行生成并分享。
-- 2026-06-12：新增豆包网页 TTS 实验 provider。面板可在千问 TTS / 豆包 TTS 间下拉切换；豆包配置使用 `sessionid`、`sid_guard`、`uid_tt` 三个输入框和独立发音人下拉框，按网页 WSS 协议生成 MP3，失败回退千问。
+- 2026-06-12：新增豆包网页 TTS 实验 provider。面板可在千问 TTS / 豆包 TTS 间下拉切换；豆包配置使用 `sessionid`、`sid_guard`、`uid_tt` 三个输入框和独立发音人下拉框，按网页 WSS 协议生成 AAC，失败回退千问。
 - 2026-06-12：新增体育赛事和本地工具分流。体育查询默认走 ESPN scoreboard，覆盖世界杯、足球联赛和 NBA/WNBA/NFL/NHL/MLB；简单计算、单位换算、北京时间查询在 APK 内处理。带“分析/预测/谁赢”等语义时，将实时赛事结果送给上游生成分析。
 - 2026-06-12：新增 MiMo TTS provider 和试听按钮。MiMo 按 `manymuch/mimo_tts` 的 `chat.completions + audio.data(base64 WAV)` 方式接入，面板可填 endpoint、API Key、预置声音、自然语言控制、音频标签控制；`试听 TTS` 会直接生成并播放测试音频。
 - 2026-06-13：修复虚拟币兜底错误。已知币种仍优先用 Yahoo 映射；未知代币改走 CoinGecko search + simple price；只有泛问“虚拟币/币圈”才返回 BTC/ETH 概览，查不到具体代币时明确提示未识别。
 - 2026-06-13：补齐个股名称搜索。A 股、港股和美股名称先走腾讯 smartbox 解析市场与代码；A/HK 行情走腾讯 `qt.gtimg.cn`，US 搜索结果转 Yahoo symbol 查询，避免“个股名无法查询”时退成市场概览。
+- 2026-06-13：修复豆包 TTS 握手失败。旧 APK 使用 Android UA 和 `mp3` 参数会让豆包 WSS 返回 HTTP 200 而不是 101；已按本地跑通的 `doubao-tts.zip` 客户端对齐为 Mac Chrome UA、`aac` 输出和同款参数，失败仍回退千问。
+- 2026-06-13：豆包完整 Cookie UI 改为只支持文件导入，不再显示完整 Cookie 多行输入框，避免几百行内容占屏和复制丢字段；保存配置不会覆盖已导入的完整 Cookie。
 - 2026-06-13：本次修改前本地备份目录：`.backup-20260612-234119-tts-sports-mimo-preview`、`.backup-20260613-001717-crypto-dynamic-lookup`、`.backup-20260613-005435-realtime-compact-money`、`.backup-20260613-010139-readme-install-handoff`；本次本地验证执行 `:app:assembleDebug`，结果 `BUILD SUCCESSFUL`；已安装到 `192.168.2.89`，版本 `versionCode=88` / `versionName=0.1.87-tools-tts`。
 - 2026-06-11：新增 Release 下载页发布、无 root 低亮防熄屏开关、菜单/操作手册指令、屏幕最暗/最亮指令、续聊控制人白名单、自拍气质和北京时间实景约束。
 - 本次修改前本地备份目录：`.backup-20260611-171112`、`.backup-20260611-172627-followup`、`.backup-20260611-173501-controller-whitelist`、`.backup-20260611-182856-image-prompt`、`.backup-20260611-183913-voice-mode-rebuild`、`.backup-20260611-185336-version-handoff`、`.backup-20260611-191702-input-mode-current-state`、`.backup-20260611-193915-inputmode-visual-ime`、`.backup-20260611-203307-inputmode-sync-switch`、`.backup-20260611-211851-realtime-voice-press-ocr`、`.backup-20260612-075746-video-parse-flow`、`.backup-20260612-084957-video-inline-parser`、`.backup-20260612-102704-bilibili-playurl-fix`、`.backup-20260612-203115-emoji-name-normalize`、`.backup-20260612-213125-selfie-batch-queue`。备份目录仅供本机回滚，不提交到仓库。
@@ -160,5 +168,5 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - 语音输入态按白名单群独立缓存；默认不要用语音开关批量覆盖缓存。只有明确打开“语音开关批量同步输入态”时，才按普通聊天/前置/后置语音开关批量写入白名单群输入态。语音按压点必须发送前实时识别，不能复用旧坐标。
 - 短视频解析必须保持 APK 内置，不依赖 Docker、3001 或局域网解析服务。视频和图集分享复用图片分享链路，改分享逻辑前必须同时回归图片和视频。
 - 图片、表情、分析、群发、TTS、普通聊天共用 `BotService` 单队列，避免多个并发链路抢微信前台。
-- 豆包 TTS 不做短信登录、不自动抓网页 token；只读取用户手动填入的三段 Cookie。若日志出现 Cookie 失效或风控，重新从已登录浏览器复制三段值。
+- 豆包 TTS 不做短信登录、不自动抓网页 token；优先读取“导入 Cookie 文件”保存的完整 Cookie Header，三段 Cookie 只作兜底。若日志出现 Cookie 失效或风控，重新从已登录浏览器导出 Cookie 文件后导入。
 - MiMo TTS 不走网页登录态，使用小米 API 平台 `api-key`；返回结构按 `choices[0].message.audio.data` 解析 base64 WAV，若接口变更先看 `tts.mimo.*` 日志。
