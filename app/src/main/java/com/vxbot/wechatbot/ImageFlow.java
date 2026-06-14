@@ -26,6 +26,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
@@ -44,6 +45,8 @@ public final class ImageFlow {
     private static final Random RANDOM = new Random();
     private static final long IMAGE_CONTEXT_TTL_MS = 15 * 60 * 1000L;
     private static final int MAX_BATCH_SELFIES = 7;
+    private static final long QUOTED_IMAGE_OPEN_SETTLE_MS = 800L;
+    private static final long QUOTED_IMAGE_AFTER_CAPTURE_WAIT_MS = 300L;
     private static final Map<String, ImageMemory> IMAGE_CONTEXTS = new HashMap<>();
 
     public boolean handle(Context context, BotConfig config, WxMessage message, SessionStore store, WechatDriver driver) {
@@ -112,7 +115,7 @@ public final class ImageFlow {
                         + " revision=" + revision + " incomingReference=" + incomingReference
                         + " sourceImages=" + sourceImages.size()
                         + " batchIndex=" + (i + 1) + "/" + imageRequests.size());
-                String image = requestImage(context, config, prompt, coolStyle, selfie, sourceImages);
+                String image = requestImage(context, config, prompt, coolStyle, selfie, incomingReference, sourceImages);
                 File file = saveImage(context, image);
                 rememberImageMemory(message.sessionName, itemRequest, selfie ? "persona_selfie" : "general", file, image);
                 BotLog.i(context, "image.save", "图片已保存 path=" + file.getAbsolutePath()
@@ -228,10 +231,18 @@ public final class ImageFlow {
         return prompt.toString();
     }
 
-    private String requestImage(Context context, BotConfig config, String prompt, boolean coolStyle, boolean selfie, List<ReferenceImage> sourceImages) throws Exception {
+    private String requestImage(Context context, BotConfig config, String prompt, boolean coolStyle, boolean selfie, boolean incomingReference, List<ReferenceImage> sourceImages) throws Exception {
         List<ReferenceImage> refs = new ArrayList<>();
         if (sourceImages != null) {
             refs.addAll(sourceImages);
+        }
+        if (incomingReference && !refs.isEmpty()) {
+            List<ReferenceImage> currentOnly = new ArrayList<>();
+            currentOnly.add(refs.get(0));
+            BotLog.i(context, "image.reference.only", "引用图请求只上传当前引用截图，避免后端误取人物/风格/历史底图 count="
+                    + refs.size() + " uploadCount=1 bytes=" + refs.get(0).bytes.length
+                    + " sha256=" + sha256Short(refs.get(0).bytes));
+            return requestEditedImage(context, config, prompt, currentOnly);
         }
         if (selfie) {
             ReferenceImage persona = loadFileReference(config.selfieReferencePhotoPath(), "persona_reference.png");
@@ -255,7 +266,7 @@ public final class ImageFlow {
             }
         }
         if (!refs.isEmpty()) {
-            return requestEditedImage(config, prompt, refs);
+            return requestEditedImage(context, config, prompt, refs);
         }
         if (coolStyle) {
             BotLog.w(context, "image.cool.ref.missing", "清凉/比基尼请求未找到上传风格底图或 APK raw/cool_style_reference，降级文生图");
@@ -290,9 +301,15 @@ public final class ImageFlow {
         return parseImage(body, config.imageEndpoint);
     }
 
-    private String requestEditedImage(BotConfig config, String prompt, List<ReferenceImage> images) throws Exception {
+    private String requestEditedImage(Context context, BotConfig config, String prompt, List<ReferenceImage> images) throws Exception {
         String endpoint = config.imageEndpoint.replaceAll("/+$", "") + "/images/edits";
         String boundary = "vxbot-apk-" + System.currentTimeMillis();
+        BotLog.i(context, "image.edit.request", "请求图片编辑接口 endpoint=" + endpoint
+                + " model=" + config.imageModel
+                + " size=" + normalizeSize(config.imageSize)
+                + " imageCount=" + images.size()
+                + " images=" + referenceSummary(images)
+                + " promptLength=" + prompt.length());
         HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");
         conn.setConnectTimeout(15000);
@@ -323,6 +340,38 @@ public final class ImageFlow {
             throw new IllegalStateException("图片编辑上游 HTTP " + code + " " + trim(body));
         }
         return parseImage(body, config.imageEndpoint);
+    }
+
+    private static String referenceSummary(List<ReferenceImage> images) {
+        StringBuilder out = new StringBuilder();
+        for (ReferenceImage image : images) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(image.filename)
+                    .append(':')
+                    .append(image.bytes == null ? 0 : image.bytes.length)
+                    .append(':')
+                    .append(sha256Short(image.bytes));
+        }
+        return out.toString();
+    }
+
+    private static String sha256Short(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "empty";
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(bytes);
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < Math.min(8, hash.length); i++) {
+                out.append(String.format(Locale.ROOT, "%02x", hash[i] & 0xff));
+            }
+            return out.toString();
+        } catch (Exception e) {
+            return "sha256_error";
+        }
     }
 
     private static void writeFormField(OutputStream out, String boundary, String name, String value) throws Exception {
@@ -1318,7 +1367,11 @@ public final class ImageFlow {
                 return null;
             }
             try {
-                return saveCurrentPreviewReference(context, hs, label + "_current_preview");
+                return saveCurrentPreviewReferenceWithRetry(
+                        context,
+                        hs,
+                        label + "_current_preview",
+                        3);
             } finally {
                 closeWechatImagePreview(context, hs, label + "_current_preview");
             }
@@ -1328,7 +1381,8 @@ public final class ImageFlow {
             BotLog.w(context, "image.reference.quote.missing", "未找到群聊引用灰卡 label=" + label);
             return null;
         }
-        long waitMs = Math.max(1200L, config.quotedImageOpenDelayMs) + 2200L;
+        long afterTapWaitMs = Math.max(QUOTED_IMAGE_OPEN_SETTLE_MS, config.quotedImageOpenDelayMs);
+        long previewWaitMs = Math.max(1600L, config.wechatChatOcrPollMs * 4L);
         for (int attempt = 1; attempt <= 2; attempt++) {
             boolean opened = false;
             String topAfterTap = "";
@@ -1336,9 +1390,14 @@ public final class ImageFlow {
                 BotLog.i(context, "image.reference.quote.tap", "点击最新引用灰卡 label=" + label
                         + " attempt=" + attempt
                         + " rect=" + card.rect.flattenToString() + " center=" + card.centerX + "," + card.centerY
-                        + " waitMs=" + waitMs);
+                        + " afterTapWaitMs=" + afterTapWaitMs);
                 hs.tap(card.centerX, card.centerY);
-                topAfterTap = waitForWechatImagePreview(hs, waitMs, 250L);
+                BotLog.i(context, "image.reference.quote.after_tap_wait", "点开引用缩略图后等待再截图 label=" + label
+                        + " attempt=" + attempt
+                        + " waitMs=" + afterTapWaitMs
+                        + " rect=" + card.rect.flattenToString());
+                SystemClock.sleep(afterTapWaitMs);
+                topAfterTap = waitForWechatImagePreview(hs, previewWaitMs, 200L);
                 opened = isWechatImagePreview(topAfterTap);
                 if (!opened) {
                     BotLog.w(context, "image.reference.quote.open.timeout", "引用灰卡点击后未进入图片预览页 label=" + label
@@ -1348,8 +1407,11 @@ public final class ImageFlow {
                     SystemClock.sleep(450);
                     continue;
                 }
-                SystemClock.sleep(300);
-                ReferenceImage saved = saveCurrentPreviewReference(context, hs, label + "_quote_card");
+                ReferenceImage saved = saveCurrentPreviewReferenceWithRetry(
+                        context,
+                        hs,
+                        label + "_quote_card",
+                        3);
                 if (saved != null) {
                     BotLog.i(context, "image.reference.saved", "已点开并裁剪群聊引用图 label=" + label
                             + " attempt=" + attempt
@@ -1360,11 +1422,11 @@ public final class ImageFlow {
                 BotLog.w(context, "image.reference.quote.capture.miss", "已进入图片预览页但截图裁剪失败 label=" + label
                         + " attempt=" + attempt
                         + " rect=" + card.rect.flattenToString() + " top=" + topAfterTap);
-                return null;
+                SystemClock.sleep(450);
             } catch (Exception e) {
                 BotLog.w(context, "image.reference.quote.error", "引用灰卡取图异常 label=" + label
                         + " attempt=" + attempt + " error=" + e.getMessage());
-                return null;
+                SystemClock.sleep(450);
             } finally {
                 if (opened) {
                     closeWechatImagePreview(context, hs, label + "_quote_card");
@@ -1385,6 +1447,38 @@ public final class ImageFlow {
             }
         }
         return top;
+    }
+
+    private ReferenceImage saveCurrentPreviewReferenceWithRetry(
+            Context context,
+            HsClient hs,
+            String label,
+            int attempts
+    ) {
+        int safeAttempts = Math.max(1, attempts);
+        for (int attempt = 1; attempt <= safeAttempts; attempt++) {
+            String top = foregroundPackageName(hs);
+            if (!isWechatImagePreview(top)) {
+                BotLog.w(context, "image.reference.preview.wait.not_ready", "预览页未稳定，暂不截图 label="
+                        + label + " attempt=" + attempt + " top=" + top);
+                SystemClock.sleep(250);
+                continue;
+            }
+            BotLog.i(context, "image.reference.preview.capture", "预览页已确认，开始截图 label="
+                    + label + " attempt=" + attempt + " top=" + top);
+            ReferenceImage saved = saveCurrentPreviewReference(context, hs, label + "_try" + attempt);
+            if (saved != null) {
+                BotLog.i(context, "image.reference.preview.after_capture_wait", "引用图截图完成，等待后再返回 label="
+                        + label + " attempt=" + attempt + " waitMs=" + QUOTED_IMAGE_AFTER_CAPTURE_WAIT_MS
+                        + " bytes=" + saved.bytes.length);
+                SystemClock.sleep(QUOTED_IMAGE_AFTER_CAPTURE_WAIT_MS);
+                return saved;
+            }
+            BotLog.w(context, "image.reference.preview.retry", "预览页截图未拿到有效图片，准备重试 label="
+                    + label + " attempt=" + attempt);
+            SystemClock.sleep(250);
+        }
+        return null;
     }
 
     private void closeWechatImagePreview(Context context, HsClient hs, String label) {

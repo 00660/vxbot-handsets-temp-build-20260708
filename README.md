@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`94`
-- `versionName`：`0.1.93-doubao-cookie-file-only`
+- `versionCode`：`103`
+- `versionName`：`0.1.102-quoted-delay-after-tap`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -132,7 +132,16 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-14：同步 GitHub 前已通过 `192.168.2.89:22` 真机核对当前运行 APK：`com.vxbot.wechatbot` 进程在线，`versionCode=103` / `versionName=0.1.102-quoted-delay-after-tap`，与本地源码 `app/build.gradle` 对齐；同步前本地差异备份目录：`.backup-20260614-230703-before-github-sync-v103`。
+- 2026-06-13：引用图取图动作改为固定时序：点击微信引用灰卡缩略图后立即按 `quotedImageOpenDelayMs` 等待，默认和最小值均为 `800ms`，等待结束后才判断预览页并截图；截图成功后固定等待 `300ms` 再执行 Back 返回会话。日志分别为 `image.reference.quote.after_tap_wait`、`image.reference.preview.capture` 和 `image.reference.preview.after_capture_wait`。
+- 2026-06-13：修复引用图请求被后端误取旧图的问题。引用图图生图命中后，上传给图片编辑接口的 multipart 只保留当前引用截图 1 个 `image` 附件，不再同时追加人物参考图、清凉风格图或历史图，避免后端按最后一个/临时文件目录取到旧文件；新增 `image.edit.request` 日志记录 filename、bytes、sha256，方便核对实际上传内容。
+- 2026-06-13：修复引用图偶发“已点开但提示没拿到图”的竞态。`quotedImageOpenDelayMs` 只作用在 `tap` 引用缩略图之后，不再放到截图函数内部或点开前面；截图函数只负责确认预览页、截图、失败短重试，避免一边点开一边马上 Back 导致拿旧截图。
+- 2026-06-13：修复通知栏偶发甩飞到系统控制面板的问题。打开通知前先收起旧通知/控制面板；OCR 发现只有系统控制面板快捷项、没有通知卡片时，不再继续下滑，而是执行 `collapse -> expand-notifications -> 稳定等待 -> 重新 OCR`，最多重试 3 次。
+- 2026-06-13：全屏背景页改为沉浸预览。开启 `全屏背景` 且人物/图片/蒸馏页存在底图时，切换到对应侧标签后右侧内容默认隐藏，左侧标签栏保留；单击右侧背景显示/隐藏右侧内容，长按强制显示右侧内容，上下滑调整右侧内容透明度并保存。豆包三段 `sessionid/sid_guard/uid_tt` 输入框从 UI 删除，只保留 Cookie 文件导入/清除。
+- 2026-06-13：按 `ProxyPin_2026-06-13.har` 里的豆包 `alice/user_voice/recommend` 返回结果，把豆包 TTS 音色表扩展为 60 个最新 `style_id`，旧 `taozi/tianmei/shuangkuai/yangguang/chenwen` 配置自动映射到新音色；豆包音色 UI 从 60 项系统 Spinner 改成“当前音色 + 展开/收起 + 每页 8 个”的分页选择，避免下拉框冲出屏幕。
 - 2026-06-13：豆包 TTS Cookie 支持浏览器导出的 JSON 数组文件导入。配置页新增“导入 Cookie 文件”按钮，导入后将 JSON 内所有 `name/value` 转成完整 Cookie Header 保存；已用用户提供的浏览器导出 Cookie 转换后跑通原始 `doubao-tts.zip` 客户端，生成 `taozi.aac` 大小 `10639` 字节。
+- 2026-06-13：豆包 Cookie 配置按钮改为 `导入` / `清除`，避免按钮文字过长在窄屏上割裂。
+- 2026-06-13：人物、图片、蒸馏预览页增加 `全屏背景` 开关；开启后切到对应侧标签且已有底图时，以该底图作为全屏背景显示。上传状态文案已移除，界面只保留预览图和操作按钮。
 - 2026-06-13：豆包 TTS 增加完整 Cookie Header 输入，完整 Cookie 优先，三段 `sessionid/sid_guard/uid_tt` 仅作兜底；同时把豆包 `device_id/web_id` 改为 SharedPreferences 持久化，首次生成后长期复用，避免每次请求随机设备指纹触发风控。
 - 2026-06-13：豆包 TTS 角色配置按 `doubao-tts.zip` 原客户端 `SPEAKERS` 映射修正，面板显示 `taozi/shuangkuai/tianmei/qingche/yangguang/chenwen/rap/en_female/en_male` alias，保存时仍写完整 speaker id；旧配置若填 alias 也能正确归一化。当前实测手机里的三段 Cookie 调原客户端返回 `710022002 block`，这是服务端认证/频率/IP 阻断，不是单个角色 ID 拼写错误。
 - 2026-06-13：TTS 配置 UI 改为按 provider 动态显示，只展示当前选择的千问/豆包/MiMo 配置表单；语音发送改为按住微信说话后先等待 500ms 再播放 TTS，避免漏开头；长回复会按微信 60 秒语音限制估算切分，多段之间等待 800ms 后连续发送。

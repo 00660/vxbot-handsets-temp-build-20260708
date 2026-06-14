@@ -20,11 +20,13 @@ import android.provider.Settings;
 import android.text.InputType;
 import android.net.Uri;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -54,11 +56,19 @@ public final class MainActivity extends Activity {
     private static final int MUTED = 0xFF5E6B82;
     private static final int NAV = 0xFF0F172A;
     private static final int TEAL = 0xFF0EA5A3;
+    private static final int TAB_PERSONA = 3;
+    private static final int TAB_IMAGE = 4;
+    private static final int TAB_EX = 5;
+    private static final int DOUBAO_VOICE_PAGE_SIZE = 8;
 
     private final List<LinearLayout> pages = new ArrayList<>();
     private final List<TextView> tabs = new ArrayList<>();
     private final ExecutorService uiWorker = Executors.newSingleThreadExecutor();
 
+    private ImageView pageBackgroundImage;
+    private ScrollView railScroll;
+    private ScrollView contentScroll;
+    private TextView mainTitle;
     private EditText botNames;
     private EditText allowedSessions;
     private EditText followUpSenderWhitelist;
@@ -94,11 +104,15 @@ public final class MainActivity extends Activity {
     private LinearLayout mimoTtsConfigGroup;
     private Spinner ttsVoice;
     private EditText ttsSpeed;
-    private Spinner doubaoTtsVoice;
-    private TextView doubaoCookieInfo;
-    private EditText doubaoSessionId;
-    private EditText doubaoSidGuard;
-    private EditText doubaoUidTt;
+    private TextView doubaoVoiceSelected;
+    private TextView doubaoVoicePageInfo;
+    private LinearLayout doubaoVoiceList;
+    private Button doubaoVoiceToggle;
+    private Button doubaoVoicePrev;
+    private Button doubaoVoiceNext;
+    private int doubaoVoiceSelectedIndex;
+    private int doubaoVoicePage;
+    private boolean doubaoVoiceExpanded;
     private Spinner mimoTtsVoice;
     private EditText mimoTtsEndpoint;
     private EditText mimoTtsApiKey;
@@ -151,12 +165,17 @@ public final class MainActivity extends Activity {
     private Switch normalReplyAsVoice;
     private Switch syncInputModeFromVoiceSwitch;
     private Switch dropImageTaskOnError;
+    private Switch fullScreenBackgroundSwitch;
     private Switch lockActiveSender;
     private Switch enableFollowUpWithoutMention;
     private Switch stayInCodexSession;
     private TextView logView;
     private TextView statusView;
     private boolean loadingConfig;
+    private int selectedTabIndex = -1;
+    private boolean fullScreenChromeVisible = false;
+    private float fullScreenPanelAlpha = 0.62f;
+    private float fullScreenTouchDownY;
     private MediaPlayer previewPlayer;
 
     private final BroadcastReceiver logReceiver = new BroadcastReceiver() {
@@ -170,6 +189,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        fullScreenPanelAlpha = clampFloat(BotConfig.prefs(this).getFloat("fullScreenPanelAlpha", fullScreenPanelAlpha), 0.15f, 0.95f);
         buildUi();
         loadConfigIntoUi();
         selectTab(0);
@@ -203,11 +223,26 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(BG);
+        pageBackgroundImage = new ImageView(this);
+        pageBackgroundImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        pageBackgroundImage.setVisibility(View.GONE);
+        pageBackgroundImage.setOnClickListener(v -> toggleFullScreenChrome());
+        pageBackgroundImage.setOnLongClickListener(v -> {
+            showFullScreenChrome();
+            return true;
+        });
+        pageBackgroundImage.setOnTouchListener((v, event) -> handleFullScreenTouch(event));
+        root.addView(pageBackgroundImage, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.HORIZONTAL);
-        shell.setBackgroundColor(BG);
+        shell.setBackgroundColor(Color.TRANSPARENT);
 
-        ScrollView railScroll = new ScrollView(this);
+        railScroll = new ScrollView(this);
         railScroll.setFillViewport(true);
         railScroll.setBackgroundColor(NAV);
         LinearLayout rail = new LinearLayout(this);
@@ -232,17 +267,23 @@ public final class MainActivity extends Activity {
         addTab(rail, "延时", 9);
         addTab(rail, "日志", 10);
 
-        ScrollView contentScroll = new ScrollView(this);
+        contentScroll = new ScrollView(this);
         contentScroll.setFillViewport(true);
+        contentScroll.setOnClickListener(v -> toggleFullScreenChrome());
+        contentScroll.setOnLongClickListener(v -> {
+            showFullScreenChrome();
+            return true;
+        });
+        contentScroll.setOnTouchListener((v, event) -> handleFullScreenTouch(event));
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(14), dp(16), dp(14), dp(24));
         contentScroll.addView(content, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         shell.addView(contentScroll, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
 
-        TextView title = text("微信机器人", 26, INK, Typeface.BOLD);
-        title.setPadding(0, 0, 0, dp(12));
-        content.addView(title);
+        mainTitle = text("微信机器人", 26, INK, Typeface.BOLD);
+        mainTitle.setPadding(0, 0, 0, dp(12));
+        content.addView(mainTitle);
 
         LinearLayout statusPage = page(content, "运行状态");
         statusView = text("", 15, INK, Typeface.BOLD);
@@ -294,7 +335,6 @@ public final class MainActivity extends Activity {
 
         LinearLayout personaPage = page(content, "人物形象");
         personaInfo = text("", 14, MUTED, Typeface.BOLD);
-        personaInfo.setPadding(0, 0, 0, dp(10));
         personaPage.addView(personaInfo);
         personaImage = new ImageView(this);
         personaImage.setAdjustViewBounds(true);
@@ -307,7 +347,6 @@ public final class MainActivity extends Activity {
 
         LinearLayout imagePage = page(content, "图片与发送");
         styleInfo = text("", 14, MUTED, Typeface.BOLD);
-        styleInfo.setPadding(0, 0, 0, dp(10));
         imagePage.addView(styleInfo);
         styleImage = new ImageView(this);
         styleImage.setAdjustViewBounds(true);
@@ -317,6 +356,13 @@ public final class MainActivity extends Activity {
         imagePage.addView(buttonRow(
                 button("上传", v -> chooseStyleReferencePhoto()),
                 button("清除", v -> clearStyleReferencePhoto())));
+        fullScreenBackgroundSwitch = switchRow(imagePage, "全屏背景");
+        fullScreenBackgroundSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (!loadingConfig) {
+                BotConfig.prefs(this).edit().putBoolean("fullScreenBackground", isChecked).apply();
+            }
+            updateFullScreenBackground();
+        });
         imageEndpoint = edit(imagePage, "图片上游基址", BotConfig.DEFAULT_IMAGE_ENDPOINT, false);
         imageApiKey = edit(imagePage, "图片 API Key", BotConfig.DEFAULT_API_KEY, false);
         imageModel = edit(imagePage, "图片模型", BotConfig.DEFAULT_IMAGE_MODEL, false);
@@ -334,7 +380,6 @@ public final class MainActivity extends Activity {
         enableExMode = switchRow(exPage, "打开蒸馏模式");
         exName = edit(exPage, "人物标签", "人物", false);
         exInfo = text("", 14, MUTED, Typeface.BOLD);
-        exInfo.setPadding(0, dp(8), 0, dp(10));
         exPage.addView(exInfo);
         exImage = new ImageView(this);
         exImage.setAdjustViewBounds(true);
@@ -384,16 +429,10 @@ public final class MainActivity extends Activity {
         ttsVoice = spinner(qwenTtsConfigGroup, "千问 TTS 语音角色", BotConfig.TTS_VOICE_LABELS);
         ttsSpeed = edit(qwenTtsConfigGroup, "TTS 语速倍率 0.5-2.0", "1.0", false);
         doubaoTtsConfigGroup = configGroup(featuresPage);
-        doubaoTtsVoice = spinner(doubaoTtsConfigGroup, "豆包 TTS 语音角色", BotConfig.DOUBAO_TTS_VOICE_LABELS);
-        doubaoCookieInfo = text("未导入完整 Cookie，留空时使用下面三段。", 13, MUTED, Typeface.NORMAL);
-        doubaoCookieInfo.setPadding(0, dp(8), 0, dp(6));
-        doubaoTtsConfigGroup.addView(doubaoCookieInfo);
+        doubaoVoicePager(doubaoTtsConfigGroup);
         doubaoTtsConfigGroup.addView(buttonRow(
-                button("导入 Cookie 文件", v -> chooseDoubaoCookieFile()),
-                button("清除完整 Cookie", v -> clearDoubaoCookieHeader())));
-        doubaoSessionId = edit(doubaoTtsConfigGroup, "豆包 sessionid", "", false);
-        doubaoSidGuard = edit(doubaoTtsConfigGroup, "豆包 sid_guard", "", false);
-        doubaoUidTt = edit(doubaoTtsConfigGroup, "豆包 uid_tt", "", false);
+                button("导入", v -> chooseDoubaoCookieFile()),
+                button("清除", v -> clearDoubaoCookieHeader())));
         mimoTtsConfigGroup = configGroup(featuresPage);
         mimoTtsVoice = spinner(mimoTtsConfigGroup, "MiMo TTS 语音角色", BotConfig.MIMO_TTS_VOICE_LABELS);
         mimoTtsEndpoint = edit(mimoTtsConfigGroup, "MiMo TTS 接口", BotConfig.DEFAULT_MIMO_TTS_ENDPOINT, false);
@@ -451,7 +490,7 @@ public final class MainActivity extends Activity {
         shareSendButtonPollMs = edit(delayPage, "图片分享发送按钮轮询毫秒", "220", false);
         shareSubmitPollMs = edit(delayPage, "图片分享提交后轮询毫秒", "350", false);
         inputModeToggleSettleMs = edit(delayPage, "语音/文字切换稳定等待毫秒", "1200", false);
-        quotedImageOpenDelayMs = edit(delayPage, "引用图点开等待毫秒", "1000", false);
+        quotedImageOpenDelayMs = edit(delayPage, "点开引用缩略图后等待毫秒", "800", false);
         delayPage.addView(buttonRow(button("保存延时", v -> saveConfig())));
 
         LinearLayout logsPage = page(content, "实时日志");
@@ -461,7 +500,10 @@ public final class MainActivity extends Activity {
         logView.setPadding(dp(12), dp(12), dp(12), dp(12));
         logsPage.addView(logView, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(520)));
 
-        setContentView(shell);
+        root.addView(shell, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
     }
 
     private void addTab(LinearLayout rail, String label, int index) {
@@ -476,11 +518,14 @@ public final class MainActivity extends Activity {
     }
 
     private void selectTab(int index) {
+        selectedTabIndex = index;
+        fullScreenChromeVisible = false;
         for (int i = 0; i < pages.size(); i++) {
             pages.get(i).setVisibility(i == index ? View.VISIBLE : View.GONE);
             tabs.get(i).setTextColor(i == index ? NAV : Color.WHITE);
             tabs.get(i).setBackground(i == index ? round(Color.WHITE, dp(18), 0, 0) : round(0x223B475C, dp(18), 0, 0));
         }
+        updateFullScreenBackground();
         refreshLogs();
         refreshStatus();
     }
@@ -498,6 +543,125 @@ public final class MainActivity extends Activity {
         content.addView(page, lp);
         pages.add(page);
         return page;
+    }
+
+    private void updateFullScreenBackground() {
+        if (pageBackgroundImage == null) {
+            return;
+        }
+        String path = activeBackgroundPath();
+        File file = path == null || path.trim().isEmpty() ? null : new File(path);
+        boolean enabled = fullScreenBackgroundSwitch != null && fullScreenBackgroundSwitch.isChecked();
+        boolean show = enabled && file != null && file.exists() && file.length() > 0;
+        if (show) {
+            pageBackgroundImage.setImageBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
+            pageBackgroundImage.setVisibility(View.VISIBLE);
+            if (railScroll != null) {
+                railScroll.setBackgroundColor(0xDD0F172A);
+            }
+            if (mainTitle != null) {
+                mainTitle.setTextColor(Color.WHITE);
+            }
+        } else {
+            fullScreenChromeVisible = true;
+            pageBackgroundImage.setImageDrawable(null);
+            pageBackgroundImage.setVisibility(View.GONE);
+            if (railScroll != null) {
+                railScroll.setBackgroundColor(NAV);
+            }
+            if (mainTitle != null) {
+                mainTitle.setTextColor(INK);
+            }
+        }
+        applyFullScreenChrome(show);
+        for (int i = 0; i < pages.size(); i++) {
+            int color = show && i == selectedTabIndex
+                    ? colorWithAlpha(Color.WHITE, fullScreenPanelAlpha) : Color.WHITE;
+            pages.get(i).setBackground(round(color, dp(18), 1, Color.rgb(226, 232, 240)));
+        }
+    }
+
+    private boolean handleFullScreenTouch(MotionEvent event) {
+        if (!isFullScreenBackgroundShowing() || event == null) {
+            return false;
+        }
+        if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            fullScreenTouchDownY = event.getRawY();
+            return false;
+        }
+        if (event.getAction() != MotionEvent.ACTION_UP) {
+            return false;
+        }
+        float delta = fullScreenTouchDownY - event.getRawY();
+        if (Math.abs(delta) < dp(36)) {
+            return false;
+        }
+        fullScreenPanelAlpha = clampFloat(fullScreenPanelAlpha + (delta > 0 ? 0.08f : -0.08f), 0.15f, 0.95f);
+        BotConfig.prefs(this).edit().putFloat("fullScreenPanelAlpha", fullScreenPanelAlpha).apply();
+        fullScreenChromeVisible = true;
+        applyFullScreenChrome(true);
+        updateFullScreenBackground();
+        toast("透明度 " + Math.round(fullScreenPanelAlpha * 100) + "%");
+        return true;
+    }
+
+    private void toggleFullScreenChrome() {
+        if (!isFullScreenBackgroundShowing()) {
+            return;
+        }
+        fullScreenChromeVisible = !fullScreenChromeVisible;
+        applyFullScreenChrome(true);
+    }
+
+    private void showFullScreenChrome() {
+        if (!isFullScreenBackgroundShowing()) {
+            return;
+        }
+        fullScreenChromeVisible = true;
+        applyFullScreenChrome(true);
+    }
+
+    private void applyFullScreenChrome(boolean backgroundShowing) {
+        if (contentScroll == null) {
+            return;
+        }
+        if (!backgroundShowing) {
+            contentScroll.setVisibility(View.VISIBLE);
+            contentScroll.setAlpha(1.0f);
+            return;
+        }
+        contentScroll.setVisibility(fullScreenChromeVisible ? View.VISIBLE : View.INVISIBLE);
+        contentScroll.setAlpha(fullScreenChromeVisible ? fullScreenPanelAlpha : 0.0f);
+    }
+
+    private boolean isFullScreenBackgroundShowing() {
+        return pageBackgroundImage != null && pageBackgroundImage.getVisibility() == View.VISIBLE;
+    }
+
+    private int colorWithAlpha(int color, float alpha) {
+        int a = Math.round(255.0f * clampFloat(alpha, 0.0f, 1.0f));
+        return (color & 0x00FFFFFF) | (a << 24);
+    }
+
+    private float clampFloat(float value, float min, float max) {
+        if (Float.isNaN(value) || Float.isInfinite(value)) {
+            return min;
+        }
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private String activeBackgroundPath() {
+        BotConfig config = BotConfig.load(this);
+        if (selectedTabIndex == TAB_PERSONA) {
+            return config.personaPhotoPath;
+        }
+        if (selectedTabIndex == TAB_IMAGE) {
+            return config.styleReferencePath;
+        }
+        if (selectedTabIndex == TAB_EX) {
+            return config.exPhotoPath;
+        }
+        return "";
     }
 
     private LinearLayout buttonRow(Button... buttons) {
@@ -549,11 +713,7 @@ public final class MainActivity extends Activity {
             ttsProvider.setSelection(ttsProviderIndex(config.ttsProvider));
             ttsVoice.setSelection(ttsVoiceIndex(config.ttsVoice));
             ttsSpeed.setText(String.valueOf(config.ttsSpeed));
-            doubaoTtsVoice.setSelection(doubaoTtsVoiceIndex(config.doubaoTtsVoice));
-            refreshDoubaoCookieInfo(config.doubaoCookieHeader);
-            doubaoSessionId.setText(config.doubaoSessionId);
-            doubaoSidGuard.setText(config.doubaoSidGuard);
-            doubaoUidTt.setText(config.doubaoUidTt);
+            setDoubaoVoice(config.doubaoTtsVoice);
             mimoTtsVoice.setSelection(mimoTtsVoiceIndex(config.mimoTtsVoice));
             mimoTtsEndpoint.setText(config.mimoTtsEndpoint);
             mimoTtsApiKey.setText(config.mimoTtsApiKey);
@@ -605,11 +765,13 @@ public final class MainActivity extends Activity {
             enableImageAfterText.setChecked(config.enableImageAfterText);
             imageAfterAsVoice.setChecked(config.imageAfterAsVoice);
             dropImageTaskOnError.setChecked(config.dropImageTaskOnError);
+            fullScreenBackgroundSwitch.setChecked(config.fullScreenBackground);
             lockActiveSender.setChecked(config.lockActiveSender);
             enableFollowUpWithoutMention.setChecked(config.enableFollowUpWithoutMention);
             stayInCodexSession.setChecked(config.stayInCodexSession);
         } finally {
             loadingConfig = false;
+            updateFullScreenBackground();
         }
     }
 
@@ -644,9 +806,6 @@ public final class MainActivity extends Activity {
         e.putString("ttsVoice", selectedTtsVoiceId());
         e.putFloat("ttsSpeed", BotConfig.normalizeTtsSpeed(floatValue(ttsSpeed, BotConfig.DEFAULT_TTS_SPEED)));
         e.putString("doubaoTtsVoice", selectedDoubaoTtsVoiceId());
-        e.putString("doubaoSessionId", doubaoSessionId.getText().toString());
-        e.putString("doubaoSidGuard", doubaoSidGuard.getText().toString());
-        e.putString("doubaoUidTt", doubaoUidTt.getText().toString());
         e.putString("mimoTtsVoice", selectedMimoTtsVoiceId());
         e.putString("mimoTtsEndpoint", mimoTtsEndpoint.getText().toString());
         e.putString("mimoTtsApiKey", mimoTtsApiKey.getText().toString());
@@ -678,7 +837,7 @@ public final class MainActivity extends Activity {
         e.putInt("shareSendButtonPollMs", intValue(shareSendButtonPollMs, 220));
         e.putInt("shareSubmitPollMs", intValue(shareSubmitPollMs, 350));
         e.putInt("inputModeToggleSettleMs", intValue(inputModeToggleSettleMs, 1200));
-        e.putInt("quotedImageOpenDelayMs", intValue(quotedImageOpenDelayMs, 1000));
+        e.putInt("quotedImageOpenDelayMs", intValue(quotedImageOpenDelayMs, 800));
         e.putInt("broadcastGapMs", intValue(broadcastGapMs, 8000));
         e.putInt("broadcastSearchResultWaitMs", intValue(broadcastSearchResultWaitMs, 6000));
         e.putBoolean("enableImageAnalysis", enableImageAnalysis.isChecked());
@@ -704,6 +863,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableImageAfterText", enableImageAfterText.isChecked());
         e.putBoolean("imageAfterAsVoice", newAfterVoice);
         e.putBoolean("dropImageTaskOnError", dropImageTaskOnError.isChecked());
+        e.putBoolean("fullScreenBackground", fullScreenBackgroundSwitch.isChecked());
         e.putBoolean("lockActiveSender", lockActiveSender.isChecked());
         e.putBoolean("enableFollowUpWithoutMention", enableFollowUpWithoutMention.isChecked());
         e.putBoolean("stayInCodexSession", stayInCodexSession.isChecked());
@@ -813,7 +973,6 @@ public final class MainActivity extends Activity {
                 throw new IllegalStateException("Cookie 文件未解析到 name=value");
             }
             BotConfig.prefs(this).edit().putString("doubaoCookieHeader", cookie).apply();
-            refreshDoubaoCookieInfo(cookie);
             BotLog.i(this, "tts.doubao.cookie.import", "已导入豆包 Cookie 文件 fields=" + cookie.split(";").length);
             toast("豆包 Cookie 已导入");
         } catch (Exception e) {
@@ -824,21 +983,8 @@ public final class MainActivity extends Activity {
 
     private void clearDoubaoCookieHeader() {
         BotConfig.prefs(this).edit().putString("doubaoCookieHeader", "").apply();
-        refreshDoubaoCookieInfo("");
         BotLog.i(this, "tts.doubao.cookie.clear", "已清除豆包完整 Cookie Header");
         toast("豆包完整 Cookie 已清除");
-    }
-
-    private void refreshDoubaoCookieInfo(String cookie) {
-        if (doubaoCookieInfo == null) {
-            return;
-        }
-        String normalized = BotConfig.normalizeDoubaoCookieHeader(cookie);
-        if (normalized.isEmpty()) {
-            doubaoCookieInfo.setText("未导入完整 Cookie，留空时使用下面三段。");
-            return;
-        }
-        doubaoCookieInfo.setText("已导入完整 Cookie：" + normalized.split(";").length + " 个字段；界面不显示内容。");
     }
 
     private void savePersonaPhoto(Uri uri) {
@@ -890,11 +1036,12 @@ public final class MainActivity extends Activity {
         File file = path == null || path.trim().isEmpty() ? null : new File(path);
         if (file != null && file.exists() && file.length() > 0) {
             personaImage.setImageBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
-            personaInfo.setText("已上传人物照片：" + file.getName() + " / " + file.length() + " bytes");
+            personaInfo.setText("");
         } else {
             personaImage.setImageDrawable(null);
-            personaInfo.setText("未上传人物照片。自拍会仅按文字提示生成；上传后会把此照片作为面貌参考。");
+            personaInfo.setText("");
         }
+        updateFullScreenBackground();
     }
 
     private void chooseStyleReferencePhoto() {
@@ -961,11 +1108,12 @@ public final class MainActivity extends Activity {
         File file = path == null || path.trim().isEmpty() ? null : new File(path);
         if (file != null && file.exists() && file.length() > 0) {
             styleImage.setImageBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
-            styleInfo.setText("已上传风格底图：" + file.getName() + " / " + file.length() + " bytes");
+            styleInfo.setText("");
         } else {
             styleImage.setImageDrawable(null);
-            styleInfo.setText("未上传风格底图。比基尼/清凉请求会先用内置参考图；上传后优先用这张。");
+            styleInfo.setText("");
         }
+        updateFullScreenBackground();
     }
 
     private void chooseExPhoto() {
@@ -1022,11 +1170,12 @@ public final class MainActivity extends Activity {
         File file = path == null || path.trim().isEmpty() ? null : new File(path);
         if (file != null && file.exists() && file.length() > 0) {
             exImage.setImageBitmap(BitmapFactory.decodeFile(file.getAbsolutePath()));
-            exInfo.setText("已上传蒸馏照片：" + file.getName() + " / " + file.length() + " bytes");
+            exInfo.setText("");
         } else {
             exImage.setImageDrawable(null);
-            exInfo.setText("未上传蒸馏照片。打开蒸馏模式后，自拍会优先使用这里的人物参考。");
+            exInfo.setText("");
         }
+        updateFullScreenBackground();
     }
 
     private void chooseExSourceImage() {
@@ -1439,6 +1588,115 @@ public final class MainActivity extends Activity {
         return spinner;
     }
 
+    private void doubaoVoicePager(LinearLayout root) {
+        TextView label = text("豆包 TTS 音色", 14, MUTED, Typeface.BOLD);
+        label.setPadding(0, dp(9), 0, dp(5));
+        root.addView(label);
+
+        doubaoVoiceSelected = text("", 15, INK, Typeface.BOLD);
+        doubaoVoiceSelected.setPadding(dp(12), dp(11), dp(12), dp(11));
+        doubaoVoiceSelected.setBackground(round(Color.WHITE, dp(12), 1, Color.rgb(226, 232, 240)));
+        root.addView(doubaoVoiceSelected, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        doubaoVoiceToggle = button("展开", v -> {
+            doubaoVoiceExpanded = !doubaoVoiceExpanded;
+            renderDoubaoVoiceList();
+        });
+        root.addView(buttonRow(doubaoVoiceToggle));
+
+        doubaoVoiceList = new LinearLayout(this);
+        doubaoVoiceList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(doubaoVoiceList, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        doubaoVoiceSelectedIndex = 0;
+        doubaoVoicePage = 0;
+        renderDoubaoVoiceList();
+    }
+
+    private void renderDoubaoVoiceList() {
+        if (doubaoVoiceSelected != null) {
+            doubaoVoiceSelected.setText("当前：" + doubaoVoiceLabel(doubaoVoiceSelectedIndex));
+        }
+        if (doubaoVoiceToggle != null) {
+            doubaoVoiceToggle.setText(doubaoVoiceExpanded ? "收起" : "展开");
+        }
+        if (doubaoVoiceList == null) {
+            return;
+        }
+        doubaoVoiceList.removeAllViews();
+        doubaoVoiceList.setVisibility(doubaoVoiceExpanded ? View.VISIBLE : View.GONE);
+        if (!doubaoVoiceExpanded) {
+            return;
+        }
+        int pageCount = doubaoVoicePageCount();
+        doubaoVoicePage = Math.max(0, Math.min(doubaoVoicePage, pageCount - 1));
+        doubaoVoicePrev = button("上页", v -> {
+            doubaoVoicePage = Math.max(0, doubaoVoicePage - 1);
+            renderDoubaoVoiceList();
+        });
+        doubaoVoiceNext = button("下页", v -> {
+            doubaoVoicePage = Math.min(doubaoVoicePageCount() - 1, doubaoVoicePage + 1);
+            renderDoubaoVoiceList();
+        });
+        doubaoVoicePrev.setEnabled(doubaoVoicePage > 0);
+        doubaoVoiceNext.setEnabled(doubaoVoicePage < pageCount - 1);
+        doubaoVoiceList.addView(buttonRow(doubaoVoicePrev, doubaoVoiceNext));
+
+        doubaoVoicePageInfo = text("第 " + (doubaoVoicePage + 1) + "/" + pageCount + " 页，每页 "
+                + DOUBAO_VOICE_PAGE_SIZE + " 个", 13, MUTED, Typeface.BOLD);
+        doubaoVoicePageInfo.setGravity(Gravity.CENTER);
+        doubaoVoicePageInfo.setPadding(0, 0, 0, dp(8));
+        doubaoVoiceList.addView(doubaoVoicePageInfo);
+
+        int start = doubaoVoicePage * DOUBAO_VOICE_PAGE_SIZE;
+        int end = Math.min(start + DOUBAO_VOICE_PAGE_SIZE, BotConfig.DOUBAO_TTS_VOICE_LABELS.length);
+        for (int i = start; i < end; i += 2) {
+            Button first = doubaoVoiceButton(i);
+            if (i + 1 < end) {
+                doubaoVoiceList.addView(buttonRow(first, doubaoVoiceButton(i + 1)));
+            } else {
+                doubaoVoiceList.addView(buttonRow(first));
+            }
+        }
+    }
+
+    private Button doubaoVoiceButton(int index) {
+        Button item = button(doubaoVoiceLabel(index), v -> {
+            doubaoVoiceExpanded = false;
+            setDoubaoVoiceIndex(index);
+        });
+        item.setTextSize(13);
+        item.setBackground(round(index == doubaoVoiceSelectedIndex ? TEAL : NAV, dp(14), 0, 0));
+        return item;
+    }
+
+    private void setDoubaoVoice(String voice) {
+        setDoubaoVoiceIndex(doubaoTtsVoiceIndex(voice));
+    }
+
+    private void setDoubaoVoiceIndex(int index) {
+        int max = BotConfig.DOUBAO_TTS_VOICE_IDS.length - 1;
+        doubaoVoiceSelectedIndex = Math.max(0, Math.min(index, max));
+        doubaoVoicePage = doubaoVoiceSelectedIndex / DOUBAO_VOICE_PAGE_SIZE;
+        renderDoubaoVoiceList();
+        if (!loadingConfig) {
+            refreshStatus();
+        }
+    }
+
+    private int doubaoVoicePageCount() {
+        return Math.max(1, (BotConfig.DOUBAO_TTS_VOICE_LABELS.length + DOUBAO_VOICE_PAGE_SIZE - 1)
+                / DOUBAO_VOICE_PAGE_SIZE);
+    }
+
+    private String doubaoVoiceLabel(int index) {
+        if (index < 0 || index >= BotConfig.DOUBAO_TTS_VOICE_LABELS.length) {
+            return BotConfig.DOUBAO_TTS_VOICE_LABELS[0];
+        }
+        return BotConfig.DOUBAO_TTS_VOICE_LABELS[index];
+    }
+
     private LinearLayout configGroup(LinearLayout root) {
         LinearLayout group = new LinearLayout(this);
         group.setOrientation(LinearLayout.VERTICAL);
@@ -1512,7 +1770,7 @@ public final class MainActivity extends Activity {
     }
 
     private String selectedDoubaoTtsVoiceId() {
-        int index = doubaoTtsVoice == null ? 0 : doubaoTtsVoice.getSelectedItemPosition();
+        int index = doubaoVoiceSelectedIndex;
         if (index < 0 || index >= BotConfig.DOUBAO_TTS_VOICE_IDS.length) {
             return BotConfig.DEFAULT_DOUBAO_TTS_VOICE;
         }

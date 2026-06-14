@@ -201,11 +201,11 @@ final class DoubaoWebTtsClient {
         params.put("real_aid", "497858");
         params.put("pkg_type", "release_version");
         params.put("device_id", fingerprint.deviceId);
-        params.put("pc_version", "2.46.3");
+        params.put("pc_version", "3.22.5");
         params.put("web_id", fingerprint.webId);
         params.put("tea_uuid", fingerprint.webId);
-        params.put("region", "");
-        params.put("sys_region", "");
+        params.put("region", "CN");
+        params.put("sys_region", "CN");
         params.put("samantha_web", "1");
         params.put("use-olympus-account", "1");
         params.put("web_tab_id", UUID.randomUUID().toString());

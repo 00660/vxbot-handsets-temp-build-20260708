@@ -437,11 +437,8 @@ public final class WechatDriver {
     }
 
     private boolean openNoticeFromShade(Context context, BotConfig config, WxMessage message) {
-        try {
-            String shell = hs.shell("cmd", "statusbar", "expand-notifications");
-            BotLog.i(context, "notice.shade.expand", compact(shell));
-        } catch (Exception e) {
-            BotLog.w(context, "notice.shade.expand.error", e.getMessage());
+        collapseNotificationShade(context);
+        if (!expandNotificationShade(context, "first", 1)) {
             return false;
         }
         waitNoticeShadeStable(context, config, "first");
@@ -494,6 +491,19 @@ public final class WechatDriver {
         }
     }
 
+    private boolean expandNotificationShade(Context context, String phase, int attempt) {
+        try {
+            String shell = hs.shell("cmd", "statusbar", "expand-notifications");
+            BotLog.i(context, "notice.shade.expand", "phase=" + phase
+                    + " attempt=" + attempt + " " + compact(shell));
+            return true;
+        } catch (Exception e) {
+            BotLog.w(context, "notice.shade.expand.error", "phase=" + phase
+                    + " attempt=" + attempt + " error=" + e.getMessage());
+            return false;
+        }
+    }
+
     private void waitNoticeShadeStable(Context context, BotConfig config, String phase) {
         long shadeWaitMs = config == null ? SHADE_SETTLE_MS : config.notificationShadeSettleMs;
         long ocrStableMs = config == null ? SHADE_OCR_STABLE_MS : config.notificationShadeOcrStableMs;
@@ -521,6 +531,12 @@ public final class WechatDriver {
         BotLog.i(context, "notice.shade.ocr.retry_wait", "attempt=" + attempt + " waitMs=" + waitMs);
         screen = OcrHelper.inspect(context, hs);
         target = findNoticeTargetInShade(screen, message);
+        if (target == null && looksLikeQuickSettingsOnly(screen)) {
+            target = recoverNoticeTargetFromQuickSettings(context, config, message, attempt + 1, screen);
+            if (target != null) {
+                return target;
+            }
+        }
         if (target == null) {
             BotLog.w(context, "notice.shade.target.retry.missing", "attempt=" + attempt
                     + " sessionName=" + message.sessionName
@@ -536,49 +552,30 @@ public final class WechatDriver {
         String firstSnippets = firstScreen == null ? "" : firstScreen.snippets;
         for (int i = 1; i <= 3; i++) {
             try {
-                SystemClock.sleep(Math.max(600L, waitMs));
+                BotLog.w(context, "notice.shade.control_panel.detected", "attempt=" + attempt
+                        + " round=" + i + " snippets=" + firstSnippets);
+                collapseNotificationShade(context);
+                SystemClock.sleep(Math.max(400L, waitMs));
+                if (!expandNotificationShade(context, "control_panel_reopen", attempt * 10 + i)) {
+                    continue;
+                }
+                waitNoticeShadeStable(context, config, "control_panel_reopen");
                 OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
                 NoticeTarget target = findNoticeTargetInShade(screen, message);
                 if (target != null) {
-                    BotLog.i(context, "notice.shade.quick_only.late_hit", "attempt=" + attempt
+                    BotLog.i(context, "notice.shade.control_panel.recovered", "attempt=" + attempt
                             + " round=" + i + " firstSnippets=" + firstSnippets);
                     return target;
                 }
-                if (i == 1) {
-                    int width = screen == null ? 720 : screen.width;
-                    int height = screen == null ? 1540 : screen.height;
-                    int x = Math.round(width * 0.50f);
-                    int y1 = Math.round(height * 0.23f);
-                    int y2 = Math.round(height * 0.77f);
-                    BotLog.i(context, "notice.shade.quick_only.swipe", "attempt=" + attempt
-                            + " x=" + x + " y1=" + y1 + " y2=" + y2
-                            + " snippets=" + (screen == null ? "" : screen.snippets));
-                    hs.shell("input", "swipe",
-                            String.valueOf(x), String.valueOf(y1),
-                            String.valueOf(x), String.valueOf(y2),
-                            "260");
-                    waitNoticeShadeStable(context, config, "quick_only_swipe");
-                } else {
-                    BotLog.i(context, "notice.shade.quick_only.wait", "attempt=" + attempt
-                            + " round=" + i
-                            + " snippets=" + (screen == null ? "" : screen.snippets));
-                }
+                firstSnippets = screen == null ? "" : screen.snippets;
+                BotLog.w(context, "notice.shade.control_panel.reopen.missing", "attempt=" + attempt
+                        + " round=" + i + " snippets=" + firstSnippets);
             } catch (Exception e) {
-                BotLog.w(context, "notice.shade.quick_only.recover.fail", "attempt=" + attempt
+                BotLog.w(context, "notice.shade.control_panel.recover.fail", "attempt=" + attempt
                         + " round=" + i + " error=" + e.getMessage());
             }
         }
-        try {
-            String shell = hs.shell("cmd", "statusbar", "expand-notifications");
-            BotLog.i(context, "notice.shade.quick_only.reexpand", "attempt=" + attempt + " " + compact(shell)
-                    + " snippets=" + firstSnippets);
-            waitNoticeShadeStable(context, config, "quick_only_retry");
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            return findNoticeTargetInShade(screen, message);
-        } catch (Exception e) {
-            BotLog.w(context, "notice.shade.quick_only.reexpand.fail", e.getMessage());
-            return null;
-        }
+        return null;
     }
 
     private NoticeTarget findNoticeTargetInShade(OcrHelper.Screen screen, WxMessage message) {

@@ -33,7 +33,7 @@ public final class BotConfig {
     };
     public static final String DEFAULT_TTS_VOICE = "Cherry";
     public static final float DEFAULT_TTS_SPEED = 1.0f;
-    public static final String DEFAULT_DOUBAO_TTS_VOICE = "zh_female_taozi_conversation_v4_wvae_bigtts";
+    public static final String DEFAULT_DOUBAO_TTS_VOICE = "zh_female_wenroutaozi_uranus_bigtts";
     public static final String[] DOUBAO_TTS_VOICE_ALIASES = {
             "taozi",
             "shuangkuai",
@@ -112,26 +112,128 @@ public final class BotConfig {
             "Dylan / 北京-晓东"
     };
     public static final String[] DOUBAO_TTS_VOICE_IDS = {
-            "zh_female_taozi_conversation_v4_wvae_bigtts",
-            "zh_female_shuangkuai_emo_v3_wvae_bigtts",
-            "zh_female_tianmei_conversation_v4_wvae_bigtts",
-            "zh_female_qingche_moon_bigtts",
-            "zh_male_yangguang_conversation_v4_wvae_bigtts",
-            "zh_male_chenwen_moon_bigtts",
-            "zh_male_rap_mars_bigtts",
-            "en_female_sarah_conversation_bigtts",
-            "en_male_adam_conversation_bigtts"
+            "zh_female_wenroutaozi_uranus_bigtts",
+            "zh_female_yangguangtianmei_uranus_bigtts",
+            "zh_female_wenroutaozi_v2_mars_bigtts",
+            "zh_female_f261_conversation_wvae_bigtts",
+            "zh_female_sophie_conversation_wvae_bigtts",
+            "zh_female_yuanqinvyou_wvae_bigtts",
+            "ICL_6acf86286e24",
+            "ICL_16cd9a58768e",
+            "zh_female_maomao_conversation_wvae_bigtts",
+            "zh_female_beijingdaniu_mars_bigtts",
+            "zh_female_F466_mars_bigtts",
+            "zh_female_F765_mars_bigtts",
+            "ICL_eaf8dd4a3a0d",
+            "BV428_streaming",
+            "zh_female_guli_stream_gpu",
+            "BV223_streaming",
+            "zh_female_leidian",
+            "BV427_streaming",
+            "ICL_19abc3128fbb",
+            "ICL_be2856499af4",
+            "ICL_7b76e4aafb6c",
+            "zh_female_leidian_conversation_wvae_bigtts",
+            "zh_female_sajiaonvyou_wvae_bigtts",
+            "zh_female_sinong_conversation_wvae_bigtts",
+            "ICL_da05661f8c64",
+            "ICL_11c6b3f0bd6d",
+            "ICL_bad46416a2b7",
+            "zh_female_meilinvyou_wvae_bigtts",
+            "ICL_49240bb7f5ac",
+            "zh_female_guangxiwrn",
+            "zh_male_cixingjunyu_uranus_bigtts",
+            "zh_male_linjiananhai_moon_bigtts",
+            "zh_male_M100_conversation_wvae_bigtts",
+            "zh_male_ahu_conversation_wvae_bigtts",
+            "zh_male_m286_conversation_wvae_bigtts",
+            "zh_male_qingyiyuxuan_mars_bigtts",
+            "ICL_c021bc19bf92",
+            "ICL_e0b9b93ee322",
+            "zh_male_aojiaobazong_wvae_bigtts",
+            "ICL_d4d40acd33dd",
+            "zh_male_cheng_mars_bigtts",
+            "zh_male_litiebanzi_mars_bigtts",
+            "ICL_df4fc4d1ce4b",
+            "zh_male_shenyeboke_wvae_bigtts",
+            "zh_male_dongfanghaoran_moon_bigtts",
+            "ICL_72afa6c5dc07",
+            "zh_male_junlangxize_mars_bigtts",
+            "ICL_9b3bc6941076",
+            "ICL_932b3f52bf3d",
+            "ICL_5a413fbc14fc",
+            "ICL_0ce6ef379e73",
+            "ICL_afedffe4586c",
+            "ICL_4ce34d3f60f4",
+            "zh_male_gangpu_conversation_wvae_bigtts",
+            "ICL_b718c1050dd1",
+            "zh_male_m219_conversation_wvae_bigtts",
+            "ICL_1eed9233299f",
+            "BV154_streaming",
+            "ICL_b22cd40ccd3e",
+            "ICL_7a33516fe388"
     };
     public static final String[] DOUBAO_TTS_VOICE_LABELS = {
-            "taozi / 桃子 / 女声对话",
-            "shuangkuai / 爽快 / 女声情绪",
-            "tianmei / 甜美 / 女声对话",
-            "qingche / 清澈 / 女声",
-            "yangguang / 阳光 / 男声对话",
-            "chenwen / 沉稳 / 男声",
-            "rap / 说唱 / 男声",
-            "en_female / Sarah / 英文女声",
-            "en_male / Adam / 英文男声"
+            "温柔桃子（升级版）",
+            "阳光甜妹（升级版）",
+            "温柔桃子（经典版）",
+            "邻家女孩",
+            "魅力苏菲",
+            "撒娇学妹",
+            "甜美小雪",
+            "清冷阿梦",
+            "文静毛毛",
+            "北京大妞",
+            "清甜瑶瑶",
+            "活泼可昕",
+            "灵兔少女",
+            "文艺阿房",
+            "顾姐",
+            "小品艺术家",
+            "雷霆女神",
+            "奶芙波波",
+            "绯樱神巫",
+            "火舞魅娘",
+            "沪上傲女",
+            "高冷御姐",
+            "柔美女友",
+            "爽快思思",
+            "妩媚御姐",
+            "活泼女孩",
+            "甜心小美",
+            "魅力女友",
+            "可爱女生",
+            "桂乡甜妞",
+            "磁性俊宇（升级版）",
+            "邻家男孩",
+            "悠悠君子",
+            "温暖阿虎",
+            "少年梓辛",
+            "阳光阿辰",
+            "腹黑霸总",
+            "冷酷霸总",
+            "傲娇霸总",
+            "霸道总裁",
+            "温柔子言",
+            "率性阿哲",
+            "温柔陆辰",
+            "深夜播客",
+            "东方浩然",
+            "病娇少爷",
+            "清爽男大",
+            "清朗宇澄",
+            "奶音俊少",
+            "沉稳皓轩",
+            "温柔俊彦",
+            "青涩沐阳",
+            "睿语舟舟",
+            "湾区大叔",
+            "随性先生",
+            "渊博小叔",
+            "俊朗男友",
+            "磁性阿铭",
+            "奶酷小宇",
+            "暖阳阿晨"
     };
     public static final String[] MIMO_TTS_VOICE_IDS = {
             "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"
@@ -231,6 +333,7 @@ public final class BotConfig {
     public final boolean syncInputModeFromVoiceSwitch;
     public final boolean enableExMode;
     public final boolean dropImageTaskOnError;
+    public final boolean fullScreenBackground;
     public final boolean lockActiveSender;
     public final boolean enableFollowUpWithoutMention;
     public final boolean stayInCodexSession;
@@ -300,7 +403,7 @@ public final class BotConfig {
         shareSendButtonPollMs = clampInt(prefs.getInt("shareSendButtonPollMs", 220), 100, 5000);
         shareSubmitPollMs = clampInt(prefs.getInt("shareSubmitPollMs", 350), 100, 5000);
         inputModeToggleSettleMs = clampInt(prefs.getInt("inputModeToggleSettleMs", 1200), 300, 10000);
-        quotedImageOpenDelayMs = clampInt(prefs.getInt("quotedImageOpenDelayMs", 1000), 300, 5000);
+        quotedImageOpenDelayMs = clampInt(prefs.getInt("quotedImageOpenDelayMs", 800), 800, 5000);
         enableImageAnalysis = prefs.getBoolean("enableImageAnalysis", true);
         enableImage = prefs.getBoolean("enableImage", true);
         enableTroll = prefs.getBoolean("enableTroll", true);
@@ -324,6 +427,7 @@ public final class BotConfig {
         syncInputModeFromVoiceSwitch = prefs.getBoolean("syncInputModeFromVoiceSwitch", false);
         enableExMode = prefs.getBoolean("enableExMode", false);
         dropImageTaskOnError = prefs.getBoolean("dropImageTaskOnError", true);
+        fullScreenBackground = prefs.getBoolean("fullScreenBackground", false);
         lockActiveSender = prefs.getBoolean("lockActiveSender", true);
         enableFollowUpWithoutMention = prefs.getBoolean("enableFollowUpWithoutMention", true);
         stayInCodexSession = prefs.getBoolean("stayInCodexSession", false);
@@ -494,6 +598,10 @@ public final class BotConfig {
         if (voice.isEmpty()) {
             return DEFAULT_DOUBAO_TTS_VOICE;
         }
+        String mapped = mapLegacyDoubaoVoice(voice);
+        if (!mapped.isEmpty()) {
+            return mapped;
+        }
         for (int i = 0; i < DOUBAO_TTS_VOICE_IDS.length; i++) {
             if (voice.equalsIgnoreCase(DOUBAO_TTS_VOICE_IDS[i])) {
                 return DOUBAO_TTS_VOICE_IDS[i];
@@ -515,6 +623,40 @@ public final class BotConfig {
             }
         }
         return DEFAULT_DOUBAO_TTS_VOICE;
+    }
+
+    private static String mapLegacyDoubaoVoice(String voice) {
+        if ("zh_female_taozi_conversation_v4_wvae_bigtts".equalsIgnoreCase(voice)
+                || "taozi".equalsIgnoreCase(voice)
+                || "桃子".equalsIgnoreCase(voice)) {
+            return "zh_female_wenroutaozi_uranus_bigtts";
+        }
+        if ("zh_female_tianmei_conversation_v4_wvae_bigtts".equalsIgnoreCase(voice)
+                || "tianmei".equalsIgnoreCase(voice)
+                || "甜美".equalsIgnoreCase(voice)) {
+            return "zh_female_yangguangtianmei_uranus_bigtts";
+        }
+        if ("zh_female_shuangkuai_emo_v3_wvae_bigtts".equalsIgnoreCase(voice)
+                || "shuangkuai".equalsIgnoreCase(voice)
+                || "爽快".equalsIgnoreCase(voice)) {
+            return "zh_female_sinong_conversation_wvae_bigtts";
+        }
+        if ("zh_male_yangguang_conversation_v4_wvae_bigtts".equalsIgnoreCase(voice)
+                || "yangguang".equalsIgnoreCase(voice)
+                || "阳光".equalsIgnoreCase(voice)) {
+            return "zh_male_qingyiyuxuan_mars_bigtts";
+        }
+        if ("zh_male_chenwen_moon_bigtts".equalsIgnoreCase(voice)
+                || "chenwen".equalsIgnoreCase(voice)
+                || "沉稳".equalsIgnoreCase(voice)) {
+            return "ICL_5a413fbc14fc";
+        }
+        if ("zh_male_rap_mars_bigtts".equalsIgnoreCase(voice)
+                || "rap".equalsIgnoreCase(voice)
+                || "说唱".equalsIgnoreCase(voice)) {
+            return "zh_male_rap_mars_bigtts";
+        }
+        return "";
     }
 
     public String doubaoCookie() {
