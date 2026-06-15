@@ -988,7 +988,7 @@ public final class WechatDriver {
         if (!tapSearchResultForBroadcast(context, config, sessionName)) {
             return false;
         }
-        if (!waitForTargetChatByTitle(context, config, sessionName, Math.max(8000, config.notificationSettleMs + 5000), "broadcast_search_confirm")) {
+        if (!waitForBroadcastChatReady(context, config, sessionName, Math.max(8000, config.notificationSettleMs + 5000), "broadcast_search_confirm")) {
             BotLog.e(context, "broadcast.search.chat.failed", "微信搜索结果进入目标会话失败 sessionName=" + sessionName);
             return false;
         }
@@ -1084,9 +1084,9 @@ public final class WechatDriver {
             PageInfo state = inspectWechatScreenByOcr(context, "broadcast_search_result_ready");
             OcrHelper.Screen screen = state.screen;
             lastCount = screen == null ? 0 : screen.items.size();
-            OcrHelper.OcrItem item = findBroadcastFrequentResultItem(screen, sessionName);
+            OcrHelper.OcrItem item = findBroadcastSearchResultItem(screen, sessionName);
             if (item != null) {
-                BotLog.i(context, "broadcast.search.result.ready", "微信搜索最常使用区已出现目标群 sessionName=" + sessionName
+                BotLog.i(context, "broadcast.search.result.ready", "微信搜索结果已出现目标会话 sessionName=" + sessionName
                         + " text=" + item.text + " x=" + item.centerX + " y=" + item.centerY
                         + " ocrCount=" + lastCount);
                 return true;
@@ -1113,23 +1113,23 @@ public final class WechatDriver {
 
     private boolean tapSearchResultForBroadcast(Context context, BotConfig config, String sessionName) throws Exception {
         OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-        OcrHelper.OcrItem item = findBroadcastFrequentResultItem(screen, sessionName);
+        OcrHelper.OcrItem item = findBroadcastSearchResultItem(screen, sessionName);
         int width = screen == null ? 720 : screen.width;
         int height = screen == null ? 1540 : screen.height;
         if (item != null) {
-            int tapX = clamp(Math.round(width * 0.25f), Math.round(width * 0.12f), Math.round(width * 0.60f));
-            int tapY = clamp(item.centerY, Math.round(height * 0.14f), Math.round(height * 0.36f));
+            int tapX = clamp(Math.round(width * 0.45f), Math.round(width * 0.18f), Math.round(width * 0.70f));
+            int tapY = clamp(item.centerY, Math.round(height * 0.14f), Math.round(height * 0.52f));
             hs.tap(tapX, tapY);
-            BotLog.i(context, "broadcast.search.result.frequent_name_tap", "OCR 命中最常使用目标并点击 sessionName="
+            BotLog.i(context, "broadcast.search.result.name_tap", "OCR 命中搜索结果目标并点击 sessionName="
                     + sessionName + " text=" + item.text + " x=" + item.centerX + " y=" + item.centerY
                     + " tapX=" + tapX + " tapY=" + tapY
                     + " rect=" + item.rect.flattenToString());
-            broadcastStepDelay(config, "search_result_frequent_name_tap");
+            broadcastStepDelay(config, "search_result_name_tap");
             return true;
         }
         OcrHelper.OcrItem frequent = findBroadcastFrequentHeader(screen);
         if (frequent != null) {
-            int tapX = clamp(Math.round(width * 0.24f), 1, width - 2);
+            int tapX = clamp(Math.round(width * 0.45f), 1, width - 2);
             int nextSectionTop = findBroadcastNextSectionTop(screen, frequent);
             int lowerBound = frequent.rect.bottom + 20;
             int upperBound = nextSectionTop > 0 ? nextSectionTop - 12 : Math.round(height * 0.34f);
@@ -1144,7 +1144,7 @@ public final class WechatDriver {
             broadcastStepDelay(config, "search_result_frequent_fixed_tap");
             return true;
         }
-        BotLog.e(context, "broadcast.search.result.tap_missing", "OCR 未找到最常使用区域，取消点击 sessionName="
+        BotLog.e(context, "broadcast.search.result.tap_missing", "OCR 未找到可点击搜索结果，取消点击 sessionName="
                 + sessionName + " snippets=" + (screen == null ? "" : screen.snippets));
         return false;
     }
@@ -1239,7 +1239,48 @@ public final class WechatDriver {
     }
 
     private OcrHelper.OcrItem findBroadcastSearchResultItem(OcrHelper.Screen screen, String sessionName) {
-        return findBroadcastFrequentResultItem(screen, sessionName);
+        OcrHelper.OcrItem frequent = findBroadcastFrequentResultItem(screen, sessionName);
+        if (frequent != null) {
+            return frequent;
+        }
+        return findBroadcastNamedResultItem(screen, sessionName);
+    }
+
+    private OcrHelper.OcrItem findBroadcastNamedResultItem(OcrHelper.Screen screen, String sessionName) {
+        if (screen == null) {
+            return null;
+        }
+        String target = normalizeOcrName(sessionName);
+        if (target.isEmpty()) {
+            return null;
+        }
+        OcrHelper.OcrItem best = null;
+        int bestScore = Integer.MAX_VALUE;
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY <= screen.height * 0.14f || item.centerY >= screen.height * 0.52f) {
+                continue;
+            }
+            String value = normalizeOcrName(item.text);
+            if (value.isEmpty()
+                    || isBroadcastSectionHeader(value)
+                    || isBroadcastResultNoise(value)
+                    || value.contains("搜索")
+                    || value.contains("取消")) {
+                continue;
+            }
+            if (!isLikelyOcrName(item.text, sessionName)) {
+                continue;
+            }
+            int score = item.rect.top;
+            if (value.equals(target)) {
+                score -= 200;
+            }
+            if (score < bestScore) {
+                best = item;
+                bestScore = score;
+            }
+        }
+        return best;
     }
 
     private OcrHelper.OcrItem findBroadcastFrequentResultItem(OcrHelper.Screen screen, String sessionName) {
@@ -1319,7 +1360,7 @@ public final class WechatDriver {
                 || value.matches(".*\\d+月\\d+日.*");
     }
 
-    private boolean waitForTargetChatByTitle(Context context, BotConfig config, String sessionName, long timeoutMs, String label) {
+    private boolean waitForBroadcastChatReady(Context context, BotConfig config, String sessionName, long timeoutMs, String label) {
         long deadline = SystemClock.uptimeMillis() + timeoutMs;
         while (SystemClock.uptimeMillis() < deadline) {
             PageInfo state = inspectWechatScreenByOcr(context, label);
@@ -1327,7 +1368,7 @@ public final class WechatDriver {
             BotLog.i(context, "broadcast.chat.confirm.check", "sessionName=" + sessionName
                     + " page=" + state.page
                     + " title=" + title);
-            if ("chat".equals(state.page) && isLikelyOcrName(title, sessionName)) {
+            if ("chat".equals(state.page)) {
                 return true;
             }
             SystemClock.sleep(config == null ? 600L : config.wechatChatOcrPollMs);
@@ -1336,56 +1377,8 @@ public final class WechatDriver {
     }
 
     private boolean sendBroadcastTextInCurrentChat(Context context, BotConfig config, String sessionName, String text) throws Exception {
-        if (!ensureTextInputMode(context, config, sessionName, "broadcast-text")) {
-            BotLog.e(context, "broadcast.input.mode.abort", "群发发送前未确认文字输入模式，取消输入动作");
-            return false;
-        }
-        Rect input = OcrHelper.findChatInputBlock(context, hs);
-        if (input == null) {
-            BotLog.e(context, "broadcast.input.missing", "群发会话中未识别到底部输入框");
-            return false;
-        }
-        hs.tap(input.centerX(), input.centerY());
-        SystemClock.sleep(stepDelay(config));
-        BotLog.i(context, "broadcast.input.tap", "群发按截图输入框点击 x=" + input.centerX()
-                + " y=" + input.centerY() + " rect=" + input.flattenToString());
-        setAppClipboard(context, text);
-        hs.keyCode(279);
-        BotLog.i(context, "broadcast.input.keypaste", "群发输入框聚焦后按 KEYCODE_PASTE");
-        SystemClock.sleep(Math.max(500L, config.sendButtonDelayMs));
-        Rect button = waitBroadcastGreenSendButton(context, 3500);
-        if (button == null) {
-            BotLog.e(context, "broadcast.send.button.missing", "群发未找到绿色发送按钮，取消发送");
-            return false;
-        }
-        hs.tap(button.centerX(), button.centerY());
-        BotLog.i(context, "broadcast.send.button.tap", "群发取色点击绿色发送按钮 x="
-                + button.centerX() + " y=" + button.centerY() + " rect=" + button.flattenToString());
-        SystemClock.sleep(600);
-        backUntilLeaveWechat(context, "broadcast-sent");
-        return true;
-    }
-
-    private Rect waitBroadcastGreenSendButton(Context context, long timeoutMs) {
-        long deadline = SystemClock.uptimeMillis() + timeoutMs;
-        while (SystemClock.uptimeMillis() < deadline) {
-            Rect button = OcrHelper.findGreenSendButton(context, hs);
-            if (button != null) {
-                return button;
-            }
-            Rect ocrButton = OcrHelper.findBottomRightText(context, hs, "发送");
-            if (ocrButton != null) {
-                BotLog.i(context, "broadcast.send.button.ocr.hit", "群发 OCR 找到发送按钮 rect=" + ocrButton.flattenToString());
-                return ocrButton;
-            }
-            Rect dumpButton = findSendButtonByDump();
-            if (dumpButton != null) {
-                BotLog.i(context, "broadcast.send.button.dump.hit", "群发 dump 找到发送按钮 rect=" + dumpButton.flattenToString());
-                return dumpButton;
-            }
-            SystemClock.sleep(400);
-        }
-        return null;
+        BotLog.i(context, "broadcast.send.reuse_normal", "群发进入会话后复用普通文字发送链路 sessionName=" + sessionName);
+        return sendTextInCurrentChat(context, config, sessionName, text, false);
     }
 
     private boolean focusAndSetText(Context context, BotConfig config, String text) throws Exception {
