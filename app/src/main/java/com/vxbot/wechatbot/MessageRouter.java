@@ -87,7 +87,7 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
-        if (matchesAny(command, "codex", "代码", "报错", "bug", "修复")) {
+        if (isCodexCommand(command)) {
             return new Route(Kind.CODEX, "Codex 模式：技术回复直接、简洁，优先给可执行步骤。");
         }
         if (config.enableImage && looksLikeStickerRequest(command)) {
@@ -161,7 +161,7 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return true;
         }
-        if (matchesAny(command, "codex", "代码", "报错", "bug", "修复")) {
+        if (isCodexCommand(command)) {
             return true;
         }
         if (config.enableImage && looksLikeStickerRequest(command)) {
@@ -341,7 +341,8 @@ public final class MessageRouter {
                 || looksLikeSportsRequest(text)
                 || looksLikeUtilityRequest(text)
                 || looksLikeWoolRequest(text)
-                || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报", "codex", "代码", "报错", "bug", "修复");
+                || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")
+                || isCodexCommand(text);
     }
 
     private static boolean looksLikeSportsRequest(String text) {
@@ -352,6 +353,33 @@ public final class MessageRouter {
                 "足球", "篮球", "网球", "羽毛球", "乒乓球", "排球",
                 "赛程", "赛事", "比分", "战绩", "排名", "积分榜", "对阵", "谁赢", "几比几", "比赛结果", "今日比赛", "今晚比赛", "明天比赛")
                 || value.matches(".*(\\w+vs\\w+|\\w+v\\w+).*");
+    }
+
+    private static boolean isCodexCommand(String text) {
+        String value = cleanCommand(text);
+        String lower = value.toLowerCase(Locale.ROOT).trim();
+        if (startsWithAsciiCommand(lower, "codex")) {
+            return true;
+        }
+        String compact = removeWhitespace(compact(value)).toLowerCase(Locale.ROOT);
+        return startsWithAsciiCommand(compact, "bug")
+                || compact.startsWith("代码")
+                || compact.startsWith("报错")
+                || compact.startsWith("修复")
+                || compact.contains("代码")
+                || compact.contains("报错")
+                || compact.contains("修复");
+    }
+
+    private static boolean startsWithAsciiCommand(String value, String command) {
+        if (value == null || command == null || !value.startsWith(command)) {
+            return false;
+        }
+        if (value.length() == command.length()) {
+            return true;
+        }
+        char next = value.charAt(command.length());
+        return !((next >= 'a' && next <= 'z') || (next >= '0' && next <= '9') || next == '_');
     }
 
     private static boolean looksLikeUtilityRequest(String text) {

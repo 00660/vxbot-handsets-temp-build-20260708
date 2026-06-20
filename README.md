@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`108`
-- `versionName`：`0.1.107-codex-route-priority`
+- `versionCode`：`109`
+- `versionName`：`0.1.108-codex-trigger-intercept`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：Codex 触发词改为独立拦截。`codex` 不再走普通 `matchesAny` 宽匹配，而是在去掉机器人名后按命令入口单独判断；`@慢一点 codex ...` 会先进入 `CODEX` 路由，不再参与金融/DexScreener 分流；版本升到 `versionCode=109` / `versionName=0.1.108-codex-trigger-intercept`。
 - 2026-06-20：修复 Codex 触发被金融分流吞掉的问题。金融关键词包含 `dex`，`codex` 会先命中金融/DexScreener；现将 `codex`、`代码`、`报错`、`bug`、`修复` 的路由优先级前移到金融、新闻、天气等工具分流之前；版本升到 `versionCode=108` / `versionName=0.1.107-codex-route-priority`。
 - 2026-06-20：更正 Happy Codex 端点安装包。默认 `happyCodexEndpoint` 固定为 `http://192.168.2.204:8731/v1/codex`，并把旧配置里误写的 `127.0.0.1:8731` / `192.168.2.157:8731` 自动归一到 204；新增 `scripts/push-phone-install-script.sh` 和手机端 `/data/local/tmp/phone-install-vxbot.sh` 安装方式，安装命令只允许在目标手机 shell 内 `su` 后执行；版本升到 `versionCode=107` / `versionName=0.1.106-happy-codex-endpoint-204`。
 - 2026-06-20：接入 Happy Codex 桥接。新增 `Happy Codex 桥接接口` 配置，默认 `http://192.168.2.204:8731/v1/codex`；CODEX 路由优先把微信群请求转发到容器内 `happy-codex-bridge`，由桥接服务复用 Happy 授权和 Codex app-server 会话执行，返回结果直接发群，桥不可用时回退普通上游；版本升到 `versionCode=106` / `versionName=0.1.105-happy-codex-bridge`。
