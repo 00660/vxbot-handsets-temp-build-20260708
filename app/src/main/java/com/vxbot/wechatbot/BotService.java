@@ -38,6 +38,7 @@ public final class BotService extends Service {
     private final ExecutorService paymentWorker = Executors.newSingleThreadExecutor();
     private final SessionStore sessionStore = new SessionStore();
     private final PersonaStore personaStore = new PersonaStore();
+    private final CodexForegroundWatcher codexForegroundWatcher = new CodexForegroundWatcher();
     private final Set<String> seenNotifications = new HashSet<>();
     private final HsDaemonManager daemonManager = new HsDaemonManager();
     private long serviceStartedAtMs;
@@ -60,6 +61,9 @@ public final class BotService extends Service {
         }
         if (key == null || "activeMode".equals(key) || "enableNoRootKeepAwake".equals(key)) {
             ScreenControl.syncForConfig(this, BotConfig.load(this), "config-change");
+        }
+        if ((key == null || "stayInCodexSession".equals(key)) && !BotConfig.load(this).stayInCodexSession) {
+            codexForegroundWatcher.stop(this, "config-disabled");
         }
     };
 
@@ -99,6 +103,7 @@ public final class BotService extends Service {
             if (logOverlay != null) {
                 logOverlay.hide();
             }
+            codexForegroundWatcher.stop(this, "bot-stop");
             ScreenControl.disableKeepAwake(this, "bot-stop");
             daemonManager.stop(this, config);
             BotLog.i(this, "bot.stop", "服务停止");
@@ -186,6 +191,7 @@ public final class BotService extends Service {
             logOverlay.hide();
         }
         BotConfig.prefs(this).unregisterOnSharedPreferenceChangeListener(configListener);
+        codexForegroundWatcher.shutdown(this);
         worker.shutdownNow();
         paymentWorker.shutdownNow();
         BotLog.w(this, "bot.service.destroy", "BotService onDestroy pid=" + Process.myPid());
@@ -215,6 +221,14 @@ public final class BotService extends Service {
     }
 
     private void handleMessage(WxMessage message) {
+        handleMessage(message, false);
+    }
+
+    private void handleForegroundCodexMessage(WxMessage message) {
+        handleMessage(message, true);
+    }
+
+    private void handleMessage(WxMessage message, boolean foregroundCodexOcr) {
         BotConfig config = BotConfig.load(this);
         if (message == null || (message.text.isEmpty() && message.rawContent.isEmpty())) {
             return;
@@ -227,14 +241,14 @@ public final class BotService extends Service {
                 seenNotifications.clear();
             }
         }
-        BotLog.i(this, "notice.raw", message.display());
-        if (isStaleStartupNotification(message)) {
+        BotLog.i(this, foregroundCodexOcr ? "codex.foreground.raw" : "notice.raw", message.display());
+        if (!foregroundCodexOcr && isStaleStartupNotification(message)) {
             BotLog.i(this, "notice.skip.stale", "忽略服务启动前残留旧通知 " + message.display()
                     + " postTime=" + message.postTime
                     + " serviceStartedAt=" + serviceStartedAtMs);
             return;
         }
-        if (PaymentNoticeFlow.looksLikePaymentNotice(message)) {
+        if (!foregroundCodexOcr && PaymentNoticeFlow.looksLikePaymentNotice(message)) {
             paymentWorker.execute(() -> new PaymentNoticeFlow().handlePayment(this, BotConfig.load(this), message));
             return;
         }
@@ -319,9 +333,16 @@ public final class BotService extends Service {
         try {
             List<String> history = sessionStore.contextOf(message.sessionName);
             WechatDriver driver = new WechatDriver(config.hsPort);
+            boolean foregroundCodexOcr = isForegroundCodexOcrMessage(message);
             Future<Boolean> openFuture = parallel.submit(() -> {
-                BotLog.i(this, "notice.open.async.start", "先打开目标会话 " + message.display());
-                boolean opened = driver.openTargetChatForReply(this, config, message);
+                boolean opened;
+                if (foregroundCodexOcr && route.kind == MessageRouter.Kind.CODEX && config.stayInCodexSession) {
+                    BotLog.i(this, "codex.foreground.open.async.start", "确认当前 Codex 前台会话 " + message.display());
+                    opened = driver.confirmCurrentChatForCodex(this, config, message.sessionName);
+                } else {
+                    BotLog.i(this, "notice.open.async.start", "先打开目标会话 " + message.display());
+                    opened = driver.openTargetChatForReply(this, config, message);
+                }
                 BotLog.write(this, opened ? "INFO" : "ERROR", "notice.open.async.done",
                         opened ? "目标会话已就绪 " + message.sessionName : "目标会话打开失败 " + message.sessionName);
                 return opened;
@@ -457,6 +478,9 @@ public final class BotService extends Service {
             boolean sent = driver.sendTextInCurrentChat(this, config, message.sessionName, reply, keepForeground);
             if (sent) {
                 sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
+                if (keepForeground) {
+                    startCodexForegroundWatcher(config, message);
+                }
             }
         } catch (Exception e) {
             BotLog.e(this, "reply.error", "回复失败: " + e.getMessage());
@@ -494,6 +518,56 @@ public final class BotService extends Service {
                 || route.kind == MessageRouter.Kind.ANALYSIS
                 || route.kind == MessageRouter.Kind.REPORT
                 || route.kind == MessageRouter.Kind.SHUTUP;
+    }
+
+    private void startCodexForegroundWatcher(BotConfig config, WxMessage message) {
+        if (config == null || message == null || !config.stayInCodexSession) {
+            return;
+        }
+        String sender = sessionStore.sessionCodexSenderName(this, message.sessionName);
+        if (sender.isEmpty()) {
+            sender = message.senderName;
+        }
+        if (!isCodexForegroundTargetAllowed(config, message.sessionName, sender)) {
+            BotLog.w(this, "codex.foreground.watch.skip", "Codex 前台 OCR 未启动，群或授权人不匹配 sessionName="
+                    + message.sessionName + " sender=" + sender);
+            return;
+        }
+        GarbageCleaner.runIfDue(this, "codex-foreground-ocr");
+        String watchSender = sender;
+        codexForegroundWatcher.start(this, config, message.sessionName, watchSender, new CodexForegroundWatcher.Callback() {
+            @Override
+            public boolean isOperationActive() {
+                return operationActive;
+            }
+
+            @Override
+            public boolean isTargetAllowed(BotConfig currentConfig, String sessionName, String senderName) {
+                return isCodexForegroundTargetAllowed(currentConfig, sessionName, senderName);
+            }
+
+            @Override
+            public void onMessage(WxMessage foregroundMessage) {
+                worker.execute(() -> handleForegroundCodexMessage(foregroundMessage));
+            }
+        });
+    }
+
+    private boolean isCodexForegroundTargetAllowed(BotConfig config, String sessionName, String senderName) {
+        if (config == null || !config.stayInCodexSession) {
+            return false;
+        }
+        if (!config.isAllowedSession(sessionName) || !config.isFollowUpSenderAllowed(senderName)) {
+            return false;
+        }
+        String bound = sessionStore.sessionCodexSenderName(this, sessionName);
+        return NameNormalizer.sameName(bound, senderName);
+    }
+
+    private static boolean isForegroundCodexOcrMessage(WxMessage message) {
+        return message != null
+                && message.notificationKey != null
+                && message.notificationKey.startsWith(CodexForegroundWatcher.NOTIFICATION_KEY_PREFIX);
     }
 
     private String buildManualReply(BotConfig config) {

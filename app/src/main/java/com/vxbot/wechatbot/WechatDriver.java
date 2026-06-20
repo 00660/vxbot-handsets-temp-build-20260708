@@ -66,6 +66,32 @@ public final class WechatDriver {
         }
     }
 
+    public boolean confirmCurrentChatForCodex(Context context, BotConfig config, String sessionName) {
+        try {
+            PageInfo page = inspectWechatScreenByOcr(context, "codex_foreground_confirm");
+            if (!"chat".equals(page.page)) {
+                BotLog.w(context, "codex.foreground.chat.missing", "当前前台不是微信会话页，停止本轮 Codex 前台发送 sessionName="
+                        + sessionName + " page=" + page.page + " reason=" + page.label);
+                return false;
+            }
+            waitChatBottomReady(context, config, "codex-foreground", sessionName);
+            return true;
+        } catch (Exception e) {
+            BotLog.e(context, "codex.foreground.chat.error", "确认 Codex 前台会话失败: " + e.getMessage());
+            return false;
+        }
+    }
+
+    public OcrHelper.Screen inspectCurrentChatScreen(Context context, String label) {
+        PageInfo page = inspectWechatScreenByOcr(context, label);
+        if (!"chat".equals(page.page)) {
+            BotLog.w(context, "codex.foreground.ocr.not_chat", "前台 OCR 跳过，当前不是微信会话页 page="
+                    + page.page + " reason=" + page.label);
+            return null;
+        }
+        return page.screen;
+    }
+
     public boolean sendTextInCurrentChat(Context context, BotConfig config, String reply, boolean keepForeground) {
         return sendTextInCurrentChat(context, config, "", reply, keepForeground);
     }

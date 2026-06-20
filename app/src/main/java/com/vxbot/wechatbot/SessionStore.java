@@ -160,6 +160,10 @@ public final class SessionStore {
                 .apply();
     }
 
+    public synchronized String sessionCodexSenderName(Context context, String sessionName) {
+        return sessionCodexSender(context, sessionName);
+    }
+
     public synchronized void muteFor(String sessionName, long millis) {
         shutupCooldownUntil.put(sessionName, System.currentTimeMillis() + millis);
     }
