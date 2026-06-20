@@ -87,6 +87,9 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
+        if (matchesAny(command, "codex", "代码", "报错", "bug", "修复")) {
+            return new Route(Kind.CODEX, "Codex 模式：技术回复直接、简洁，优先给可执行步骤。");
+        }
         if (config.enableImage && looksLikeStickerRequest(command)) {
             return new Route(Kind.STICKER, "EmojiCut 表情包：生成 16 格白底贴纸图，切图保存后发群。");
         }
@@ -116,9 +119,6 @@ public final class MessageRouter {
         }
         if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
             return new Route(Kind.WEATHER, "天气查询：按用户地点请求回复，不确定地点就追问。");
-        }
-        if (matchesAny(command, "codex", "代码", "报错", "bug", "修复")) {
-            return new Route(Kind.CODEX, "Codex 模式：技术回复直接、简洁，优先给可执行步骤。");
         }
         if (config.enableShutupCooldown && matchesAny(command, "闭嘴", "住嘴", "关闭瞎聊", "别说了")) {
             return new Route(Kind.SHUTUP, "回复一句赛博朋克暴脾气风格的闭嘴回击，然后本群安静一段时间。");
@@ -161,6 +161,9 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return true;
         }
+        if (matchesAny(command, "codex", "代码", "报错", "bug", "修复")) {
+            return true;
+        }
         if (config.enableImage && looksLikeStickerRequest(command)) {
             return true;
         }
@@ -185,10 +188,7 @@ public final class MessageRouter {
         if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")) {
             return true;
         }
-        if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
-            return true;
-        }
-        return matchesAny(command, "codex", "代码", "报错", "bug", "修复");
+        return config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报");
     }
 
     public static boolean isMediaOnlyMessage(String text) {
