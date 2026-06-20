@@ -11,9 +11,10 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`105`
-- `versionName`：`0.1.104-market-news-briefing`
+- `versionCode`：`106`
+- `versionName`：`0.1.105-happy-codex-bridge`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
+- 默认 Happy Codex 桥接接口：`http://192.168.2.157:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
 ## 已实现功能
@@ -23,6 +24,7 @@
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
 - 人物画像：白名单群消息按群、成员、日期分组落盘；群里发送 `人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
+- Happy Codex：命中 `codex`、`代码`、`报错`、`bug`、`修复` 的技术请求时，优先调用容器内 Happy Codex 桥接接口；桥接服务复用 Happy 终端授权拉起/复用 Codex 会话，失败时回退普通上游。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持千问/豆包/MiMo TTS 下拉切换、发音人和语速配置；豆包支持浏览器 Cookie JSON 文件或完整 Cookie 文件导入，界面不展示 Cookie 原文，三段 Cookie 仅作兜底，MiMo 使用 `api-key` 调用小米 `mimo-v2.5-tts`，失败自动回退千问。
 - TTS 试听：功能页提供 `试听 TTS`，按当前 provider、角色、语速或控制参数生成一句测试语并在 APK 内播放。
 - 输入态缓存：默认按每个白名单群自动识别文字/语音/输入法弹出态并缓存；语音真正按下前每次实时 OCR 当前屏幕的 `按住` 或 `说话` 区域，不使用缓存按压坐标。
@@ -137,6 +139,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：接入 Happy Codex 桥接。新增 `Happy Codex 桥接接口` 配置，默认 `http://192.168.2.157:8731/v1/codex`；CODEX 路由优先把微信群请求转发到容器内 `happy-codex-bridge`，由桥接服务复用 Happy 授权和 Codex app-server 会话执行，返回结果直接发群，桥不可用时回退普通上游；版本升到 `versionCode=106` / `versionName=0.1.105-happy-codex-bridge`。
 - 2026-06-20：增强虚拟币行情和新闻早报。虚拟币查询从金融分支前置，优先 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko；支持合约地址、币安链/BSC 等链偏好，避免虚拟币问题被 Yahoo 固定映射成 BTC/ETH。早安定时广播附带微博热搜、百度热榜和 Google News RSS 早报，群内 `早报`、`晨报`、`今日简报` 可手动触发；版本升到 `versionCode=105` / `versionName=0.1.104-market-news-briefing`。
 - 2026-06-20：新增人物画像功能。白名单群消息会按群名、成员名、日期写入本地 `persona_store`；`人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 等指令会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计；版本升到 `versionCode=104` / `versionName=0.1.103-persona-profile`。
 - 2026-06-14：同步 GitHub 前已通过 `192.168.2.89:22` 真机核对当前运行 APK：`com.vxbot.wechatbot` 进程在线，`versionCode=103` / `versionName=0.1.102-quoted-delay-after-tap`，与本地源码 `app/build.gradle` 对齐；同步前本地差异备份目录：`.backup-20260614-230703-before-github-sync-v103`。

@@ -73,6 +73,7 @@ public final class MainActivity extends Activity {
     private EditText allowedSessions;
     private EditText followUpSenderWhitelist;
     private EditText chatEndpoint;
+    private EditText happyCodexEndpoint;
     private EditText apiKey;
     private EditText model;
     private EditText systemPrompt;
@@ -323,6 +324,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout upstreamPage = page(content, "上游模型");
         chatEndpoint = edit(upstreamPage, "OpenAI 兼容接口", BotConfig.DEFAULT_CHAT_ENDPOINT, false);
+        happyCodexEndpoint = edit(upstreamPage, "Happy Codex 桥接接口", BotConfig.DEFAULT_HAPPY_CODEX_ENDPOINT, false);
         apiKey = edit(upstreamPage, "API Key", BotConfig.DEFAULT_API_KEY, false);
         model = edit(upstreamPage, "模型", "gpt-5.5", false);
         systemPrompt = edit(upstreamPage, "基础 system prompt", "", true);
@@ -688,6 +690,7 @@ public final class MainActivity extends Activity {
             followUpSenderWhitelist.setText(config.followUpSenderWhitelist);
             activeMode.setSelection("shizuku".equals(config.activeMode) ? 1 : 0);
             chatEndpoint.setText(config.chatEndpoint);
+            happyCodexEndpoint.setText(config.happyCodexEndpoint);
             apiKey.setText(config.apiKey);
             model.setText(config.model);
             systemPrompt.setText(config.systemPrompt);
@@ -791,6 +794,7 @@ public final class MainActivity extends Activity {
         e.putString("followUpSenderWhitelist", followUpSenderWhitelist.getText().toString());
         e.putString("activeMode", activeMode.getSelectedItem().toString());
         e.putString("chatEndpoint", chatEndpoint.getText().toString());
+        e.putString("happyCodexEndpoint", happyCodexEndpoint.getText().toString());
         e.putString("apiKey", apiKey.getText().toString());
         e.putString("model", model.getText().toString());
         e.putString("systemPrompt", systemPrompt.getText().toString());

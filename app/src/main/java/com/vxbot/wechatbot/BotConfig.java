@@ -13,6 +13,7 @@ import java.util.List;
 public final class BotConfig {
     private static final String PREFS = "bot_config";
     public static final String DEFAULT_CHAT_ENDPOINT = "http://192.168.2.157:8317/v1/chat/completions";
+    public static final String DEFAULT_HAPPY_CODEX_ENDPOINT = "http://192.168.2.157:8731/v1/codex";
     public static final String DEFAULT_API_KEY = "client-key-1";
     public static final String DEFAULT_IMAGE_ENDPOINT = "http://192.168.3.1:3002/v1";
     public static final String DEFAULT_IMAGE_MODEL = "gpt-image-2";
@@ -254,6 +255,7 @@ public final class BotConfig {
     public final String followUpSenderWhitelist;
     public final String activeMode;
     public final String chatEndpoint;
+    public final String happyCodexEndpoint;
     public final String apiKey;
     public final String model;
     public final String systemPrompt;
@@ -344,6 +346,7 @@ public final class BotConfig {
         followUpSenderWhitelist = prefs.getString("followUpSenderWhitelist", "");
         activeMode = prefs.getString("activeMode", "root");
         chatEndpoint = normalizeChatEndpoint(prefs.getString("chatEndpoint", DEFAULT_CHAT_ENDPOINT));
+        happyCodexEndpoint = normalizeHappyCodexEndpoint(prefs.getString("happyCodexEndpoint", DEFAULT_HAPPY_CODEX_ENDPOINT));
         apiKey = normalizeApiKey(prefs.getString("apiKey", DEFAULT_API_KEY));
         model = prefs.getString("model", "gpt-5.5");
         systemPrompt = prefs.getString("systemPrompt", "你是微信群里的机器人，回复短、自然、接上下文。");
@@ -535,6 +538,14 @@ public final class BotConfig {
             return DEFAULT_CHAT_ENDPOINT;
         }
         return endpoint;
+    }
+
+    private static String normalizeHappyCodexEndpoint(String value) {
+        String endpoint = value == null ? "" : value.trim();
+        if (endpoint.equalsIgnoreCase("off") || endpoint.equalsIgnoreCase("none") || endpoint.equals("关闭")) {
+            return "";
+        }
+        return endpoint.replaceAll("/+$", "");
     }
 
     private static String normalizeApiKey(String value) {

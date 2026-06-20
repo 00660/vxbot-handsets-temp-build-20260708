@@ -19,6 +19,18 @@ public final class ChatClient {
         if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
             throw new IllegalStateException("chatEndpoint 未配置");
         }
+        if (route.kind == MessageRouter.Kind.CODEX && !isBlank(config.happyCodexEndpoint)) {
+            try {
+                String reply = requestHappyCodex(context, config, message, history);
+                reply = cleanReplyPrefix(reply, config);
+                if (!isBlank(reply)) {
+                    return reply.trim();
+                }
+                BotLog.w(context, "codex.happy.empty", "Happy Codex 返回空内容，回退普通上游");
+            } catch (Exception e) {
+                BotLog.w(context, "codex.happy.fallback", "Happy Codex 请求失败，回退普通上游: " + e.getMessage());
+            }
+        }
         Exception last = null;
         String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);
         if (shouldReplyWithToolContext(route.kind, toolContext, message.text)) {
@@ -41,6 +53,61 @@ public final class ChatClient {
             }
         }
         throw last == null ? new IllegalStateException("请求失败") : last;
+    }
+
+    private String requestHappyCodex(Context context, BotConfig config, WxMessage message, List<String> history) throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("message", buildHappyCodexPrompt(config, message, history));
+        payload.put("model", config.model);
+        payload.put("permissionMode", "yolo");
+        payload.put("timeoutMs", Math.max(10000, config.replyTimeoutMs));
+        payload.put("appendSystemPrompt",
+                "你通过 Happy 接收微信群机器人转发的 Codex 请求。"
+                        + "如果请求涉及当前容器工作区代码，直接完成必要修改和验证；"
+                        + "最终回复要适合发回微信群，简洁说明做了什么、结果如何、有没有未完成项。");
+        BotLog.i(context, "codex.happy.request", "请求 Happy Codex " + config.happyCodexEndpoint
+                + " bytes=" + payload.toString().getBytes(StandardCharsets.UTF_8).length);
+        HttpURLConnection conn = (HttpURLConnection) new URL(config.happyCodexEndpoint).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(Math.max(10000, config.replyTimeoutMs));
+        conn.setDoOutput(true);
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+        try (OutputStream out = conn.getOutputStream()) {
+            out.write(bytes);
+        }
+        int code = conn.getResponseCode();
+        String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
+        if (code < 200 || code >= 300) {
+            throw new IllegalStateException("HTTP " + code + " " + trimBody(body));
+        }
+        JSONObject json = new JSONObject(body);
+        if (!json.optBoolean("ok", false)) {
+            throw new IllegalStateException(json.optString("error", "Happy Codex 返回失败"));
+        }
+        return json.optString("reply", "");
+    }
+
+    private static String buildHappyCodexPrompt(BotConfig config, WxMessage message, List<String> history) {
+        StringBuilder prompt = new StringBuilder(2048);
+        prompt.append("微信群 Codex 请求\n");
+        prompt.append("当前群聊: ").append(message.sessionName == null ? "" : message.sessionName).append('\n');
+        prompt.append("发送人: ").append(message.senderName == null ? "" : message.senderName).append('\n');
+        if (history != null && !history.isEmpty()) {
+            prompt.append("最近上下文:\n");
+            int start = Math.max(0, history.size() - 8);
+            for (int i = start; i < history.size(); i++) {
+                String line = history.get(i);
+                if (!isBlank(line)) {
+                    prompt.append("- ").append(historyContent(line)).append('\n');
+                }
+            }
+        }
+        prompt.append("用户消息:\n").append(message.text == null ? "" : message.text.trim()).append('\n');
+        prompt.append("回复要求: 直接处理请求。需要改代码就改；需要查看文件、运行命令或验证就执行。最终只给可发回微信群的简短结论。");
+        String text = prompt.toString();
+        return text.length() > 12000 ? text.substring(0, 12000) : text;
     }
 
     private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext, String userText) {
