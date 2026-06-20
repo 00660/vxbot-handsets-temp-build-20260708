@@ -87,6 +87,9 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
+        if (isCodexModeExitCommand(command)) {
+            return new Route(Kind.CODEX, "退出本群授权 Codex 模式。", "", true, true);
+        }
         if (isCodexModeEnterCommand(command)) {
             return new Route(Kind.CODEX, "进入本群授权 Codex 模式：后续由该授权人发送的消息全部交给 Codex。");
         }
@@ -146,7 +149,7 @@ public final class MessageRouter {
         if (command.isEmpty()) {
             command = text;
         }
-        if (isRoastExitCommand(command) || isLoverExitCommand(command)) {
+        if (isRoastExitCommand(command) || isLoverExitCommand(command) || isCodexModeExitCommand(command)) {
             return true;
         }
         if (isManualCommand(command) || isScreenDimCommand(command) || isScreenBrightCommand(command)) {
@@ -242,6 +245,14 @@ public final class MessageRouter {
             command = text;
         }
         return isCodexModeEnterCommand(command);
+    }
+
+    public static boolean isCodexModeExitCommand(String text, BotConfig config) {
+        String command = stripBotMention(text, config);
+        if (command.isEmpty()) {
+            command = text;
+        }
+        return isCodexModeExitCommand(command);
     }
 
     public static boolean isScreenDimCommand(String text) {
@@ -356,6 +367,7 @@ public final class MessageRouter {
                 || looksLikeUtilityRequest(text)
                 || looksLikeWoolRequest(text)
                 || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")
+                || isCodexModeExitCommand(text)
                 || isCodexModeEnterCommand(text)
                 || isCodexCommand(text);
     }
@@ -394,6 +406,18 @@ public final class MessageRouter {
         return value.matches("^(全局)?(进入|打开|开启|启动)(codex|代码)(模式|状态)?$")
                 || value.matches("^(进入|打开|开启|启动)(全局)?(codex|代码)(模式|状态)?$")
                 || value.matches("^(全局)?(codex|代码)(模式|状态)(进入|打开|开启|启动)?$");
+    }
+
+    private static boolean isCodexModeExitCommand(String text) {
+        String value = removeWhitespace(compact(text)).toLowerCase(Locale.ROOT);
+        if (value.isEmpty()) {
+            return false;
+        }
+        return value.matches("^(强制)?(退出|关闭|停止|结束|取消|解除)(全局)?(codex|代码)(模式|状态)?$")
+                || value.matches("^(强制)?(退出|关闭|停止|结束|取消|解除)(codex|代码)$")
+                || value.matches("^(全局)?(codex|代码)(模式|状态)?(退出|关闭|停止|结束|取消|解除)$")
+                || value.matches("^(退出|关闭|停止|结束|取消|解除)(全局)?(codex|代码)(模式|状态)?$")
+                || value.matches("^(别|不要|不用)?(进|跑)?(codex|代码)(了)$");
     }
 
     private static boolean startsWithAsciiCommand(String value, String command) {

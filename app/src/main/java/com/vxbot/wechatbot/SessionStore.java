@@ -164,6 +164,10 @@ public final class SessionStore {
         return sessionCodexSender(context, sessionName);
     }
 
+    public synchronized void clearCodexMode(Context context, String sessionName) {
+        clearSessionCodexMode(context, sessionName);
+    }
+
     public synchronized void muteFor(String sessionName, long millis) {
         shutupCooldownUntil.put(sessionName, System.currentTimeMillis() + millis);
     }

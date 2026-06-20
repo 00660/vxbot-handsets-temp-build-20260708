@@ -266,6 +266,14 @@ public final class BotService extends Service {
             BotLog.i(this, "notice.skip.context", "未命中@或当前发起人锁 " + message.display());
             return;
         }
+        if (MessageRouter.isCodexModeExitCommand(message.text, config)) {
+            if (sessionStore.isSessionCodexMode(this, message, config)) {
+                handleCodexExitCommand(config, message);
+            } else {
+                BotLog.i(this, "codex.session.exit.skip", "退出 Codex 指令未命中当前授权会话 " + message.display());
+            }
+            return;
+        }
         sessionStore.remember(message, "user");
         boolean enteringSessionCodex = MessageRouter.isCodexModeEnterCommand(message.text, config);
         if (enteringSessionCodex) {
@@ -287,6 +295,22 @@ public final class BotService extends Service {
             return false;
         }
         return message.postTime + STARTUP_NOTIFICATION_GRACE_MS < serviceStartedAtMs;
+    }
+
+    private void handleCodexExitCommand(BotConfig config, WxMessage message) {
+        sessionStore.clearCodexMode(this, message.sessionName);
+        codexForegroundWatcher.stop(this, "codex-exit-command");
+        BotLog.i(this, "codex.session.exit", "已退出本群 Codex 模式并准备返回后台 " + message.display());
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, "codex.session.exit.back.abort", "hs daemon 未就绪，无法执行返回后台");
+            return;
+        }
+        pauseLogOverlayForOperation(config);
+        try {
+            new WechatDriver(config.hsPort).leaveWechatIfForeground(this, "codex-exit");
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
     }
 
     private MessageRouter.Route applySessionMode(WxMessage message, MessageRouter.Route route) {
@@ -577,7 +601,7 @@ public final class BotService extends Service {
                 + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
                 + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、赛事比分/赛事分析、来点羊毛、短视频/图集链接解析。\n"
                 + "4. 画像：人物画像、昨日总结、谁是话痨、昨天说了啥。\n"
-                + "5. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
+                + "5. 模式：进入 Codex 模式、退出 Codex 模式、撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
                 + "6. 语音：发语音 文字；机器人请报道可测在线。\n"
                 + "7. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
     }

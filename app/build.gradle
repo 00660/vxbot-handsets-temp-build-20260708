@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 114
-        versionName "0.1.113-codex-foreground-ocr"
+        versionCode 115
+        versionName "0.1.114-codex-foreground-exit"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
