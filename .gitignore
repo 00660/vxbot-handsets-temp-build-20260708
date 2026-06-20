@@ -9,6 +9,7 @@ local.properties
 *.bak-*
 *.log
 apk-output/
+artifacts/
 screen-debug/
 live-watch/
 external/
