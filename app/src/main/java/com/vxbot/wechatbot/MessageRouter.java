@@ -88,7 +88,7 @@ public final class MessageRouter {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
         if (isCodexModeEnterCommand(command)) {
-            return new Route(Kind.CODEX, "进入全局 Codex 模式：后续白名单群消息全部交给 Codex。");
+            return new Route(Kind.CODEX, "进入本群授权 Codex 模式：后续由该授权人发送的消息全部交给 Codex。");
         }
         if (isCodexCommand(command)) {
             return new Route(Kind.CODEX, "Codex 模式：技术回复直接、简洁，优先给可执行步骤。");

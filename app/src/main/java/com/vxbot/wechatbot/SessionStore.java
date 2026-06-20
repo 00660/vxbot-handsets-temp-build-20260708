@@ -13,7 +13,7 @@ public final class SessionStore {
     private static final int MAX_LINES = 15;
     private static final String PREFS = "session_store";
     private static final String KEY_ACTIVE_PREFIX = "active_sender_";
-    private static final String KEY_GLOBAL_CODEX_MODE = "global_codex_mode";
+    private static final String KEY_CODEX_MODE_SENDER_PREFIX = "codex_mode_sender_";
 
     private final Map<String, ArrayDeque<String>> histories = new HashMap<>();
     private final Map<String, String> activeSenders = new HashMap<>();
@@ -27,9 +27,15 @@ public final class SessionStore {
             return false;
         }
         if (MessageRouter.isCodexModeEnterCommand(message.text, config)) {
-            return true;
+            if (canEnableSessionCodexMode(message, config)) {
+                return true;
+            }
+            BotLog.i(context, "codex.session.not_allowed",
+                    "Codex 模式入口拒绝，发起人不在续聊控制人白名单 group="
+                            + session + " sender=" + message.senderName);
+            return false;
         }
-        if (isGlobalCodexMode(context)) {
+        if (isSessionCodexMode(context, message, config)) {
             return true;
         }
         long until = shutupCooldownUntil.getOrDefault(session, 0L);
@@ -112,15 +118,35 @@ public final class SessionStore {
         return lines == null ? new ArrayList<>() : new ArrayList<>(lines);
     }
 
-    public synchronized boolean isGlobalCodexMode(Context context) {
-        return context != null && prefs(context).getBoolean(KEY_GLOBAL_CODEX_MODE, false);
+    public synchronized boolean isSessionCodexMode(Context context, WxMessage message, BotConfig config) {
+        if (context == null || message == null || config == null) {
+            return false;
+        }
+        String sender = prefs(context).getString(codexModeSenderKey(message.sessionName), "");
+        if (sender == null || sender.trim().isEmpty()) {
+            return false;
+        }
+        if (!config.isFollowUpSenderAllowed(sender)) {
+            clearSessionCodexMode(context, message.sessionName);
+            return false;
+        }
+        return NameNormalizer.sameName(sender, message.senderName);
     }
 
-    public synchronized void enableGlobalCodexMode(Context context) {
-        if (context == null) {
+    public synchronized boolean canEnableSessionCodexMode(WxMessage message, BotConfig config) {
+        return message != null
+                && config != null
+                && config.isAllowedSession(message.sessionName)
+                && config.isFollowUpSenderAllowed(message.senderName);
+    }
+
+    public synchronized void enableSessionCodexMode(Context context, WxMessage message, BotConfig config) {
+        if (context == null || !canEnableSessionCodexMode(message, config)) {
             return;
         }
-        prefs(context).edit().putBoolean(KEY_GLOBAL_CODEX_MODE, true).apply();
+        prefs(context).edit()
+                .putString(codexModeSenderKey(message.sessionName), message.senderName.trim())
+                .apply();
     }
 
     public synchronized void muteFor(String sessionName, long millis) {
@@ -208,6 +234,18 @@ public final class SessionStore {
     private static String activeSenderKey(String sessionName) {
         String normalized = NameNormalizer.nameKey(sessionName);
         return KEY_ACTIVE_PREFIX + Integer.toHexString(normalized.hashCode());
+    }
+
+    private static void clearSessionCodexMode(Context context, String sessionName) {
+        if (context == null || sessionName == null || sessionName.trim().isEmpty()) {
+            return;
+        }
+        prefs(context).edit().remove(codexModeSenderKey(sessionName)).apply();
+    }
+
+    private static String codexModeSenderKey(String sessionName) {
+        String normalized = NameNormalizer.nameKey(sessionName);
+        return KEY_CODEX_MODE_SENDER_PREFIX + Integer.toHexString(normalized.hashCode());
     }
 
     private static final class ModeTarget {
