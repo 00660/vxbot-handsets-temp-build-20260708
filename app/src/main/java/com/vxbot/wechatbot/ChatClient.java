@@ -16,20 +16,24 @@ import java.util.List;
 
 public final class ChatClient {
     public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route) throws Exception {
-        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
-            throw new IllegalStateException("chatEndpoint 未配置");
-        }
-        if (route.kind == MessageRouter.Kind.CODEX && !isBlank(config.happyCodexEndpoint)) {
+        if (route.kind == MessageRouter.Kind.CODEX) {
+            if (isBlank(config.happyCodexEndpoint)) {
+                throw new IllegalStateException("Happy Codex 桥接接口未配置");
+            }
             try {
                 String reply = requestHappyCodex(context, config, message, history);
                 reply = cleanReplyPrefix(reply, config);
                 if (!isBlank(reply)) {
                     return reply.trim();
                 }
-                BotLog.w(context, "codex.happy.empty", "Happy Codex 返回空内容，回退普通上游");
+                throw new IllegalStateException("Happy Codex 返回空内容");
             } catch (Exception e) {
-                BotLog.w(context, "codex.happy.fallback", "Happy Codex 请求失败，回退普通上游: " + e.getMessage());
+                BotLog.w(context, "codex.happy.fail", "Happy Codex 请求失败: " + e.getMessage());
+                throw new IllegalStateException("Happy Codex 请求失败: " + e.getMessage(), e);
             }
+        }
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置");
         }
         Exception last = null;
         String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);

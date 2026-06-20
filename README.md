@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`112`
-- `versionName`：`0.1.111-codex-mode-sender-lock`
+- `versionCode`：`113`
+- `versionName`：`0.1.112-codex-bridge-no-fallback`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：修正 Codex 桥接失败路径。容器内 `happy-codex-bridge` 默认直接驱动本地 `codex app-server`，不再因为缺 `/root/.happy/access.key` 阻断机器人 Codex；APK 侧 `CODEX` 路由只走 `happyCodexEndpoint`，桥接失败时记录 `codex.happy.fail` 并终止本次回复，不再回退普通聊天上游；版本升到 `versionCode=113` / `versionName=0.1.112-codex-bridge-no-fallback`。
 - 2026-06-20：继续收紧 Codex 待命模式。某群进入 Codex 模式后，该群只处理绑定的授权人消息；其它成员即使 @ 机器人也不会落到普通金融、新闻、人物画像等路由，避免非授权成员绕过模式限制；版本升到 `versionCode=112` / `versionName=0.1.111-codex-mode-sender-lock`。
 - 2026-06-20：收紧 Codex 待命模式权限。`进入codex模式`、`打开codex模式` 只能在白名单群内由“续聊控制人白名单”里的成员触发；模式按群持久化，并绑定触发人，进入后只有该授权人在该群的消息直接走 `CODEX`，其它群和其它成员不会进入 Codex；版本升到 `versionCode=111` / `versionName=0.1.110-session-codex-mode`。
 - 2026-06-20：新增 Codex 待命模式初版。白名单群发送 `进入codex模式`、`打开codex模式`、`开启codex模式`、`全局codex模式` 后会持久化进入 Codex 模式；该初版在 `versionCode=111` 已收紧为按群和授权人绑定；版本升到 `versionCode=110` / `versionName=0.1.109-global-codex-mode`。

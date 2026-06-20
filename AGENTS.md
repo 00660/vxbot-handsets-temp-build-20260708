@@ -34,6 +34,8 @@ adb -s 192.168.2.89:5555 shell pm list packages --user 0 --show-versioncode | rg
 
 - Happy/Codex 授权属于独立链路。除非用户明确要求重新授权，不要执行 `happy auth login --force`、`happy auth logout` 或清理 `/root/.happy` 凭据。
 - 机器人接入 Happy Codex 时只修改 `happyCodexEndpoint` 或桥服务配置，不要把普通聊天上游 `chatEndpoint` 当成同一件事处理。
+- `happy-codex-bridge` 默认应直接驱动本容器内 `codex app-server`，不要把缺 `/root/.happy/access.key` 当成机器人 Codex 不可用的必要条件；只有显式设置 `HAPPY_CODEX_BRIDGE_MODE=happy-api` 时才走 Happy API 授权文件。
+- APK 侧 `CODEX` 路由不能在 Happy/Codex 桥接失败时回退普通聊天上游；失败应记录 `codex.happy.fail` 并终止本次回复，避免把 Codex 请求伪装成普通聊天回答。
 - Codex 待命模式不能做任意群、任意人全局触发；只能在 `allowedSessions` 白名单群内，由 `followUpSenderWhitelist` 续聊控制人白名单里的成员发送 `进入codex模式` / `打开codex模式` 开启，并且模式只作用于该群和该授权人。
 - Happy/Codex 桥接所在机器按用户明确指定的 `192.168.2.204` 处理；`happyCodexEndpoint` 应为 `http://192.168.2.204:8731/v1/codex`。
 - `8731` 是容器内 `happy-codex-bridge` 默认端口；手机不能直接访问容器内 `127.0.0.1` 或 `172.17.0.3`，必须先在 `192.168.2.204` 宿主机做端口映射/反代，再让 89 手机访问 `http://192.168.2.204:8731/health` 验证。
