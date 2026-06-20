@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`111`
-- `versionName`：`0.1.110-session-codex-mode`
+- `versionCode`：`112`
+- `versionName`：`0.1.111-codex-mode-sender-lock`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：继续收紧 Codex 待命模式。某群进入 Codex 模式后，该群只处理绑定的授权人消息；其它成员即使 @ 机器人也不会落到普通金融、新闻、人物画像等路由，避免非授权成员绕过模式限制；版本升到 `versionCode=112` / `versionName=0.1.111-codex-mode-sender-lock`。
 - 2026-06-20：收紧 Codex 待命模式权限。`进入codex模式`、`打开codex模式` 只能在白名单群内由“续聊控制人白名单”里的成员触发；模式按群持久化，并绑定触发人，进入后只有该授权人在该群的消息直接走 `CODEX`，其它群和其它成员不会进入 Codex；版本升到 `versionCode=111` / `versionName=0.1.110-session-codex-mode`。
 - 2026-06-20：新增 Codex 待命模式初版。白名单群发送 `进入codex模式`、`打开codex模式`、`开启codex模式`、`全局codex模式` 后会持久化进入 Codex 模式；该初版在 `versionCode=111` 已收紧为按群和授权人绑定；版本升到 `versionCode=110` / `versionName=0.1.109-global-codex-mode`。
 - 2026-06-20：Codex 触发词改为独立拦截。`codex` 不再走普通 `matchesAny` 宽匹配，而是在去掉机器人名后按命令入口单独判断；`@慢一点 codex ...` 会先进入 `CODEX` 路由，不再参与金融/DexScreener 分流；版本升到 `versionCode=109` / `versionName=0.1.108-codex-trigger-intercept`。

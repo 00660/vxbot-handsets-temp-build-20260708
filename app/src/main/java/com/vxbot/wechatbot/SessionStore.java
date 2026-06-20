@@ -35,8 +35,19 @@ public final class SessionStore {
                             + session + " sender=" + message.senderName);
             return false;
         }
-        if (isSessionCodexMode(context, message, config)) {
-            return true;
+        String codexSender = sessionCodexSender(context, session);
+        if (!codexSender.isEmpty()) {
+            if (!config.isFollowUpSenderAllowed(codexSender)) {
+                clearSessionCodexMode(context, session);
+                return false;
+            }
+            if (NameNormalizer.sameName(codexSender, message.senderName)) {
+                return true;
+            }
+            BotLog.i(context, "codex.session.sender.skip",
+                    "本群 Codex 模式已绑定其它授权人，忽略消息 group="
+                            + session + " sender=" + message.senderName);
+            return false;
         }
         long until = shutupCooldownUntil.getOrDefault(session, 0L);
         if (System.currentTimeMillis() < until) {
@@ -122,8 +133,8 @@ public final class SessionStore {
         if (context == null || message == null || config == null) {
             return false;
         }
-        String sender = prefs(context).getString(codexModeSenderKey(message.sessionName), "");
-        if (sender == null || sender.trim().isEmpty()) {
+        String sender = sessionCodexSender(context, message.sessionName);
+        if (sender.isEmpty()) {
             return false;
         }
         if (!config.isFollowUpSenderAllowed(sender)) {
@@ -241,6 +252,14 @@ public final class SessionStore {
             return;
         }
         prefs(context).edit().remove(codexModeSenderKey(sessionName)).apply();
+    }
+
+    private static String sessionCodexSender(Context context, String sessionName) {
+        if (context == null || sessionName == null || sessionName.trim().isEmpty()) {
+            return "";
+        }
+        String sender = prefs(context).getString(codexModeSenderKey(sessionName), "");
+        return sender == null ? "" : sender.trim();
     }
 
     private static String codexModeSenderKey(String sessionName) {
