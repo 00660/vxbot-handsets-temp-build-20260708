@@ -13,6 +13,7 @@ public final class SessionStore {
     private static final int MAX_LINES = 15;
     private static final String PREFS = "session_store";
     private static final String KEY_ACTIVE_PREFIX = "active_sender_";
+    private static final String KEY_GLOBAL_CODEX_MODE = "global_codex_mode";
 
     private final Map<String, ArrayDeque<String>> histories = new HashMap<>();
     private final Map<String, String> activeSenders = new HashMap<>();
@@ -24,6 +25,12 @@ public final class SessionStore {
         String session = message.sessionName;
         if (!config.isAllowedSession(session)) {
             return false;
+        }
+        if (MessageRouter.isCodexModeEnterCommand(message.text, config)) {
+            return true;
+        }
+        if (isGlobalCodexMode(context)) {
+            return true;
         }
         long until = shutupCooldownUntil.getOrDefault(session, 0L);
         if (System.currentTimeMillis() < until) {
@@ -103,6 +110,17 @@ public final class SessionStore {
     public synchronized List<String> contextOf(String sessionName) {
         ArrayDeque<String> lines = histories.get(sessionName);
         return lines == null ? new ArrayList<>() : new ArrayList<>(lines);
+    }
+
+    public synchronized boolean isGlobalCodexMode(Context context) {
+        return context != null && prefs(context).getBoolean(KEY_GLOBAL_CODEX_MODE, false);
+    }
+
+    public synchronized void enableGlobalCodexMode(Context context) {
+        if (context == null) {
+            return;
+        }
+        prefs(context).edit().putBoolean(KEY_GLOBAL_CODEX_MODE, true).apply();
     }
 
     public synchronized void muteFor(String sessionName, long millis) {

@@ -253,7 +253,14 @@ public final class BotService extends Service {
             return;
         }
         sessionStore.remember(message, "user");
-        MessageRouter.Route route = MessageRouter.classify(message.text, config);
+        boolean enteringGlobalCodex = MessageRouter.isCodexModeEnterCommand(message.text, config);
+        if (enteringGlobalCodex) {
+            sessionStore.enableGlobalCodexMode(this);
+            BotLog.i(this, "codex.global.enable", "已进入全局 Codex 模式 " + message.display());
+        }
+        MessageRouter.Route route = sessionStore.isGlobalCodexMode(this)
+                ? new MessageRouter.Route(MessageRouter.Kind.CODEX, "全局 Codex 模式：所有白名单群消息直接交给 Codex 处理，不再走其它工具分流。")
+                : MessageRouter.classify(message.text, config);
         route = applySessionMode(message, route);
         if (route.kind == MessageRouter.Kind.SHUTUP) {
             sessionStore.muteFor(message.sessionName, 30 * 60 * 1000L);

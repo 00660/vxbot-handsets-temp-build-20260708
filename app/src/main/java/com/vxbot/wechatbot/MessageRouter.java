@@ -87,6 +87,9 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
+        if (isCodexModeEnterCommand(command)) {
+            return new Route(Kind.CODEX, "进入全局 Codex 模式：后续白名单群消息全部交给 Codex。");
+        }
         if (isCodexCommand(command)) {
             return new Route(Kind.CODEX, "Codex 模式：技术回复直接、简洁，优先给可执行步骤。");
         }
@@ -161,6 +164,9 @@ public final class MessageRouter {
         if (isPersonaCommand(command)) {
             return true;
         }
+        if (isCodexModeEnterCommand(command)) {
+            return true;
+        }
         if (isCodexCommand(command)) {
             return true;
         }
@@ -228,6 +234,14 @@ public final class MessageRouter {
             return false;
         }
         return value.matches(".*(人物画像|群员画像|成员画像|群友画像|群画像|画像分析|话痨排行|活跃排行|谁是话痨|谁最话痨|谁话最多|群聊总结|昨日总结|今日总结|昨天总结|今天总结|昨天干了啥|昨天说了啥|昨日重点|今日重点|重点是啥).*");
+    }
+
+    public static boolean isCodexModeEnterCommand(String text, BotConfig config) {
+        String command = stripBotMention(text, config);
+        if (command.isEmpty()) {
+            command = text;
+        }
+        return isCodexModeEnterCommand(command);
     }
 
     public static boolean isScreenDimCommand(String text) {
@@ -342,6 +356,7 @@ public final class MessageRouter {
                 || looksLikeUtilityRequest(text)
                 || looksLikeWoolRequest(text)
                 || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")
+                || isCodexModeEnterCommand(text)
                 || isCodexCommand(text);
     }
 
@@ -369,6 +384,16 @@ public final class MessageRouter {
                 || compact.contains("代码")
                 || compact.contains("报错")
                 || compact.contains("修复");
+    }
+
+    private static boolean isCodexModeEnterCommand(String text) {
+        String value = removeWhitespace(compact(text)).toLowerCase(Locale.ROOT);
+        if (value.isEmpty()) {
+            return false;
+        }
+        return value.matches("^(全局)?(进入|打开|开启|启动)(codex|代码)(模式|状态)?$")
+                || value.matches("^(进入|打开|开启|启动)(全局)?(codex|代码)(模式|状态)?$")
+                || value.matches("^(全局)?(codex|代码)(模式|状态)(进入|打开|开启|启动)?$");
     }
 
     private static boolean startsWithAsciiCommand(String value, String command) {
