@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 106
-        versionName "0.1.105-happy-codex-bridge"
+        versionCode 107
+        versionName "0.1.106-happy-codex-endpoint-204"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

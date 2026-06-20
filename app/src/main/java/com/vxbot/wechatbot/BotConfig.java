@@ -13,7 +13,9 @@ import java.util.List;
 public final class BotConfig {
     private static final String PREFS = "bot_config";
     public static final String DEFAULT_CHAT_ENDPOINT = "http://192.168.2.157:8317/v1/chat/completions";
-    public static final String DEFAULT_HAPPY_CODEX_ENDPOINT = "http://192.168.2.157:8731/v1/codex";
+    public static final String DEFAULT_HAPPY_CODEX_ENDPOINT = "http://192.168.2.204:8731/v1/codex";
+    private static final String LEGACY_HAPPY_CODEX_ENDPOINT_LOCAL = "http://127.0.0.1:8731/v1/codex";
+    private static final String LEGACY_HAPPY_CODEX_ENDPOINT_157 = "http://192.168.2.157:8731/v1/codex";
     public static final String DEFAULT_API_KEY = "client-key-1";
     public static final String DEFAULT_IMAGE_ENDPOINT = "http://192.168.3.1:3002/v1";
     public static final String DEFAULT_IMAGE_MODEL = "gpt-image-2";
@@ -545,7 +547,12 @@ public final class BotConfig {
         if (endpoint.equalsIgnoreCase("off") || endpoint.equalsIgnoreCase("none") || endpoint.equals("关闭")) {
             return "";
         }
-        return endpoint.replaceAll("/+$", "");
+        String normalized = endpoint.replaceAll("/+$", "");
+        if (LEGACY_HAPPY_CODEX_ENDPOINT_LOCAL.equals(normalized)
+                || LEGACY_HAPPY_CODEX_ENDPOINT_157.equals(normalized)) {
+            return DEFAULT_HAPPY_CODEX_ENDPOINT;
+        }
+        return normalized;
     }
 
     private static String normalizeApiKey(String value) {

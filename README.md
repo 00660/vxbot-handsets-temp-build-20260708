@@ -11,10 +11,10 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`106`
-- `versionName`：`0.1.105-happy-codex-bridge`
+- `versionCode`：`107`
+- `versionName`：`0.1.106-happy-codex-endpoint-204`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
-- 默认 Happy Codex 桥接接口：`http://192.168.2.157:8731/v1/codex`
+- 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
 ## 已实现功能
@@ -94,11 +94,19 @@ gradle :app:assembleDebug --stacktrace
 
 ## 安装验证
 
-安装到设备后确认版本：
+安装到目标手机只走脚本推送和手机 root shell 内安装。容器端先推 APK 和手机安装脚本：
 
 ```bash
-pm install -r -d /data/local/tmp/hs-wechatbot-latest.apk
-dumpsys package com.vxbot.wechatbot | grep -E 'versionCode|versionName'
+./scripts/push-phone-install-script.sh ./hs-wechatbot-latest.apk
+```
+
+随后进入手机 shell，先 `su`，确认 `uid=0` 后再运行手机端脚本：
+
+```bash
+adb -s 192.168.2.89:5555 shell
+su
+id
+sh /data/local/tmp/phone-install-vxbot.sh
 ```
 
 启动服务：
@@ -139,7 +147,8 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
-- 2026-06-20：接入 Happy Codex 桥接。新增 `Happy Codex 桥接接口` 配置，默认 `http://192.168.2.157:8731/v1/codex`；CODEX 路由优先把微信群请求转发到容器内 `happy-codex-bridge`，由桥接服务复用 Happy 授权和 Codex app-server 会话执行，返回结果直接发群，桥不可用时回退普通上游；版本升到 `versionCode=106` / `versionName=0.1.105-happy-codex-bridge`。
+- 2026-06-20：更正 Happy Codex 端点安装包。默认 `happyCodexEndpoint` 固定为 `http://192.168.2.204:8731/v1/codex`，并把旧配置里误写的 `127.0.0.1:8731` / `192.168.2.157:8731` 自动归一到 204；新增 `scripts/push-phone-install-script.sh` 和手机端 `/data/local/tmp/phone-install-vxbot.sh` 安装方式，安装命令只允许在目标手机 shell 内 `su` 后执行；版本升到 `versionCode=107` / `versionName=0.1.106-happy-codex-endpoint-204`。
+- 2026-06-20：接入 Happy Codex 桥接。新增 `Happy Codex 桥接接口` 配置，默认 `http://192.168.2.204:8731/v1/codex`；CODEX 路由优先把微信群请求转发到容器内 `happy-codex-bridge`，由桥接服务复用 Happy 授权和 Codex app-server 会话执行，返回结果直接发群，桥不可用时回退普通上游；版本升到 `versionCode=106` / `versionName=0.1.105-happy-codex-bridge`。
 - 2026-06-20：增强虚拟币行情和新闻早报。虚拟币查询从金融分支前置，优先 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko；支持合约地址、币安链/BSC 等链偏好，避免虚拟币问题被 Yahoo 固定映射成 BTC/ETH。早安定时广播附带微博热搜、百度热榜和 Google News RSS 早报，群内 `早报`、`晨报`、`今日简报` 可手动触发；版本升到 `versionCode=105` / `versionName=0.1.104-market-news-briefing`。
 - 2026-06-20：新增人物画像功能。白名单群消息会按群名、成员名、日期写入本地 `persona_store`；`人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 等指令会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计；版本升到 `versionCode=104` / `versionName=0.1.103-persona-profile`。
 - 2026-06-14：同步 GitHub 前已通过 `192.168.2.89:22` 真机核对当前运行 APK：`com.vxbot.wechatbot` 进程在线，`versionCode=103` / `versionName=0.1.102-quoted-delay-after-tap`，与本地源码 `app/build.gradle` 对齐；同步前本地差异备份目录：`.backup-20260614-230703-before-github-sync-v103`。
