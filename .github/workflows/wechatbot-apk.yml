@@ -1,5 +1,6 @@
 name: WeChat Bot APK
 
+# Public mirror builds use the same workflow as the private source repo.
 on:
   push:
     branches:
