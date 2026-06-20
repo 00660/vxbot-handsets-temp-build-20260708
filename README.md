@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`104`
-- `versionName`：`0.1.103-persona-profile`
+- `versionCode`：`105`
+- `versionName`：`0.1.104-market-news-briefing`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -29,8 +29,8 @@
 - 图片自拍：支持人物参考图、清凉/泳装风格参考图、前置/后置话术、图片发送；`几张自拍` 默认串行生成 3 张，`2-7张自拍` 按数量排队，`七情自拍/喜怒哀乐悲恐惊自拍` 串行生成 7 张不同情绪自拍。
 - 图片分析/表情：支持引用图点开截图后传上游分析或生成表情图。
 - 群发消息：从配置面板向白名单群依次发送自定义消息。
-- 每日问好：定时向白名单群发送随机问好。
-- 金融/天气/新闻/体育/本地工具/羊毛：内置实时工具分流与回复；金融支持股票代码、A/HK/US 个股名称搜索、指数、汇率、贵金属克价、常见虚拟币和 CoinGecko 代币搜索，不再用 BTC/ETH 兜底冒充未知代币；体育支持世界杯、足球联赛、NBA/WNBA/NFL/NHL/MLB 等赛程比分；赛事分析类问题会带实时赛程上下文请求上游分析。
+- 每日问好/新闻早报：定时向白名单群发送随机问好，并附带微博热搜、百度热榜和 Google News RSS 组成的今日早报；群里发送 `早报`、`晨报`、`今日简报` 也可手动触发。
+- 金融/天气/新闻/体育/本地工具/羊毛：内置实时工具分流与回复；金融支持股票代码、A/HK/US 个股名称搜索、指数、汇率、贵金属克价；虚拟币查询优先走 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko，支持合约地址和币安链/BSC 等链偏好，不再让虚拟币问题先落到 Yahoo 或固定 BTC/ETH；体育支持世界杯、足球联赛、NBA/WNBA/NFL/NHL/MLB 等赛程比分；赛事分析类问题会带实时赛程上下文请求上游分析。
 - 短视频/图集解析：命中抖音、快手、小红书、微博、B站等分享链接后，APK 内置 parse-video 平台解析逻辑直接解析，下载无水印视频、图集或 LivePhoto，并复用图片分享链路发回当前群。
 - 注册机：对接注册码/授权码查询链路，固定文字回复。
 - 赛博喷子模式：支持触发、目标锁定、退出指令。
@@ -122,6 +122,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `chat.tool.direct`：新闻、金融、天气、体育和本地工具命中后直接使用实时工具结果回复。
 - `persona.store.full` / `persona.store.error`：人物画像按群成员分组落盘时成员数超限或写入失败。
 - `persona.analysis.request` / `persona.analysis.fallback`：人物画像上游大模型分析请求或失败后回落本地统计。
+- `morning.briefing.fail`：定时新闻早报生成失败，继续发送普通问好。
 - `video.parse.start` / `video.parse.done`：短视频或图集解析开始和完成。
 - `video.inline.http`：APK 内置解析器请求平台页面/API 的 HTTP 返回状态和响应体大小。
 - `video.bili.ids`：B 站解析到的 `bvid` 和 `cid`，`cid` 必须按字符串/long 处理，不能用 32 位 int。
@@ -136,6 +137,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：增强虚拟币行情和新闻早报。虚拟币查询从金融分支前置，优先 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko；支持合约地址、币安链/BSC 等链偏好，避免虚拟币问题被 Yahoo 固定映射成 BTC/ETH。早安定时广播附带微博热搜、百度热榜和 Google News RSS 早报，群内 `早报`、`晨报`、`今日简报` 可手动触发；版本升到 `versionCode=105` / `versionName=0.1.104-market-news-briefing`。
 - 2026-06-20：新增人物画像功能。白名单群消息会按群名、成员名、日期写入本地 `persona_store`；`人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 等指令会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计；版本升到 `versionCode=104` / `versionName=0.1.103-persona-profile`。
 - 2026-06-14：同步 GitHub 前已通过 `192.168.2.89:22` 真机核对当前运行 APK：`com.vxbot.wechatbot` 进程在线，`versionCode=103` / `versionName=0.1.102-quoted-delay-after-tap`，与本地源码 `app/build.gradle` 对齐；同步前本地差异备份目录：`.backup-20260614-230703-before-github-sync-v103`。
 - 2026-06-13：引用图取图动作改为固定时序：点击微信引用灰卡缩略图后立即按 `quotedImageOpenDelayMs` 等待，默认和最小值均为 `800ms`，等待结束后才判断预览页并截图；截图成功后固定等待 `300ms` 再执行 Back 返回会话。日志分别为 `image.reference.quote.after_tap_wait`、`image.reference.preview.capture` 和 `image.reference.preview.after_capture_wait`。

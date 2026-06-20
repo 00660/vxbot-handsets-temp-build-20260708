@@ -662,6 +662,14 @@ public final class BotService extends Service {
             return;
         }
         String text = MORNING_GREETINGS[RANDOM.nextInt(MORNING_GREETINGS.length)];
+        try {
+            String briefing = RealtimeTools.morningBriefing();
+            if (briefing != null && !briefing.trim().isEmpty()) {
+                text = text + "\n\n" + briefing.trim();
+            }
+        } catch (Exception e) {
+            BotLog.w(this, "morning.briefing.fail", "新闻早报生成失败，继续发送问好: " + e.getMessage());
+        }
         BotLog.i(this, "morning.broadcast.start", "早安问好接入白名单群发 text=" + text);
         runBroadcastText(text, "morning");
     }

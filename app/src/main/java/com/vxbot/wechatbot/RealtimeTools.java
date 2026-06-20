@@ -105,6 +105,9 @@ public final class RealtimeTools {
 
     private static String news(String text) throws Exception {
         String compact = clean(text);
+        if (matchesAny(compact, "早报", "晨报", "新闻早餐", "今日简报", "每日简报")) {
+            return morningBriefing();
+        }
         if (compact.contains("微博")) {
             String hot = weiboHot();
             if (!hot.isEmpty()) {
@@ -119,7 +122,7 @@ public final class RealtimeTools {
         }
         String query = compact.replaceAll(".*?(新闻|热点|热搜|头条|快讯|资讯)", "").trim();
         if (query.isEmpty()) {
-            query = "今日新闻";
+            return morningBriefing();
         }
         String rss = getUtf8("https://news.google.com/rss/search?hl=zh-CN&gl=CN&ceid=CN:zh-Hans&q=" + enc(query), 10000);
         Matcher item = Pattern.compile("<item>(.*?)</item>", Pattern.DOTALL).matcher(rss);
@@ -142,28 +145,51 @@ public final class RealtimeTools {
         return out.toString();
     }
 
+    public static String morningBriefing() throws Exception {
+        StringBuilder out = new StringBuilder("今日早报：");
+        try {
+            appendNumberedBlock(out, "微博热搜", hotWordsFromWeibo(5));
+        } catch (Exception ignored) {
+        }
+        try {
+            appendNumberedBlock(out, "百度热榜", hotWordsFromBaidu(5));
+        } catch (Exception ignored) {
+        }
+        try {
+            appendNumberedBlock(out, "焦点新闻", rssTitles("https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans", 6));
+        } catch (Exception ignored) {
+        }
+        try {
+            appendNumberedBlock(out, "财经科技", rssTitles("https://news.google.com/rss/search?hl=zh-CN&gl=CN&ceid=CN:zh-Hans&q="
+                    + enc("财经 科技 OR AI"), 4));
+        } catch (Exception ignored) {
+        }
+        if ("今日早报：".contentEquals(out)) {
+            return baiduHot();
+        }
+        out.append("\n数据源：微博热搜、百度热榜、Google News RSS。");
+        return out.toString();
+    }
+
     private static String finance(String text) throws Exception {
         String value = clean(text);
         String metal = metalGramPrices(value);
         if (!metal.isEmpty()) {
             return metal;
         }
-        String symbol = yahooSymbol(value);
-        if (!symbol.isEmpty()) {
-            return yahooQuote(symbol);
-        }
         if (looksLikeCryptoQuery(value)) {
-            String crypto = coinGeckoQuote(value);
+            String crypto = cryptoQuote(value);
             if (!crypto.isEmpty()) {
                 return crypto;
-            }
-            if (looksLikeGenericCryptoOverview(value)) {
-                return yahooQuote("BTC-USD") + "\n" + yahooQuote("ETH-USD");
             }
             String query = cryptoSearchQuery(value);
             return "金融工具：没查到这个代币"
                     + (query.isEmpty() ? "" : "（" + query + "）")
-                    + "，请换成币种英文简称或 CoinGecko 名称。";
+                    + "，请换成币种英文简称、交易所交易对或合约地址。";
+        }
+        String symbol = yahooSymbol(value);
+        if (!symbol.isEmpty()) {
+            return yahooQuote(symbol);
         }
         String stockCode = extractChinaStock(value);
         if (!stockCode.isEmpty()) {
@@ -183,7 +209,9 @@ public final class RealtimeTools {
     private static boolean looksLikeCryptoQuery(String text) {
         String value = clean(text);
         String lower = value.toLowerCase(Locale.ROOT);
-        return matchesAny(value, "虚拟币", "加密货币", "数字货币", "币价", "币圈", "代币", "链上", "合约地址", "市值", "24h")
+        return !extractContractAddress(value).isEmpty()
+                || !cryptoAliasSymbol(value).isEmpty()
+                || matchesAny(value, "虚拟币", "加密货币", "数字货币", "币价", "币圈", "代币", "链上", "合约地址", "合约", "市值", "24h", "bsc", "币安链", "dex", "dexscreener", "meme币")
                 || value.matches(".*[\\u4e00-\\u9fa5A-Za-z0-9]{1,24}(币|代币).*")
                 || lower.matches(".*\\b(token|coin|crypto|usdt|usdc)\\b.*");
     }
@@ -194,6 +222,92 @@ public final class RealtimeTools {
                 .replaceAll("[\\s，。,.?!？！:：；;、]", "");
         return matchesAny(stripped, "虚拟币", "加密货币", "数字货币", "币圈", "币价", "代币行情")
                 && cryptoSearchQuery(value).isEmpty();
+    }
+
+    private static String cryptoQuote(String text) throws Exception {
+        String contract = extractContractAddress(text);
+        if (!contract.isEmpty()) {
+            String dex = dexScreenerTokenQuote(contract, text);
+            return dex.isEmpty() ? "" : dex;
+        }
+        if (looksLikeGenericCryptoOverview(text)) {
+            return cryptoMarketOverview();
+        }
+        String query = cryptoSearchQuery(text);
+        if (query.isEmpty()) {
+            return "";
+        }
+        String symbol = cryptoAliasSymbol(query);
+        if (symbol.isEmpty()) {
+            symbol = query.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        }
+        if (!symbol.isEmpty()) {
+            String binance = binanceTickerQuote(symbol, "https://api.binance.us", "Binance.US");
+            if (!binance.isEmpty()) {
+                return binance;
+            }
+            binance = binanceTickerQuote(symbol, "https://api.binance.com", "Binance");
+            if (!binance.isEmpty()) {
+                return binance;
+            }
+        }
+        String dex = dexScreenerSearchQuote(query, text);
+        if (!dex.isEmpty()) {
+            return dex;
+        }
+        return coinGeckoQuote(text);
+    }
+
+    private static String cryptoMarketOverview() throws Exception {
+        StringBuilder out = new StringBuilder("虚拟币行情工具：");
+        int count = 0;
+        for (String symbol : new String[]{"BTC", "ETH", "BNB", "SOL", "DOGE"}) {
+            String quote = binanceTickerQuote(symbol, "https://api.binance.us", "Binance.US");
+            if (quote.isEmpty()) {
+                quote = binanceTickerQuote(symbol, "https://api.binance.com", "Binance");
+            }
+            if (quote.isEmpty()) {
+                continue;
+            }
+            String line = quote.replaceFirst("^金融工具：", "");
+            out.append("\n").append(++count).append(". ").append(line);
+        }
+        if (count > 0) {
+            return out.toString();
+        }
+        return coinGeckoQuote("bitcoin") + "\n" + coinGeckoQuote("ethereum");
+    }
+
+    private static String binanceTickerQuote(String symbol, String baseUrl, String source) {
+        String cleanSymbol = symbol == null ? "" : symbol.replaceAll("[^A-Za-z0-9]", "").toUpperCase(Locale.ROOT);
+        if (cleanSymbol.isEmpty()) {
+            return "";
+        }
+        if (cleanSymbol.endsWith("USDT") && cleanSymbol.length() > 4) {
+            cleanSymbol = cleanSymbol.substring(0, cleanSymbol.length() - 4);
+        }
+        String pair = cleanSymbol + "USDT";
+        try {
+            JSONObject data = new JSONObject(getUtf8(baseUrl + "/api/v3/ticker/24hr?symbol=" + enc(pair), 10000));
+            if (data.has("code") && !data.has("lastPrice")) {
+                return "";
+            }
+            double last = optJsonDouble(data, "lastPrice");
+            if (Double.isNaN(last)) {
+                return "";
+            }
+            double changePercent = optJsonDouble(data, "priceChangePercent");
+            double high = optJsonDouble(data, "highPrice");
+            double low = optJsonDouble(data, "lowPrice");
+            double quoteVolume = optJsonDouble(data, "quoteVolume");
+            return "金融工具：" + cleanSymbol + "/USDT 现价 $" + fmt(last)
+                    + "，24h " + signed(changePercent) + "%"
+                    + "，高低 $" + fmt(high) + " / $" + fmt(low)
+                    + "，成交额 $" + compactMoney(quoteVolume)
+                    + "，来源 " + source;
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private static String coinGeckoQuote(String text) throws Exception {
@@ -251,6 +365,89 @@ public final class RealtimeTools {
         return out.toString();
     }
 
+    private static String dexScreenerTokenQuote(String contract, String text) throws Exception {
+        JSONObject data = new JSONObject(getUtf8("https://api.dexscreener.com/latest/dex/tokens/" + enc(contract), 12000));
+        JSONArray pairs = data.optJSONArray("pairs");
+        JSONObject best = chooseDexPair(pairs, text);
+        return best == null ? "" : formatDexPair(best);
+    }
+
+    private static String dexScreenerSearchQuote(String query, String text) throws Exception {
+        JSONObject data = new JSONObject(getUtf8("https://api.dexscreener.com/latest/dex/search?q=" + enc(query), 12000));
+        JSONArray pairs = data.optJSONArray("pairs");
+        JSONObject best = chooseDexPair(pairs, text);
+        return best == null ? "" : formatDexPair(best);
+    }
+
+    private static JSONObject chooseDexPair(JSONArray pairs, String text) {
+        if (pairs == null || pairs.length() == 0) {
+            return null;
+        }
+        String query = cryptoSearchQuery(text).toUpperCase(Locale.ROOT);
+        String preferChain = preferredChain(text);
+        JSONObject best = null;
+        double bestScore = -1.0;
+        for (int i = 0; i < pairs.length(); i++) {
+            JSONObject pair = pairs.optJSONObject(i);
+            if (pair == null) {
+                continue;
+            }
+            JSONObject base = pair.optJSONObject("baseToken");
+            String symbol = base == null ? "" : base.optString("symbol", "").toUpperCase(Locale.ROOT);
+            String name = base == null ? "" : base.optString("name", "").toUpperCase(Locale.ROOT);
+            double liquidity = nestedDouble(pair, "liquidity", "usd");
+            double volume = nestedDouble(pair, "volume", "h24");
+            double score = Math.max(liquidity, 0.0) + Math.max(volume, 0.0) * 0.2;
+            if (!query.isEmpty() && (query.equals(symbol) || name.contains(query))) {
+                score += 10_000_000_000.0;
+            }
+            if (!preferChain.isEmpty() && preferChain.equalsIgnoreCase(pair.optString("chainId", ""))) {
+                score += 5_000_000_000.0;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = pair;
+            }
+        }
+        return best;
+    }
+
+    private static String formatDexPair(JSONObject pair) {
+        JSONObject base = pair.optJSONObject("baseToken");
+        JSONObject quote = pair.optJSONObject("quoteToken");
+        String name = base == null ? "" : base.optString("name", "");
+        String symbol = base == null ? "" : base.optString("symbol", "");
+        String quoteSymbol = quote == null ? "" : quote.optString("symbol", "");
+        double price = optJsonDouble(pair, "priceUsd");
+        double change = nestedDouble(pair, "priceChange", "h24");
+        double volume = nestedDouble(pair, "volume", "h24");
+        double liquidity = nestedDouble(pair, "liquidity", "usd");
+        double marketCap = pair.optDouble("marketCap", pair.optDouble("fdv", Double.NaN));
+        StringBuilder out = new StringBuilder("金融工具：");
+        out.append(name.isEmpty() ? symbol : name);
+        if (!symbol.isEmpty()) {
+            out.append("(").append(symbol).append(")");
+        }
+        out.append(" 现价 $").append(fmt(price));
+        if (!quoteSymbol.isEmpty() && !Double.isNaN(optJsonDouble(pair, "priceNative"))) {
+            out.append(" / ").append(fmt(optJsonDouble(pair, "priceNative"))).append(" ").append(quoteSymbol);
+        }
+        out.append("，24h ").append(signed(change)).append("%");
+        if (!Double.isNaN(volume)) {
+            out.append("，24h成交 $").append(compactMoney(volume));
+        }
+        if (!Double.isNaN(liquidity)) {
+            out.append("，流动性 $").append(compactMoney(liquidity));
+        }
+        if (!Double.isNaN(marketCap) && marketCap > 0) {
+            out.append("，市值 $").append(compactMoney(marketCap));
+        }
+        out.append("，链 ").append(pair.optString("chainId", "--"))
+                .append(" / ").append(pair.optString("dexId", "--"))
+                .append("，来源 DexScreener");
+        return out.toString();
+    }
+
     private static JSONObject chooseCoinGeckoCoin(JSONArray coins, String query) {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         JSONObject first = null;
@@ -274,6 +471,14 @@ public final class RealtimeTools {
 
     private static String cryptoSearchQuery(String text) {
         String value = clean(text);
+        String alias = cryptoAliasSymbol(value);
+        if (!alias.isEmpty()) {
+            return alias.toLowerCase(Locale.ROOT);
+        }
+        String contract = extractContractAddress(value);
+        if (!contract.isEmpty()) {
+            return contract;
+        }
         String upper = value.toUpperCase(Locale.ROOT);
         Matcher ticker = Pattern.compile("\\b([A-Z0-9]{2,16})\\b").matcher(upper);
         while (ticker.find()) {
@@ -304,7 +509,90 @@ public final class RealtimeTools {
     }
 
     private static boolean isFinanceNoiseToken(String token) {
-        return matchesAny(token, "USD", "CNY", "RMB", "API", "HTTP", "HTTPS", "AI", "A股", "HK", "ETF", "24H", "TOKEN", "COIN", "CRYPTO");
+        return matchesAny(token, "USD", "CNY", "RMB", "API", "HTTP", "HTTPS", "AI", "A股", "HK", "ETF", "24H", "TOKEN", "COIN", "CRYPTO", "USDT", "USDC", "BUSD", "BSC", "DEX");
+    }
+
+    private static String extractContractAddress(String text) {
+        String value = clean(text);
+        Matcher evm = Pattern.compile("\\b0x[a-fA-F0-9]{40}\\b").matcher(value);
+        if (evm.find()) {
+            return evm.group();
+        }
+        Matcher sol = Pattern.compile("\\b[1-9A-HJ-NP-Za-km-z]{32,44}\\b").matcher(value);
+        while (sol.find()) {
+            String token = sol.group();
+            if (!isFinanceNoiseToken(token.toUpperCase(Locale.ROOT))) {
+                return token;
+            }
+        }
+        return "";
+    }
+
+    private static String preferredChain(String text) {
+        String value = clean(text).toLowerCase(Locale.ROOT);
+        if (matchesAny(value, "币安链", "bsc", "bnb chain", "bnbchain", "pancake")) {
+            return "bsc";
+        }
+        if (matchesAny(value, "以太坊链", "eth链", "ethereum", "uniswap")) {
+            return "ethereum";
+        }
+        if (matchesAny(value, "solana", "sol链", "raydium")) {
+            return "solana";
+        }
+        if (matchesAny(value, "base链", "base")) {
+            return "base";
+        }
+        if (matchesAny(value, "arbitrum", "arb链")) {
+            return "arbitrum";
+        }
+        if (matchesAny(value, "polygon", "matic链")) {
+            return "polygon";
+        }
+        return "";
+    }
+
+    private static String cryptoAliasSymbol(String text) {
+        String value = clean(text);
+        if (matchesAny(value, "比特币", "大饼") || hasTicker(value, "BTC")) return "BTC";
+        if (matchesAny(value, "以太坊", "姨太") || hasTicker(value, "ETH")) return "ETH";
+        if (matchesAny(value, "币安币") || hasTicker(value, "BNB")) return "BNB";
+        if (matchesAny(value, "狗狗币") || hasTicker(value, "DOGE")) return "DOGE";
+        if (matchesAny(value, "瑞波") || hasTicker(value, "XRP")) return "XRP";
+        if (matchesAny(value, "波场") || hasTicker(value, "TRX")) return "TRX";
+        if (matchesAny(value, "艾达币", "卡尔达诺") || hasTicker(value, "ADA")) return "ADA";
+        if (matchesAny(value, "雪崩") || hasTicker(value, "AVAX")) return "AVAX";
+        if (matchesAny(value, "波卡") || hasTicker(value, "DOT")) return "DOT";
+        if (matchesAny(value, "莱特币") || hasTicker(value, "LTC")) return "LTC";
+        if (matchesAny(value, "柴犬币") || hasTicker(value, "SHIB")) return "SHIB";
+        if (matchesAny(value, "泰达币") || hasTicker(value, "USDT")) return "USDT";
+        if (hasTicker(value, "USDC")) return "USDC";
+        if (hasTicker(value, "SOL")) return "SOL";
+        if (hasTicker(value, "PEPE")) return "PEPE";
+        if (hasTicker(value, "TON")) return "TON";
+        if (hasTicker(value, "LINK")) return "LINK";
+        if (hasTicker(value, "BCH")) return "BCH";
+        if (hasTicker(value, "UNI")) return "UNI";
+        if (hasTicker(value, "MATIC")) return "MATIC";
+        if (hasTicker(value, "POL")) return "POL";
+        if (hasTicker(value, "ETC")) return "ETC";
+        if (hasTicker(value, "FIL")) return "FIL";
+        if (hasTicker(value, "ICP")) return "ICP";
+        if (hasTicker(value, "ATOM")) return "ATOM";
+        if (hasTicker(value, "NEAR")) return "NEAR";
+        if (hasTicker(value, "ARB")) return "ARB";
+        if (hasTicker(value, "APT")) return "APT";
+        if (hasTicker(value, "SUI")) return "SUI";
+        if (hasTicker(value, "OP")) return "OP";
+        if (hasTicker(value, "AAVE")) return "AAVE";
+        if (hasTicker(value, "OKB")) return "OKB";
+        return "";
+    }
+
+    private static boolean hasTicker(String text, String symbol) {
+        if (text == null || symbol == null || symbol.isEmpty()) {
+            return false;
+        }
+        return Pattern.compile("(?i)(?<![A-Z0-9])" + Pattern.quote(symbol) + "(?![A-Z0-9])").matcher(text).find();
     }
 
     private static String sports(String text) throws Exception {
@@ -621,47 +909,90 @@ public final class RealtimeTools {
     }
 
     private static String weiboHot() throws Exception {
-        JSONObject data = new JSONObject(getUtf8("https://weibo.com/ajax/side/hotSearch", 10000));
-        JSONArray list = data.optJSONObject("data") == null ? null : data.optJSONObject("data").optJSONArray("realtime");
-        if (list == null || list.length() == 0) {
+        List<String> words = hotWordsFromWeibo(10);
+        if (words.isEmpty()) {
             return "";
         }
         StringBuilder out = new StringBuilder("微博热搜工具：");
-        for (int i = 0; i < Math.min(10, list.length()); i++) {
-            JSONObject item = list.optJSONObject(i);
-            if (item != null) {
-                out.append("\n").append(i + 1).append(". ").append(item.optString("note"));
-            }
+        for (int i = 0; i < words.size(); i++) {
+            out.append("\n").append(i + 1).append(". ").append(words.get(i));
         }
         return out.toString();
     }
 
     private static String baiduHot() throws Exception {
-        JSONObject data = new JSONObject(getUtf8("https://top.baidu.com/api/board?platform=wise&tab=realtime", 10000));
-        JSONArray list = data.optJSONObject("data") == null ? null : data.optJSONObject("data").optJSONArray("cards");
-        if (list == null || list.length() == 0) {
+        List<String> words = hotWordsFromBaidu(10);
+        if (words.isEmpty()) {
             return "热点工具：未获取到热榜数据";
         }
-        List<String> words = new ArrayList<>();
-        collectHotWords(list, words);
         StringBuilder out = new StringBuilder("百度热搜工具：");
-        for (int i = 0; i < Math.min(10, words.size()); i++) {
+        for (int i = 0; i < words.size(); i++) {
             out.append("\n").append(i + 1).append(". ").append(words.get(i));
-        }
-        if (words.isEmpty()) {
-            out.append("\n未解析到热榜标题");
         }
         return out.toString();
     }
 
+    private static List<String> hotWordsFromWeibo(int limit) throws Exception {
+        JSONObject data = new JSONObject(getUtf8("https://weibo.com/ajax/side/hotSearch", 10000));
+        JSONArray list = data.optJSONObject("data") == null ? null : data.optJSONObject("data").optJSONArray("realtime");
+        List<String> out = new ArrayList<>();
+        if (list == null) {
+            return out;
+        }
+        for (int i = 0; i < list.length() && out.size() < limit; i++) {
+            JSONObject item = list.optJSONObject(i);
+            if (item != null) {
+                appendHotWord(out, item.optString("note"));
+            }
+        }
+        return out;
+    }
+
+    private static List<String> hotWordsFromBaidu(int limit) throws Exception {
+        JSONObject data = new JSONObject(getUtf8("https://top.baidu.com/api/board?platform=wise&tab=realtime", 10000));
+        JSONArray list = data.optJSONObject("data") == null ? null : data.optJSONObject("data").optJSONArray("cards");
+        List<String> out = new ArrayList<>();
+        collectHotWords(list, out, limit);
+        return out;
+    }
+
+    private static List<String> rssTitles(String url, int limit) throws Exception {
+        String rss = getUtf8(url, 10000);
+        Matcher item = Pattern.compile("<item>(.*?)</item>", Pattern.DOTALL).matcher(rss);
+        List<String> out = new ArrayList<>();
+        while (item.find() && out.size() < limit) {
+            String block = item.group(1);
+            String title = xmlText(block, "title").replaceAll(" - .*$", "").trim();
+            String source = xmlText(block, "source");
+            if (!title.isEmpty()) {
+                appendHotWord(out, source.isEmpty() ? title : title + " / " + source);
+            }
+        }
+        return out;
+    }
+
+    private static void appendNumberedBlock(StringBuilder out, String title, List<String> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        out.append("\n").append(title).append("：");
+        for (int i = 0; i < rows.size(); i++) {
+            out.append("\n").append(i + 1).append(". ").append(rows.get(i));
+        }
+    }
+
     private static void collectHotWords(Object node, List<String> out) {
-        if (node == null || out.size() >= 10) {
+        collectHotWords(node, out, 10);
+    }
+
+    private static void collectHotWords(Object node, List<String> out, int limit) {
+        if (node == null || out.size() >= limit) {
             return;
         }
         if (node instanceof JSONArray) {
             JSONArray array = (JSONArray) node;
-            for (int i = 0; i < array.length() && out.size() < 10; i++) {
-                collectHotWords(array.opt(i), out);
+            for (int i = 0; i < array.length() && out.size() < limit; i++) {
+                collectHotWords(array.opt(i), out, limit);
             }
             return;
         }
@@ -673,12 +1004,12 @@ public final class RealtimeTools {
         appendHotWord(out, object.optString("word", ""));
         appendHotWord(out, object.optString("title", ""));
         appendHotWord(out, object.optString("note", ""));
-        if (out.size() >= 10) {
+        if (out.size() >= limit) {
             return;
         }
-        collectHotWords(object.optJSONArray("content"), out);
-        collectHotWords(object.optJSONArray("cards"), out);
-        collectHotWords(object.optJSONObject("data"), out);
+        collectHotWords(object.optJSONArray("content"), out, limit);
+        collectHotWords(object.optJSONArray("cards"), out, limit);
+        collectHotWords(object.optJSONObject("data"), out, limit);
     }
 
     private static void appendHotWord(List<String> out, String value) {
@@ -1052,6 +1383,33 @@ public final class RealtimeTools {
             }
         }
         return false;
+    }
+
+    private static double nestedDouble(JSONObject object, String objectKey, String valueKey) {
+        if (object == null) {
+            return Double.NaN;
+        }
+        JSONObject nested = object.optJSONObject(objectKey);
+        return nested == null ? Double.NaN : optJsonDouble(nested, valueKey);
+    }
+
+    private static double optJsonDouble(JSONObject object, String key) {
+        if (object == null || key == null) {
+            return Double.NaN;
+        }
+        Object value = object.opt(key);
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof String) {
+            try {
+                String text = ((String) value).trim();
+                return text.isEmpty() ? Double.NaN : Double.parseDouble(text);
+            } catch (Exception ignored) {
+                return Double.NaN;
+            }
+        }
+        return Double.NaN;
     }
 
     private static String fmt(double value) {

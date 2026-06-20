@@ -111,8 +111,8 @@ public final class MessageRouter {
         if (looksLikeWoolRequest(command)) {
             return new Route(Kind.WOOL, "羊毛线报：抓取赚客吧最新线报并生成榜单图片发群。");
         }
-        if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条")) {
-            return new Route(Kind.NEWS, "热点查询：总结用户问的热点方向，不能联网时说明需要配置联网模型或工具。");
+        if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")) {
+            return new Route(Kind.NEWS, "新闻/早报查询：整合热搜、热榜和 RSS 新闻，只输出适合群里的简短摘要。");
         }
         if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
             return new Route(Kind.WEATHER, "天气查询：按用户地点请求回复，不确定地点就追问。");
@@ -182,7 +182,7 @@ public final class MessageRouter {
         if (looksLikeWoolRequest(command)) {
             return true;
         }
-        if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条")) {
+        if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")) {
             return true;
         }
         if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
@@ -321,7 +321,7 @@ public final class MessageRouter {
     private static boolean looksLikeFinanceRequest(String text) {
         return matchesAny(text,
                 "股票", "基金", "虚拟币", "加密货币", "数字货币", "币价", "币圈",
-                "代币", "token", "coin", "crypto",
+                "代币", "合约地址", "链上", "币安链", "meme币", "token", "coin", "crypto", "bsc", "dex",
                 "比特币", "大饼", "以太坊", "狗狗币", "瑞波", "波场", "币安币", "波卡", "莱特币", "柴犬币",
                 "btc", "eth", "sol", "doge", "xrp", "bnb", "ada", "trx", "avax", "link", "dot", "ltc", "bch", "ton", "shib", "pepe", "uni", "matic", "pol", "etc", "fil", "icp", "atom", "near", "arb", "apt", "sui", "aave", "okb",
                 "行情", "汇率", "外汇", "美元", "人民币", "港币", "港元", "欧元", "日元", "英镑", "澳元", "加元", "新加坡元", "瑞郎", "离岸人民币",
@@ -341,7 +341,7 @@ public final class MessageRouter {
                 || looksLikeSportsRequest(text)
                 || looksLikeUtilityRequest(text)
                 || looksLikeWoolRequest(text)
-                || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "codex", "代码", "报错", "bug", "修复");
+                || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报", "codex", "代码", "报错", "bug", "修复");
     }
 
     private static boolean looksLikeSportsRequest(String text) {
