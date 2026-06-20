@@ -23,6 +23,7 @@ public final class MessageRouter {
         TTS,
         STICKER,
         REPORT,
+        PERSONA,
         SHUTUP,
         MANUAL,
         SCREEN_DIM,
@@ -82,6 +83,9 @@ public final class MessageRouter {
         }
         if (isReportCommand(command)) {
             return new Route(Kind.REPORT, "本地随机报道回复。");
+        }
+        if (isPersonaCommand(command)) {
+            return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
         }
         if (config.enableImage && looksLikeStickerRequest(command)) {
             return new Route(Kind.STICKER, "EmojiCut 表情包：生成 16 格白底贴纸图，切图保存后发群。");
@@ -154,6 +158,9 @@ public final class MessageRouter {
         if (isReportCommand(command)) {
             return true;
         }
+        if (isPersonaCommand(command)) {
+            return true;
+        }
         if (config.enableImage && looksLikeStickerRequest(command)) {
             return true;
         }
@@ -213,6 +220,14 @@ public final class MessageRouter {
         }
         return value.matches("^(机器人|bot|慢一点|韵味)?(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)$")
                 || value.matches("^(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)(机器人|bot|慢一点|韵味)?$");
+    }
+
+    public static boolean isPersonaCommand(String text) {
+        String value = compact(text);
+        if (value.isEmpty()) {
+            return false;
+        }
+        return value.matches(".*(人物画像|群员画像|成员画像|群友画像|群画像|画像分析|话痨排行|活跃排行|谁是话痨|谁最话痨|谁话最多|群聊总结|昨日总结|今日总结|昨天总结|今天总结|昨天干了啥|昨天说了啥|昨日重点|今日重点|重点是啥).*");
     }
 
     public static boolean isScreenDimCommand(String text) {

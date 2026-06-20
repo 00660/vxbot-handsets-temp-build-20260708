@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`103`
-- `versionName`：`0.1.102-quoted-delay-after-tap`
+- `versionCode`：`104`
+- `versionName`：`0.1.103-persona-profile`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
 
@@ -21,6 +21,7 @@
 - 微信通知监听：从系统通知提取群名、发送人、消息文本，按白名单群处理。
 - 名字匹配归一化：白名单、续聊发起人、喷子/恋人目标、OCR 会话名、图片/视频分享目标统一过滤括号表情、真实 emoji 和非文字符号。
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
+- 人物画像：白名单群消息按群、成员、日期分组落盘；群里发送 `人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持千问/豆包/MiMo TTS 下拉切换、发音人和语速配置；豆包支持浏览器 Cookie JSON 文件或完整 Cookie 文件导入，界面不展示 Cookie 原文，三段 Cookie 仅作兜底，MiMo 使用 `api-key` 调用小米 `mimo-v2.5-tts`，失败自动回退千问。
 - TTS 试听：功能页提供 `试听 TTS`，按当前 provider、角色、语速或控制参数生成一句测试语并在 APK 内播放。
@@ -51,6 +52,7 @@
 - 前台服务：`app/src/main/java/com/vxbot/wechatbot/BotService.java`
 - 通知监听：`app/src/main/java/com/vxbot/wechatbot/WxNotificationListener.java`
 - 消息分类：`app/src/main/java/com/vxbot/wechatbot/MessageRouter.java`
+- 人物画像存储：`app/src/main/java/com/vxbot/wechatbot/PersonaStore.java`
 - 上游文字请求：`app/src/main/java/com/vxbot/wechatbot/ChatClient.java`
 - 微信操作：`app/src/main/java/com/vxbot/wechatbot/WechatDriver.java`
 - OCR/找图找色：`app/src/main/java/com/vxbot/wechatbot/OcrHelper.java`
@@ -118,6 +120,8 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `tts.preview.fail` / `tts.preview.play.fail`：面板试听生成或播放失败。
 - `tts.prepare.fallback`：豆包三段 Cookie 缺失、MiMo API Key 缺失、失效或请求失败后，自动回退千问 TTS。
 - `chat.tool.direct`：新闻、金融、天气、体育和本地工具命中后直接使用实时工具结果回复。
+- `persona.store.full` / `persona.store.error`：人物画像按群成员分组落盘时成员数超限或写入失败。
+- `persona.analysis.request` / `persona.analysis.fallback`：人物画像上游大模型分析请求或失败后回落本地统计。
 - `video.parse.start` / `video.parse.done`：短视频或图集解析开始和完成。
 - `video.inline.http`：APK 内置解析器请求平台页面/API 的 HTTP 返回状态和响应体大小。
 - `video.bili.ids`：B 站解析到的 `bvid` 和 `cid`，`cid` 必须按字符串/long 处理，不能用 32 位 int。
@@ -132,6 +136,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-06-20：新增人物画像功能。白名单群消息会按群名、成员名、日期写入本地 `persona_store`；`人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 等指令会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计；版本升到 `versionCode=104` / `versionName=0.1.103-persona-profile`。
 - 2026-06-14：同步 GitHub 前已通过 `192.168.2.89:22` 真机核对当前运行 APK：`com.vxbot.wechatbot` 进程在线，`versionCode=103` / `versionName=0.1.102-quoted-delay-after-tap`，与本地源码 `app/build.gradle` 对齐；同步前本地差异备份目录：`.backup-20260614-230703-before-github-sync-v103`。
 - 2026-06-13：引用图取图动作改为固定时序：点击微信引用灰卡缩略图后立即按 `quotedImageOpenDelayMs` 等待，默认和最小值均为 `800ms`，等待结束后才判断预览页并截图；截图成功后固定等待 `300ms` 再执行 Back 返回会话。日志分别为 `image.reference.quote.after_tap_wait`、`image.reference.preview.capture` 和 `image.reference.preview.after_capture_wait`。
 - 2026-06-13：修复引用图请求被后端误取旧图的问题。引用图图生图命中后，上传给图片编辑接口的 multipart 只保留当前引用截图 1 个 `image` 附件，不再同时追加人物参考图、清凉风格图或历史图，避免后端按最后一个/临时文件目录取到旧文件；新增 `image.edit.request` 日志记录 filename、bytes、sha256，方便核对实际上传内容。

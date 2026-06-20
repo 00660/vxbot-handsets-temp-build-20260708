@@ -113,6 +113,30 @@ public final class ChatClient {
         throw last == null ? new IllegalStateException("视觉请求失败") : last;
     }
 
+    public String requestPersonaReport(Context context, BotConfig config, WxMessage message, String personaContext) throws Exception {
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置");
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("model", config.model);
+        JSONArray messages = new JSONArray();
+        messages.put(new JSONObject().put("role", "system").put("content",
+                "你是微信群人物画像分析助手。只根据用户提供的群聊分组样本分析，不要编造样本外事实。"
+                        + "输出可直接发到微信群里的中文短报告，必须包含：话痨是谁、各主要成员性格/表达风格、"
+                        + "他们昨天或今天干了啥说了啥、群聊重点。数据不足就明确说样本不足。"
+                        + "不要写内部推理，不要输出 JSON。"));
+        messages.put(new JSONObject().put("role", "user").put("content", personaContext));
+        payload.put("messages", messages);
+        payload.put("temperature", 0.45);
+        BotLog.i(context, "persona.analysis.request", "发送人物画像分析请求 group=" + message.sessionName
+                + " bytes=" + payload.toString().getBytes(StandardCharsets.UTF_8).length);
+        String reply = cleanReplyPrefix(postChat(config, payload), config);
+        if (reply == null || reply.trim().isEmpty()) {
+            throw new IllegalStateException("人物画像上游返回空内容");
+        }
+        return reply.trim();
+    }
+
     private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);

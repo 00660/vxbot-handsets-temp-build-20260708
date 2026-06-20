@@ -39,7 +39,8 @@ public final class SessionStore {
         }
         boolean mentioned = config.isBotMentioned(message.text);
         boolean reportCommand = MessageRouter.isReportCommand(message.text);
-        if (mentioned || reportCommand) {
+        boolean personaCommand = MessageRouter.isPersonaCommand(message.text);
+        if (mentioned || reportCommand || personaCommand) {
             if (canLockActiveSender(message, config)) {
                 activeSenders.put(session, message.senderName);
                 if (config.enableFollowUpWithoutMention) {

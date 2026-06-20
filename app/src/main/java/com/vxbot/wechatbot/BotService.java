@@ -37,6 +37,7 @@ public final class BotService extends Service {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService paymentWorker = Executors.newSingleThreadExecutor();
     private final SessionStore sessionStore = new SessionStore();
+    private final PersonaStore personaStore = new PersonaStore();
     private final Set<String> seenNotifications = new HashSet<>();
     private final HsDaemonManager daemonManager = new HsDaemonManager();
     private long serviceStartedAtMs;
@@ -244,6 +245,9 @@ public final class BotService extends Service {
             BotLog.w(this, "notice.skip.whitelist", "群不在白名单 " + message.sessionName);
             return;
         }
+        if (!MessageRouter.isPersonaCommand(message.text)) {
+            personaStore.remember(this, message);
+        }
         if (!sessionStore.shouldHandle(this, message, config)) {
             BotLog.i(this, "notice.skip.context", "未命中@或当前发起人锁 " + message.display());
             return;
@@ -336,6 +340,19 @@ public final class BotService extends Service {
                 }
                 if (route.kind == MessageRouter.Kind.MANUAL) {
                     return buildManualReply(config);
+                }
+                if (route.kind == MessageRouter.Kind.PERSONA) {
+                    String local = personaStore.buildReport(this, message.sessionName, message.text, System.currentTimeMillis());
+                    String personaContext = personaStore.buildModelContext(this, message.sessionName, message.text, System.currentTimeMillis());
+                    if (personaContext.isEmpty()) {
+                        return local;
+                    }
+                    try {
+                        return new ChatClient().requestPersonaReport(this, config, message, personaContext);
+                    } catch (Exception e) {
+                        BotLog.w(this, "persona.analysis.fallback", "人物画像上游分析失败，回落本地统计: " + e.getMessage());
+                        return local;
+                    }
                 }
                 if (route.kind == MessageRouter.Kind.SCREEN_DIM) {
                     ScreenControl.enableDimKeepAwake(this, "command");
@@ -478,9 +495,10 @@ public final class BotService extends Service {
                 + "1. 聊天：@" + name + " 后面直接说内容。\n"
                 + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
                 + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、赛事比分/赛事分析、来点羊毛、短视频/图集链接解析。\n"
-                + "4. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
-                + "5. 语音：发语音 文字；机器人请报道可测在线。\n"
-                + "6. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
+                + "4. 画像：人物画像、昨日总结、谁是话痨、昨天说了啥。\n"
+                + "5. 模式：撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
+                + "6. 语音：发语音 文字；机器人请报道可测在线。\n"
+                + "7. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
     }
 
     private boolean startTtsVoiceInCurrentChat(BotConfig config, WechatDriver driver, WxMessage message, String text, String reason) {
