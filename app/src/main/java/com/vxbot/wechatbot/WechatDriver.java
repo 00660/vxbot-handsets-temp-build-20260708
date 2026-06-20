@@ -71,7 +71,7 @@ public final class WechatDriver {
             PageInfo page = inspectWechatScreenByOcr(context, "codex_foreground_confirm");
             if (!"chat".equals(page.page)) {
                 BotLog.w(context, "codex.foreground.chat.missing", "当前前台不是微信会话页，停止本轮 Codex 前台发送 sessionName="
-                        + sessionName + " page=" + page.page + " reason=" + page.label);
+                        + sessionName + " page=" + page.page + " reason=" + page.reason);
                 return false;
             }
             waitChatBottomReady(context, config, "codex-foreground", sessionName);
@@ -86,7 +86,7 @@ public final class WechatDriver {
         PageInfo page = inspectWechatScreenByOcr(context, label);
         if (!"chat".equals(page.page)) {
             BotLog.w(context, "codex.foreground.ocr.not_chat", "前台 OCR 跳过，当前不是微信会话页 page="
-                    + page.page + " reason=" + page.label);
+                    + page.page + " reason=" + page.reason);
             return null;
         }
         return page.screen;
