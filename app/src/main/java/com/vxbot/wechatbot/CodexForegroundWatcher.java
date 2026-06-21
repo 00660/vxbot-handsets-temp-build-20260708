@@ -19,7 +19,7 @@ final class CodexForegroundWatcher {
     static final String NOTIFICATION_KEY_PREFIX = "codex-foreground-ocr:";
 
     private static final int MAX_SEEN_SIGNATURES = 160;
-    private static final int MAX_NOT_CHAT_COUNT = 3;
+    private static final int MAX_NOT_CHAT_COUNT = 8;
     private static final long RECENT_TEXT_SUPPRESS_MS = 120_000L;
 
     private final Object lock = new Object();

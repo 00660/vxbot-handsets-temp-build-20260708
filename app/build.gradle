@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 119
-        versionName "0.1.118-codex-chat-title-match"
+        versionCode 120
+        versionName "0.1.119-codex-enter-no-reply"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

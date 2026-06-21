@@ -279,6 +279,8 @@ public final class BotService extends Service {
         if (enteringSessionCodex) {
             sessionStore.enableSessionCodexMode(this, message, config);
             BotLog.i(this, "codex.session.enable", "已进入本群 Codex 模式 " + message.display());
+            enterCodexForegroundMode(config, message);
+            return;
         }
         MessageRouter.Route route = sessionStore.isSessionCodexMode(this, message, config)
                 ? new MessageRouter.Route(MessageRouter.Kind.CODEX, "本群 Codex 模式：授权发起人的消息直接交给 Codex 处理，不再走其它工具分流。")
@@ -308,6 +310,28 @@ public final class BotService extends Service {
         pauseLogOverlayForOperation(config);
         try {
             new WechatDriver(config.hsPort).leaveWechatIfForeground(this, "codex-exit");
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
+    }
+
+    private void enterCodexForegroundMode(BotConfig config, WxMessage message) {
+        if (config == null || message == null || !config.stayInCodexSession) {
+            return;
+        }
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, "codex.session.enter.open.abort", "hs daemon 未就绪，无法进入 Codex 前台会话");
+            return;
+        }
+        pauseLogOverlayForOperation(config);
+        try {
+            WechatDriver driver = new WechatDriver(config.hsPort);
+            BotLog.i(this, "codex.session.enter.open.start", "进入 Codex 模式后打开目标会话 " + message.display());
+            if (!driver.openTargetChatForReply(this, config, message)) {
+                BotLog.e(this, "codex.session.enter.open.fail", "进入 Codex 模式后打开目标会话失败 " + message.sessionName);
+                return;
+            }
+            startCodexForegroundWatcher(config, message);
         } finally {
             resumeLogOverlayAfterOperation();
         }
