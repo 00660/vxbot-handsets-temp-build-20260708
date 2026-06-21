@@ -129,6 +129,29 @@ public final class SessionStore {
         return lines == null ? new ArrayList<>() : new ArrayList<>(lines);
     }
 
+    public synchronized boolean looksLikeRecentBotReply(String sessionName, String text) {
+        String key = NameNormalizer.contentKey(text);
+        if (key.length() < 4) {
+            return false;
+        }
+        ArrayDeque<String> lines = histories.get(sessionName);
+        if (lines == null || lines.isEmpty()) {
+            return false;
+        }
+        for (String line : lines) {
+            if (line == null || !line.startsWith("bot:")) {
+                continue;
+            }
+            int split = line.indexOf(':', 4);
+            String body = split >= 0 ? line.substring(split + 1) : line.substring(4);
+            String botKey = NameNormalizer.contentKey(body);
+            if (botKey.length() >= 4 && (botKey.contains(key) || key.contains(botKey))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public synchronized boolean isSessionCodexMode(Context context, WxMessage message, BotConfig config) {
         if (context == null || message == null || config == null) {
             return false;

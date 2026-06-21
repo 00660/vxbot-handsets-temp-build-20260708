@@ -225,6 +225,10 @@ public final class BotService extends Service {
     }
 
     private void handleForegroundCodexMessage(WxMessage message) {
+        if (message != null && sessionStore.looksLikeRecentBotReply(message.sessionName, message.text)) {
+            BotLog.i(this, "codex.foreground.ocr.skip_bot_reply", "跳过 OCR 捕获到的机器人自身回复 " + message.display());
+            return;
+        }
         handleMessage(message, true);
     }
 

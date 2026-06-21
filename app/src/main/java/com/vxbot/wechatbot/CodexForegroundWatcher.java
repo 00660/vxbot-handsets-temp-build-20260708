@@ -90,6 +90,7 @@ final class CodexForegroundWatcher {
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         Map<String, Long> recentTexts = new HashMap<>();
         boolean baselineCaptured = false;
+        int baselineBottom = -1;
         int notChatCount = 0;
         try {
             while (!watch.stopRequested) {
@@ -128,19 +129,22 @@ final class CodexForegroundWatcher {
                         addSeen(seen, candidate.signature);
                         recentTexts.put(candidate.textKey, baselineAt);
                     }
+                    baselineBottom = Math.max(maxBottom(candidates), Math.round(screen.height * 0.52f));
                     baselineCaptured = true;
                     BotLog.i(context, "codex.foreground.ocr.baseline", "已记录当前会话 OCR 基线 sessionName="
                             + watch.sessionName + " sender=" + watch.senderName
-                            + " count=" + candidates.size());
+                            + " count=" + candidates.size()
+                            + " bottom=" + baselineBottom);
                     sleepPoll(config);
                     continue;
                 }
                 pruneRecentTexts(recentTexts);
-                Candidate next = newestUnhandled(candidates, seen, recentTexts);
+                Candidate next = newestUnhandled(candidates, seen, recentTexts, baselineBottom);
                 if (next != null) {
                     long now = System.currentTimeMillis();
                     addSeen(seen, next.signature);
                     recentTexts.put(next.textKey, now);
+                    baselineBottom = Math.max(baselineBottom, next.rect.bottom);
                     WxMessage message = new WxMessage(
                             watch.sessionName,
                             watch.senderName,
@@ -377,10 +381,14 @@ final class CodexForegroundWatcher {
     }
 
     private static Candidate newestUnhandled(List<Candidate> candidates, LinkedHashSet<String> seen,
-                                             Map<String, Long> recentTexts) {
+                                             Map<String, Long> recentTexts, int baselineBottom) {
         long now = System.currentTimeMillis();
         for (int i = candidates.size() - 1; i >= 0; i--) {
             Candidate candidate = candidates.get(i);
+            if (baselineBottom >= 0 && candidate.rect.bottom <= baselineBottom + 6) {
+                addSeen(seen, candidate.signature);
+                continue;
+            }
             if (seen.contains(candidate.signature)) {
                 continue;
             }
@@ -392,6 +400,19 @@ final class CodexForegroundWatcher {
             return candidate;
         }
         return null;
+    }
+
+    private static int maxBottom(List<Candidate> candidates) {
+        int value = -1;
+        if (candidates == null) {
+            return value;
+        }
+        for (Candidate candidate : candidates) {
+            if (candidate != null && candidate.rect != null) {
+                value = Math.max(value, candidate.rect.bottom);
+            }
+        }
+        return value;
     }
 
     private static void addSeen(LinkedHashSet<String> seen, String value) {
