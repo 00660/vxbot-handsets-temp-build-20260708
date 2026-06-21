@@ -121,7 +121,7 @@ final class CodexForegroundWatcher {
                     continue;
                 }
                 notChatCount = 0;
-                List<Candidate> candidates = extractAuthorizedIncoming(screen, watch.senderName);
+                List<Candidate> candidates = extractForegroundCandidates(screen, watch.senderName, config);
                 if (!baselineCaptured) {
                     long baselineAt = System.currentTimeMillis();
                     for (Candidate candidate : candidates) {
@@ -169,6 +169,35 @@ final class CodexForegroundWatcher {
                 }
             }
         }
+    }
+
+    private static List<Candidate> extractForegroundCandidates(OcrHelper.Screen screen, String senderName, BotConfig config) {
+        List<Candidate> exitCommands = extractVisibleExitCommands(screen, config);
+        if (!exitCommands.isEmpty()) {
+            return exitCommands;
+        }
+        return extractAuthorizedIncoming(screen, senderName);
+    }
+
+    private static List<Candidate> extractVisibleExitCommands(OcrHelper.Screen screen, BotConfig config) {
+        if (screen == null || screen.items.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Candidate> out = new ArrayList<>();
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (!isChatMessageText(screen, item, "")) {
+                continue;
+            }
+            String text = item.text.trim();
+            if (!MessageRouter.isCodexModeExitCommand(text, config)) {
+                continue;
+            }
+            String textKey = NameNormalizer.contentKey(text);
+            int yBucket = Math.max(0, item.centerY / 12);
+            String signature = textKey + ":" + yBucket + ":" + Math.max(0, item.rect.height() / 8);
+            out.add(new Candidate(text, textKey, signature, item.rect));
+        }
+        return out;
     }
 
     private static List<Candidate> extractAuthorizedIncoming(OcrHelper.Screen screen, String senderName) {
