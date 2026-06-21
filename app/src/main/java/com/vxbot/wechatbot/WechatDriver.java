@@ -995,10 +995,7 @@ public final class WechatDriver {
             if (value.isEmpty()) {
                 continue;
             }
-            boolean matched = target.length() <= 2
-                    ? value.equals(target)
-                    : value.equals(target) || value.contains(target) || target.contains(value);
-            if (!matched) {
+            if (!isConversationTitleMatch(item.text, value, target)) {
                 continue;
             }
             int score = item.rect.top + Math.abs(item.centerX - Math.round(screen.width * 0.28f));
@@ -1008,6 +1005,26 @@ public final class WechatDriver {
             }
         }
         return best;
+    }
+
+    private static boolean isConversationTitleMatch(String rawText, String value, String target) {
+        if (value == null || target == null || value.isEmpty() || target.isEmpty()) {
+            return false;
+        }
+        if (value.equals(target)) {
+            return true;
+        }
+        if (target.length() <= 2) {
+            return false;
+        }
+        String raw = rawText == null ? "" : rawText;
+        if (raw.contains(":") || raw.contains("：")) {
+            return false;
+        }
+        if (value.length() > target.length() + 6) {
+            return false;
+        }
+        return value.contains(target) || target.contains(value);
     }
 
     private boolean waitWechatChatByOcr(Context context, BotConfig config, long timeoutMs) {
