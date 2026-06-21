@@ -283,6 +283,10 @@ public final class MessageRouter {
                 || compact.startsWith("绑定")
                 || compact.startsWith("选择")
                 || compact.startsWith("改成")
+                || compact.startsWith("清除")
+                || compact.startsWith("重置")
+                || compact.startsWith("取消")
+                || compact.startsWith("切回")
                 || compact.startsWith("codex")
                 || compact.startsWith("happycodex")
                 || compact.startsWith("代码");
