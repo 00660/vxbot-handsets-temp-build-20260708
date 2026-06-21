@@ -68,10 +68,10 @@ public final class WechatDriver {
 
     public boolean confirmCurrentChatForCodex(Context context, BotConfig config, String sessionName) {
         try {
-            PageInfo page = inspectWechatScreenByOcr(context, "codex_foreground_confirm");
-            if (!"chat".equals(page.page)) {
+            OcrHelper.Screen screen = inspectCurrentCodexScreen(context, "codex_foreground_confirm", sessionName);
+            if (screen == null) {
                 BotLog.w(context, "codex.foreground.chat.missing", "当前前台不是微信会话页，停止本轮 Codex 前台发送 sessionName="
-                        + sessionName + " page=" + page.page + " reason=" + page.reason);
+                        + sessionName);
                 return false;
             }
             waitChatBottomReady(context, config, "codex-foreground", sessionName);
@@ -83,13 +83,30 @@ public final class WechatDriver {
     }
 
     public OcrHelper.Screen inspectCurrentChatScreen(Context context, String label) {
+        return inspectCurrentCodexScreen(context, label, "");
+    }
+
+    public OcrHelper.Screen inspectCurrentCodexScreen(Context context, String label, String sessionName) {
         PageInfo page = inspectWechatScreenByOcr(context, label);
-        if (!"chat".equals(page.page)) {
-            BotLog.w(context, "codex.foreground.ocr.not_chat", "前台 OCR 跳过，当前不是微信会话页 page="
-                    + page.page + " reason=" + page.reason);
-            return null;
+        if ("chat".equals(page.page)) {
+            return page.screen;
         }
-        return page.screen;
+        if (page.screen != null && looksLikeCurrentSessionScreen(page.screen, sessionName)) {
+            BotLog.i(context, "codex.foreground.ocr.session_fallback", "按顶部会话名确认当前 Codex 会话 sessionName="
+                    + sessionName + " page=" + page.page + " reason=" + page.reason);
+            return page.screen;
+        }
+        if (page.screen == null && !isWechatForeground()) {
+            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+            if (looksLikeCurrentSessionScreen(screen, sessionName)) {
+                BotLog.i(context, "codex.foreground.ocr.session_fallback", "前台包名未命中微信，但截图顶部会话名匹配 sessionName="
+                        + sessionName + " reason=" + page.reason);
+                return screen;
+            }
+        }
+        BotLog.w(context, "codex.foreground.ocr.not_chat", "前台 OCR 跳过，当前不是微信会话页 page="
+                + page.page + " reason=" + page.reason + " sessionName=" + sessionName);
+        return null;
     }
 
     public boolean sendTextInCurrentChat(Context context, BotConfig config, String reply, boolean keepForeground) {
@@ -914,6 +931,32 @@ public final class WechatDriver {
         if (tabDiscover) tabCount++;
         if (tabMe) tabCount++;
         return tabCount >= 3 || (topWechatTitle && tabCount >= 2);
+    }
+
+    private boolean looksLikeCurrentSessionScreen(OcrHelper.Screen screen, String sessionName) {
+        if (screen == null || sessionName == null || sessionName.trim().isEmpty()) {
+            return false;
+        }
+        String target = normalizeOcrName(sessionName);
+        if (target.isEmpty()) {
+            return false;
+        }
+        int maxTop = Math.round(screen.height * 0.13f);
+        int minTitleX = Math.round(screen.width * 0.18f);
+        int maxTitleX = Math.round(screen.width * 0.82f);
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY > maxTop || item.centerX < minTitleX || item.centerX > maxTitleX) {
+                continue;
+            }
+            String value = normalizeOcrName(item.text);
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (value.equals(target) || value.contains(target) || target.contains(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean clickConversationFromListByOcr(Context context, BotConfig config, String sessionName, OcrHelper.Screen currentScreen) throws Exception {

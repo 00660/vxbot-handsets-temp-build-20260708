@@ -108,7 +108,7 @@ final class CodexForegroundWatcher {
                     continue;
                 }
                 WechatDriver driver = new WechatDriver(config.hsPort);
-                OcrHelper.Screen screen = driver.inspectCurrentChatScreen(context, "codex_foreground_poll");
+                OcrHelper.Screen screen = driver.inspectCurrentCodexScreen(context, "codex_foreground_poll", watch.sessionName);
                 if (screen == null) {
                     notChatCount++;
                     if (notChatCount >= MAX_NOT_CHAT_COUNT) {
@@ -188,6 +188,25 @@ final class CodexForegroundWatcher {
             if (candidate != null) {
                 out.add(candidate);
             }
+        }
+        if (!out.isEmpty()) {
+            return out;
+        }
+        return extractLeftBubbleIncoming(screen, items, senderName);
+    }
+
+    private static List<Candidate> extractLeftBubbleIncoming(OcrHelper.Screen screen, List<OcrHelper.OcrItem> items,
+                                                              String senderName) {
+        List<Candidate> out = new ArrayList<>();
+        for (OcrHelper.OcrItem item : items) {
+            if (!isLeftBubbleMessageText(screen, item, senderName)) {
+                continue;
+            }
+            String text = item.text.trim();
+            String textKey = NameNormalizer.contentKey(text);
+            int yBucket = Math.max(0, item.centerY / 12);
+            String signature = textKey + ":" + yBucket + ":" + Math.max(0, item.rect.height() / 8);
+            out.add(new Candidate(text, textKey, signature, item.rect));
         }
         return out;
     }
@@ -272,6 +291,19 @@ final class CodexForegroundWatcher {
             return false;
         }
         return !isWechatChromeText(text, key);
+    }
+
+    private static boolean isLeftBubbleMessageText(OcrHelper.Screen screen, OcrHelper.OcrItem item, String senderName) {
+        if (!isChatMessageText(screen, item, senderName)) {
+            return false;
+        }
+        if (item.centerX < screen.width * 0.12f || item.centerX > screen.width * 0.68f) {
+            return false;
+        }
+        if (item.rect.left < screen.width * 0.09f && item.rect.width() < screen.width * 0.16f) {
+            return false;
+        }
+        return true;
     }
 
     private static boolean isWechatChromeText(String raw, String key) {
