@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -1468,6 +1469,9 @@ public final class WechatDriver {
     }
 
     private boolean focusAndSetText(Context context, BotConfig config, String text) throws Exception {
+        if (inputWithBotIme(context, config, text)) {
+            return true;
+        }
         if (pasteAfterImageInputFocus(context, config, text)) {
             return true;
         }
@@ -1512,6 +1516,123 @@ public final class WechatDriver {
             BotLog.w(context, "input.textcmd.fail", textInput);
         }
         return false;
+    }
+
+    private boolean inputWithBotIme(Context context, BotConfig config, String text) {
+        try {
+            if (!ensureBotInputMethod(context)) {
+                return false;
+            }
+            if (!focusChatInputForIme(context, config)) {
+                BotLog.w(context, "input.bot_ime.focus.fail", "自家输入法未能聚焦微信输入框");
+                return false;
+            }
+            boolean committed = BotInputMethodService.commitText(text, 2500L);
+            if (!committed) {
+                BotLog.w(context, "input.bot_ime.commit.fail", "自家输入法 commitText 失败 length="
+                        + (text == null ? 0 : text.length()));
+                return false;
+            }
+            BotLog.i(context, "input.bot_ime.commit", "已通过 HS 机器人输入法输入 length="
+                    + (text == null ? 0 : text.length()));
+            if (waitSendButtonVisible(context, 1800)) {
+                return true;
+            }
+            BotLog.w(context, "input.bot_ime.no_send", "自家输入法输入后未出现发送按钮，继续尝试旧输入链路");
+            return false;
+        } catch (Exception e) {
+            BotLog.w(context, "input.bot_ime.fail", e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean ensureBotInputMethod(Context context) throws Exception {
+        String ime = BotInputMethodService.COMPONENT;
+        String current = safeTrim(hs.settingsGet("secure", "default_input_method"));
+        if (sameInputMethod(current, ime)) {
+            return true;
+        }
+        String enabled = safeTrim(hs.settingsGet("secure", "enabled_input_methods"));
+        if (!enabledInputMethodsContain(enabled, ime)) {
+            try {
+                BotLog.i(context, "input.bot_ime.shell_enable", hs.shell("ime", "enable", ime));
+            } catch (Exception e) {
+                BotLog.w(context, "input.bot_ime.shell_enable.fail", e.getMessage());
+            }
+            String nextEnabled = enabled == null || enabled.isEmpty() || "null".equalsIgnoreCase(enabled)
+                    ? ime
+                    : enabled + ":" + ime;
+            String putEnabled = hs.settingsPut("secure", "enabled_input_methods", nextEnabled);
+            BotLog.i(context, "input.bot_ime.enable", "写入 enabled_input_methods result="
+                    + putEnabled + " added=" + ime);
+        }
+        try {
+            BotLog.i(context, "input.bot_ime.shell_set", hs.shell("ime", "set", ime));
+        } catch (Exception e) {
+            BotLog.w(context, "input.bot_ime.shell_set.fail", e.getMessage());
+        }
+        String putDefault = hs.settingsPut("secure", "default_input_method", ime);
+        BotLog.i(context, "input.bot_ime.set_default", "切换默认输入法 result=" + putDefault + " ime=" + ime);
+        SystemClock.sleep(500L);
+        current = safeTrim(hs.settingsGet("secure", "default_input_method"));
+        boolean ok = sameInputMethod(current, ime);
+        if (!ok) {
+            BotLog.w(context, "input.bot_ime.set_default.fail", "默认输入法仍不是自家 IME current=" + current);
+        }
+        return ok;
+    }
+
+    private boolean focusChatInputForIme(Context context, BotConfig config) throws Exception {
+        Rect input = OcrHelper.findChatInputBlock(context, hs);
+        if (input != null) {
+            hs.tap(input.centerX(), input.centerY());
+            SystemClock.sleep(stepDelay(config));
+            BotLog.i(context, "input.bot_ime.tap", "已按截图识别输入框点击 x=" + input.centerX()
+                    + " y=" + input.centerY()
+                    + " rect=" + input.flattenToString());
+            return true;
+        }
+        String selector = resolveEditTextSelector(context);
+        String focused = hs.focusNode(selector);
+        if (!focused.startsWith("ERR:")) {
+            BotLog.i(context, "input.bot_ime.focus", "已通过 selector 聚焦输入框 selector=" + selector);
+            SystemClock.sleep(stepDelay(config));
+            return true;
+        }
+        BotLog.w(context, "input.bot_ime.focus.selector_fail", focused);
+        String clicked = hs.clickNode(selector);
+        if (!clicked.startsWith("ERR:")) {
+            BotLog.i(context, "input.bot_ime.click", "已通过 selector 点击输入框 selector=" + selector);
+            SystemClock.sleep(stepDelay(config));
+            return true;
+        }
+        BotLog.w(context, "input.bot_ime.click.selector_fail", clicked);
+        return false;
+    }
+
+    private static boolean enabledInputMethodsContain(String enabled, String ime) {
+        if (enabled == null || ime == null) {
+            return false;
+        }
+        for (String part : enabled.split(":")) {
+            if (sameInputMethod(part, ime)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean sameInputMethod(String value, String ime) {
+        String current = safeTrim(value);
+        String target = safeTrim(ime);
+        return !current.isEmpty()
+                && !target.isEmpty()
+                && (current.equalsIgnoreCase(target)
+                || current.toLowerCase(Locale.ROOT).startsWith(target.toLowerCase(Locale.ROOT) + ";"));
+    }
+
+    private static String safeTrim(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private boolean setAppClipboard(Context context, String text) {

@@ -131,6 +131,14 @@ public final class HsClient {
         return streamCommand(builder.toString());
     }
 
+    public String settingsGet(String namespace, String key) throws Exception {
+        return command("settings_get " + namespace + " " + key);
+    }
+
+    public String settingsPut(String namespace, String key, String value) throws Exception {
+        return command("settings_put " + namespace + " " + key + " " + (value == null ? "" : value));
+    }
+
     public String textInput(String text) throws Exception {
         return command("text " + (text == null ? "" : text));
     }

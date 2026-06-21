@@ -69,6 +69,19 @@
             android:foregroundServiceType="mediaPlayback" />
 
         <service
+            android:name=".BotInputMethodService"
+            android:exported="true"
+            android:label="@string/bot_input_method_label"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/bot_input_method" />
+        </service>
+
+        <service
             android:name=".WxNotificationListener"
             android:exported="true"
             android:label="HS 微信机器人通知监听"

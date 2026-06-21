@@ -4,4 +4,5 @@
     <string name="notification_channel_name">机器人运行状态</string>
     <string name="accessibility_service_label">HS 微信机器人辅助服务</string>
     <string name="accessibility_service_description">用于无 root 模式下辅助机器人确认微信界面状态与执行必要点击。</string>
+    <string name="bot_input_method_label">HS 机器人输入法</string>
 </resources>
