@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 116
-        versionName "0.1.115-codex-left-bubble-ocr"
+        versionCode 117
+        versionName "0.1.116-codex-left-bubble-tight"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

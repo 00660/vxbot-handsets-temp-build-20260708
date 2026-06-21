@@ -123,8 +123,10 @@ final class CodexForegroundWatcher {
                 notChatCount = 0;
                 List<Candidate> candidates = extractAuthorizedIncoming(screen, watch.senderName);
                 if (!baselineCaptured) {
+                    long baselineAt = System.currentTimeMillis();
                     for (Candidate candidate : candidates) {
                         addSeen(seen, candidate.signature);
+                        recentTexts.put(candidate.textKey, baselineAt);
                     }
                     baselineCaptured = true;
                     BotLog.i(context, "codex.foreground.ocr.baseline", "已记录当前会话 OCR 基线 sessionName="
@@ -178,6 +180,10 @@ final class CodexForegroundWatcher {
             int byTop = Integer.compare(left.rect.top, right.rect.top);
             return byTop != 0 ? byTop : Integer.compare(left.rect.left, right.rect.left);
         });
+        List<Candidate> leftBubbles = extractLeftBubbleIncoming(screen, items, senderName);
+        if (!leftBubbles.isEmpty()) {
+            return leftBubbles;
+        }
         List<Candidate> out = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             OcrHelper.OcrItem label = items.get(i);
@@ -189,10 +195,7 @@ final class CodexForegroundWatcher {
                 out.add(candidate);
             }
         }
-        if (!out.isEmpty()) {
-            return out;
-        }
-        return extractLeftBubbleIncoming(screen, items, senderName);
+        return out;
     }
 
     private static List<Candidate> extractLeftBubbleIncoming(OcrHelper.Screen screen, List<OcrHelper.OcrItem> items,
@@ -298,6 +301,9 @@ final class CodexForegroundWatcher {
             return false;
         }
         if (item.centerX < screen.width * 0.12f || item.centerX > screen.width * 0.68f) {
+            return false;
+        }
+        if (item.rect.left > screen.width * 0.19f) {
             return false;
         }
         if (item.rect.left < screen.width * 0.09f && item.rect.width() < screen.width * 0.16f) {
