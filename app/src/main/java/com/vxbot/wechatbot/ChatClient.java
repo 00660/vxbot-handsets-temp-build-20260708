@@ -17,6 +17,20 @@ import java.util.List;
 public final class ChatClient {
     public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route) throws Exception {
         if (route.kind == MessageRouter.Kind.CODEX) {
+            if (config.enableHappyDirectCodex) {
+                try {
+                    String reply = new HappyDirectClient().requestCodex(context, config,
+                            buildHappyCodexPrompt(config, message, history));
+                    reply = cleanReplyPrefix(reply, config);
+                    if (!isBlank(reply)) {
+                        return reply.trim();
+                    }
+                    throw new IllegalStateException("Happy 直连返回空内容");
+                } catch (Exception e) {
+                    BotLog.w(context, "codex.happy_direct.fail", "Happy 直连请求失败: " + e.getMessage());
+                    throw new IllegalStateException("Happy 直连请求失败: " + e.getMessage(), e);
+                }
+            }
             if (isBlank(config.happyCodexEndpoint)) {
                 throw new IllegalStateException("Happy Codex 桥接接口未配置");
             }

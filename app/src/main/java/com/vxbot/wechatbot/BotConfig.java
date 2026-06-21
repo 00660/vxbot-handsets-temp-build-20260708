@@ -14,6 +14,7 @@ public final class BotConfig {
     private static final String PREFS = "bot_config";
     public static final String DEFAULT_CHAT_ENDPOINT = "http://192.168.2.157:8317/v1/chat/completions";
     public static final String DEFAULT_HAPPY_CODEX_ENDPOINT = "http://192.168.2.204:8731/v1/codex";
+    public static final String DEFAULT_HAPPY_DIRECT_SERVER_URL = "https://api.cluster-fluster.com";
     private static final String LEGACY_HAPPY_CODEX_ENDPOINT_LOCAL = "http://127.0.0.1:8731/v1/codex";
     private static final String LEGACY_HAPPY_CODEX_ENDPOINT_157 = "http://192.168.2.157:8731/v1/codex";
     public static final String DEFAULT_API_KEY = "client-key-1";
@@ -258,6 +259,10 @@ public final class BotConfig {
     public final String activeMode;
     public final String chatEndpoint;
     public final String happyCodexEndpoint;
+    public final String happyDirectServerUrl;
+    public final String happyDirectToken;
+    public final String happyDirectSecret;
+    public final String happyDirectSessionId;
     public final String apiKey;
     public final String model;
     public final String systemPrompt;
@@ -341,6 +346,7 @@ public final class BotConfig {
     public final boolean lockActiveSender;
     public final boolean enableFollowUpWithoutMention;
     public final boolean stayInCodexSession;
+    public final boolean enableHappyDirectCodex;
 
     private BotConfig(SharedPreferences prefs) {
         botNames = prefs.getString("botNames", "机器人");
@@ -349,6 +355,10 @@ public final class BotConfig {
         activeMode = prefs.getString("activeMode", "root");
         chatEndpoint = normalizeChatEndpoint(prefs.getString("chatEndpoint", DEFAULT_CHAT_ENDPOINT));
         happyCodexEndpoint = normalizeHappyCodexEndpoint(prefs.getString("happyCodexEndpoint", DEFAULT_HAPPY_CODEX_ENDPOINT));
+        happyDirectServerUrl = normalizeBaseUrl(prefs.getString("happyDirectServerUrl", DEFAULT_HAPPY_DIRECT_SERVER_URL), DEFAULT_HAPPY_DIRECT_SERVER_URL);
+        happyDirectToken = prefs.getString("happyDirectToken", "").trim();
+        happyDirectSecret = prefs.getString("happyDirectSecret", "").trim();
+        happyDirectSessionId = prefs.getString("happyDirectSessionId", "").trim();
         apiKey = normalizeApiKey(prefs.getString("apiKey", DEFAULT_API_KEY));
         model = prefs.getString("model", "gpt-5.5");
         systemPrompt = prefs.getString("systemPrompt", "你是微信群里的机器人，回复短、自然、接上下文。");
@@ -436,6 +446,7 @@ public final class BotConfig {
         lockActiveSender = prefs.getBoolean("lockActiveSender", true);
         enableFollowUpWithoutMention = prefs.getBoolean("enableFollowUpWithoutMention", true);
         stayInCodexSession = prefs.getBoolean("stayInCodexSession", false);
+        enableHappyDirectCodex = prefs.getBoolean("enableHappyDirectCodex", false);
     }
 
     public static BotConfig load(Context context) {

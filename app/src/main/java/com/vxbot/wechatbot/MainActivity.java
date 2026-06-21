@@ -74,6 +74,12 @@ public final class MainActivity extends Activity {
     private EditText followUpSenderWhitelist;
     private EditText chatEndpoint;
     private EditText happyCodexEndpoint;
+    private Switch enableHappyDirectCodex;
+    private EditText happyDirectServerUrl;
+    private EditText happyDirectSessionId;
+    private EditText happyDirectToken;
+    private EditText happyDirectSecret;
+    private TextView happyDirectPairingInfo;
     private EditText apiKey;
     private EditText model;
     private EditText systemPrompt;
@@ -325,6 +331,16 @@ public final class MainActivity extends Activity {
         LinearLayout upstreamPage = page(content, "上游模型");
         chatEndpoint = edit(upstreamPage, "OpenAI 兼容接口", BotConfig.DEFAULT_CHAT_ENDPOINT, false);
         happyCodexEndpoint = edit(upstreamPage, "Happy Codex 桥接接口", BotConfig.DEFAULT_HAPPY_CODEX_ENDPOINT, false);
+        enableHappyDirectCodex = switchRow(upstreamPage, "Happy Codex 直连 session");
+        happyDirectServerUrl = edit(upstreamPage, "Happy Server", BotConfig.DEFAULT_HAPPY_DIRECT_SERVER_URL, false);
+        happyDirectSessionId = edit(upstreamPage, "Happy Codex sessionId", "", false);
+        happyDirectToken = edit(upstreamPage, "Happy token", "", false);
+        happyDirectSecret = edit(upstreamPage, "Happy account secret", "", false);
+        happyDirectPairingInfo = text("Happy 配对未生成", 13, MUTED, Typeface.NORMAL);
+        upstreamPage.addView(happyDirectPairingInfo);
+        upstreamPage.addView(buttonRow(
+                button("生成 Happy 配对", v -> startHappyDirectPairing()),
+                button("完成 Happy 配对", v -> finishHappyDirectPairing())));
         apiKey = edit(upstreamPage, "API Key", BotConfig.DEFAULT_API_KEY, false);
         model = edit(upstreamPage, "模型", "gpt-5.5", false);
         systemPrompt = edit(upstreamPage, "基础 system prompt", "", true);
@@ -691,6 +707,12 @@ public final class MainActivity extends Activity {
             activeMode.setSelection("shizuku".equals(config.activeMode) ? 1 : 0);
             chatEndpoint.setText(config.chatEndpoint);
             happyCodexEndpoint.setText(config.happyCodexEndpoint);
+            enableHappyDirectCodex.setChecked(config.enableHappyDirectCodex);
+            happyDirectServerUrl.setText(config.happyDirectServerUrl);
+            happyDirectSessionId.setText(config.happyDirectSessionId);
+            happyDirectToken.setText(config.happyDirectToken);
+            happyDirectSecret.setText(config.happyDirectSecret);
+            refreshHappyDirectPairingInfo();
             apiKey.setText(config.apiKey);
             model.setText(config.model);
             systemPrompt.setText(config.systemPrompt);
@@ -795,6 +817,11 @@ public final class MainActivity extends Activity {
         e.putString("activeMode", activeMode.getSelectedItem().toString());
         e.putString("chatEndpoint", chatEndpoint.getText().toString());
         e.putString("happyCodexEndpoint", happyCodexEndpoint.getText().toString());
+        e.putBoolean("enableHappyDirectCodex", enableHappyDirectCodex.isChecked());
+        e.putString("happyDirectServerUrl", happyDirectServerUrl.getText().toString());
+        e.putString("happyDirectSessionId", happyDirectSessionId.getText().toString());
+        e.putString("happyDirectToken", happyDirectToken.getText().toString());
+        e.putString("happyDirectSecret", happyDirectSecret.getText().toString());
         e.putString("apiKey", apiKey.getText().toString());
         e.putString("model", model.getText().toString());
         e.putString("systemPrompt", systemPrompt.getText().toString());
@@ -894,6 +921,75 @@ public final class MainActivity extends Activity {
         BotLog.i(this, "config.save", "配置已保存");
         toast("配置已保存");
         refreshStatus();
+    }
+
+    private void startHappyDirectPairing() {
+        saveConfig();
+        String serverUrl = happyDirectServerUrl.getText().toString().trim();
+        toast("正在生成 Happy 配对链接");
+        uiWorker.execute(() -> {
+            try {
+                HappyDirectClient.Pairing pairing = new HappyDirectClient().startAccountPairing(serverUrl);
+                BotConfig.prefs(this).edit()
+                        .putString("happyDirectPairPublicKey", pairing.publicKeyBase64)
+                        .putString("happyDirectPairSecretKey", pairing.secretKeyBase64)
+                        .putString("happyDirectPairUrl", pairing.url)
+                        .apply();
+                runOnUiThread(() -> {
+                    refreshHappyDirectPairingInfo();
+                    toast("Happy 配对链接已生成");
+                });
+            } catch (Exception e) {
+                BotLog.w(this, "happy.direct.pair.start.fail", e.getMessage());
+                runOnUiThread(() -> toast("Happy 配对生成失败，看日志"));
+            }
+        });
+    }
+
+    private void finishHappyDirectPairing() {
+        saveConfig();
+        SharedPreferences prefs = BotConfig.prefs(this);
+        String publicKey = prefs.getString("happyDirectPairPublicKey", "");
+        String secretKey = prefs.getString("happyDirectPairSecretKey", "");
+        String serverUrl = happyDirectServerUrl.getText().toString().trim();
+        if (publicKey == null || publicKey.trim().isEmpty() || secretKey == null || secretKey.trim().isEmpty()) {
+            toast("先生成 Happy 配对链接");
+            return;
+        }
+        toast("正在完成 Happy 配对");
+        uiWorker.execute(() -> {
+            try {
+                HappyDirectClient.Credentials credentials =
+                        new HappyDirectClient().finishAccountPairing(serverUrl, publicKey, secretKey);
+                BotConfig.prefs(this).edit()
+                        .putString("happyDirectToken", credentials.token)
+                        .putString("happyDirectSecret", credentials.secretBase64)
+                        .remove("happyDirectPairSecretKey")
+                        .apply();
+                runOnUiThread(() -> {
+                    happyDirectToken.setText(credentials.token);
+                    happyDirectSecret.setText(credentials.secretBase64);
+                    refreshHappyDirectPairingInfo();
+                    toast("Happy 配对完成");
+                });
+            } catch (Exception e) {
+                BotLog.w(this, "happy.direct.pair.finish.fail", e.getMessage());
+                runOnUiThread(() -> toast("Happy 配对未完成，看日志"));
+            }
+        });
+    }
+
+    private void refreshHappyDirectPairingInfo() {
+        if (happyDirectPairingInfo == null) {
+            return;
+        }
+        SharedPreferences prefs = BotConfig.prefs(this);
+        String url = prefs.getString("happyDirectPairUrl", "");
+        if (url == null || url.trim().isEmpty()) {
+            happyDirectPairingInfo.setText("Happy 配对未生成");
+            return;
+        }
+        happyDirectPairingInfo.setText("Happy 配对链接：\n" + url);
     }
 
     private void startBroadcastText() {
