@@ -340,10 +340,10 @@ public final class MainActivity extends Activity {
         happyDirectCwd = edit(upstreamPage, "Happy Codex 工作目录", BotConfig.DEFAULT_HAPPY_DIRECT_CWD, false);
         happyDirectToken = edit(upstreamPage, "Happy token", "", false);
         happyDirectSecret = edit(upstreamPage, "Happy account secret", "", false);
-        happyDirectPairingInfo = text("Happy 配对未生成", 13, MUTED, Typeface.NORMAL);
+        happyDirectPairingInfo = text("Happy 授权请求未创建", 13, MUTED, Typeface.NORMAL);
         upstreamPage.addView(happyDirectPairingInfo);
         upstreamPage.addView(buttonRow(
-                button("生成 Happy 配对", v -> startHappyDirectPairing()),
+                button("创建 Happy 授权请求", v -> startHappyDirectPairing()),
                 button("完成 Happy 配对", v -> finishHappyDirectPairing())));
         apiKey = edit(upstreamPage, "API Key", BotConfig.DEFAULT_API_KEY, false);
         model = edit(upstreamPage, "模型", "gpt-5.5", false);
@@ -934,7 +934,7 @@ public final class MainActivity extends Activity {
     private void startHappyDirectPairing() {
         saveConfig();
         String serverUrl = happyDirectServerUrl.getText().toString().trim();
-        toast("正在生成 Happy 配对链接");
+        toast("正在创建 Happy 服务端授权请求");
         uiWorker.execute(() -> {
             try {
                 HappyDirectClient.Pairing pairing = new HappyDirectClient().startAccountPairing(serverUrl);
@@ -945,11 +945,11 @@ public final class MainActivity extends Activity {
                         .apply();
                 runOnUiThread(() -> {
                     refreshHappyDirectPairingInfo();
-                    toast("Happy 配对链接已生成");
+                    toast("Happy 授权扫码链接已创建");
                 });
             } catch (Exception e) {
                 BotLog.w(this, "happy.direct.pair.start.fail", e.getMessage());
-                runOnUiThread(() -> toast("Happy 配对生成失败，看日志"));
+                runOnUiThread(() -> toast("Happy 授权请求创建失败，看日志"));
             }
         });
     }
@@ -961,7 +961,7 @@ public final class MainActivity extends Activity {
         String secretKey = prefs.getString("happyDirectPairSecretKey", "");
         String serverUrl = happyDirectServerUrl.getText().toString().trim();
         if (publicKey == null || publicKey.trim().isEmpty() || secretKey == null || secretKey.trim().isEmpty()) {
-            toast("先生成 Happy 配对链接");
+            toast("先创建 Happy 授权请求");
             return;
         }
         toast("正在完成 Happy 配对");
@@ -994,10 +994,10 @@ public final class MainActivity extends Activity {
         SharedPreferences prefs = BotConfig.prefs(this);
         String url = prefs.getString("happyDirectPairUrl", "");
         if (url == null || url.trim().isEmpty()) {
-            happyDirectPairingInfo.setText("Happy 配对未生成");
+            happyDirectPairingInfo.setText("Happy 授权请求未创建");
             return;
         }
-        happyDirectPairingInfo.setText("Happy 配对链接：\n" + url);
+        happyDirectPairingInfo.setText("Happy 授权扫码链接：\n" + url);
     }
 
     private void startBroadcastText() {
