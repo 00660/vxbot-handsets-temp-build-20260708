@@ -28,36 +28,6 @@ import okhttp3.WebSocketListener;
 final class HappyDirectClient {
     private static final String CLIENT_HEADER = "vxbot-apk-happy-direct/1";
 
-    Pairing startAccountPairing(String serverUrl) throws Exception {
-        TweetNaclFast.Box.KeyPair keyPair = HappyCrypto.newBoxKeyPair();
-        String publicKey = HappyCrypto.encodeBase64(keyPair.getPublicKey());
-        JSONObject body = new JSONObject().put("publicKey", publicKey);
-        httpJson(trimServer(serverUrl) + "/v1/auth/account/request", "POST", "", body);
-        return new Pairing(
-                publicKey,
-                HappyCrypto.encodeBase64(keyPair.getSecretKey()),
-                "happy:///account?" + HappyCrypto.encodeBase64Url(keyPair.getPublicKey()));
-    }
-
-    Credentials finishAccountPairing(String serverUrl, String publicKeyBase64, String secretKeyBase64) throws Exception {
-        JSONObject body = new JSONObject().put("publicKey", publicKeyBase64);
-        JSONObject json = httpJson(trimServer(serverUrl) + "/v1/auth/account/request", "POST", "", body);
-        if (!"authorized".equals(json.optString("state"))) {
-            throw new IllegalStateException("Happy 配对尚未授权");
-        }
-        String token = json.optString("token", "").trim();
-        String response = json.optString("response", "").trim();
-        if (token.isEmpty() || response.isEmpty()) {
-            throw new IllegalStateException("Happy 配对响应缺少 token/response");
-        }
-        byte[] secretKey = HappyCrypto.decodeBase64Any(secretKeyBase64);
-        byte[] accountSecret = HappyCrypto.decryptBoxBundle(HappyCrypto.decodeBase64Any(response), secretKey);
-        if (accountSecret == null || accountSecret.length != 32) {
-            throw new IllegalStateException("Happy 配对响应解密失败");
-        }
-        return new Credentials(token, HappyCrypto.encodeBase64(accountSecret));
-    }
-
     String requestCodex(Context context, BotConfig config, String prompt) throws Exception {
         if (isBlank(config.happyDirectToken)
                 || isBlank(config.happyDirectSecret)) {
@@ -619,28 +589,6 @@ final class HappyDirectClient {
 
     private static boolean isBlank(String text) {
         return text == null || text.trim().isEmpty();
-    }
-
-    static final class Pairing {
-        final String publicKeyBase64;
-        final String secretKeyBase64;
-        final String url;
-
-        Pairing(String publicKeyBase64, String secretKeyBase64, String url) {
-            this.publicKeyBase64 = publicKeyBase64;
-            this.secretKeyBase64 = secretKeyBase64;
-            this.url = url;
-        }
-    }
-
-    static final class Credentials {
-        final String token;
-        final String secretBase64;
-
-        Credentials(String token, String secretBase64) {
-            this.token = token;
-            this.secretBase64 = secretBase64;
-        }
     }
 
     private static final class SessionRef {

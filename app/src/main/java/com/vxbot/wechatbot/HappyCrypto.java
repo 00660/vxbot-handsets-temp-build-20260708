@@ -39,28 +39,6 @@ final class HappyCrypto {
         return Base64.decode(text, flags);
     }
 
-    static String encodeBase64Url(byte[] data) {
-        return Base64.encodeToString(data, Base64.NO_WRAP | Base64.URL_SAFE | Base64.NO_PADDING);
-    }
-
-    static TweetNaclFast.Box.KeyPair newBoxKeyPair() {
-        return TweetNaclFast.Box.keyPair_fromSecretKey(randomBytes(32));
-    }
-
-    static byte[] encryptBox(byte[] data, byte[] recipientPublicKey) {
-        TweetNaclFast.Box.KeyPair ephemeral = newBoxKeyPair();
-        byte[] nonce = randomBytes(TweetNaclFast.Box.nonceLength);
-        byte[] encrypted = new TweetNaclFast.Box(recipientPublicKey, ephemeral.getSecretKey()).box(data, nonce);
-        if (encrypted == null) {
-            throw new IllegalStateException("Happy box encrypt failed");
-        }
-        byte[] out = new byte[32 + nonce.length + encrypted.length];
-        System.arraycopy(ephemeral.getPublicKey(), 0, out, 0, 32);
-        System.arraycopy(nonce, 0, out, 32, nonce.length);
-        System.arraycopy(encrypted, 0, out, 32 + nonce.length, encrypted.length);
-        return out;
-    }
-
     static byte[] decryptBoxBundle(byte[] bundle, byte[] recipientSecretKey) {
         if (bundle == null || bundle.length < 32 + TweetNaclFast.Box.nonceLength) {
             return null;

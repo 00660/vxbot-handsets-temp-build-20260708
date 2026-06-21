@@ -90,6 +90,9 @@ public final class MessageRouter {
         if (isCodexModeExitCommand(command)) {
             return new Route(Kind.CODEX, "退出本群授权 Codex 模式。", "", true, true);
         }
+        if (extractCodexSessionSwitch(command, config) != null) {
+            return new Route(Kind.CODEX, "切换 Happy Codex 会话。", "", false, true);
+        }
         if (isCodexModeEnterCommand(command)) {
             return new Route(Kind.CODEX, "进入本群授权 Codex 模式：后续由该授权人发送的消息全部交给 Codex。");
         }
@@ -168,6 +171,9 @@ public final class MessageRouter {
             return true;
         }
         if (isCodexModeEnterCommand(command)) {
+            return true;
+        }
+        if (extractCodexSessionSwitch(command, config) != null) {
             return true;
         }
         if (isCodexCommand(command)) {
@@ -253,6 +259,58 @@ public final class MessageRouter {
             command = text;
         }
         return isCodexModeExitCommand(command);
+    }
+
+    public static String extractCodexSessionSwitch(String text, BotConfig config) {
+        String command = stripBotMention(text, config);
+        if (command.isEmpty()) {
+            command = text;
+        }
+        String value = cleanCommand(command).trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        String compact = removeWhitespace(compact(value)).toLowerCase(Locale.ROOT);
+        boolean hasCodex = compact.contains("codex") || compact.contains("代码");
+        boolean hasSession = compact.contains("会话") || compact.contains("session");
+        if (!hasCodex || !hasSession) {
+            return null;
+        }
+        boolean switchAction = compact.startsWith("切换")
+                || compact.startsWith("使用")
+                || compact.startsWith("设置")
+                || compact.startsWith("指定")
+                || compact.startsWith("绑定")
+                || compact.startsWith("选择")
+                || compact.startsWith("改成")
+                || compact.startsWith("codex")
+                || compact.startsWith("happycodex")
+                || compact.startsWith("代码");
+        if (!switchAction) {
+            return null;
+        }
+        if (compact.matches(".*(自动|最近活跃|清除|重置|取消|不指定|不用指定).*")) {
+            return "";
+        }
+        String target = value;
+        String[] markers = {
+                "sessionId", "sessionID", "SessionId", "Session ID", "session id",
+                "session", "Session", "会话"
+        };
+        int bestIndex = -1;
+        String bestMarker = "";
+        for (String marker : markers) {
+            int index = target.lastIndexOf(marker);
+            if (index >= bestIndex) {
+                bestIndex = index;
+                bestMarker = marker;
+            }
+        }
+        if (bestIndex >= 0) {
+            target = target.substring(bestIndex + bestMarker.length());
+        }
+        target = sanitizeSessionId(target);
+        return target.isEmpty() ? null : target;
     }
 
     public static boolean isScreenDimCommand(String text) {
@@ -368,6 +426,7 @@ public final class MessageRouter {
                 || looksLikeWoolRequest(text)
                 || matchesAny(text, "天气", "下雨", "温度", "气温", "预报", "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")
                 || isCodexModeExitCommand(text)
+                || extractCodexSessionSwitch(text, null) != null
                 || isCodexModeEnterCommand(text)
                 || isCodexCommand(text);
     }
@@ -429,6 +488,39 @@ public final class MessageRouter {
         }
         char next = value.charAt(command.length());
         return !((next >= 'a' && next <= 'z') || (next >= '0' && next <= '9') || next == '_');
+    }
+
+    private static String sanitizeSessionId(String value) {
+        if (value == null) {
+            return "";
+        }
+        String out = value.trim();
+        while (!out.isEmpty() && TARGET_SEPARATORS.indexOf(out.charAt(0)) >= 0) {
+            out = out.substring(1).trim();
+        }
+        String[] fillers = {"为", "到", "成", "使用", "设为", "设置为", "指定为", "绑定为", "切换到"};
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (String filler : fillers) {
+                if (out.startsWith(filler)) {
+                    out = out.substring(filler.length()).trim();
+                    changed = true;
+                }
+            }
+        }
+        int space = out.indexOf(' ');
+        if (space > 0) {
+            out = out.substring(0, space);
+        }
+        int line = out.indexOf('\n');
+        if (line > 0) {
+            out = out.substring(0, line);
+        }
+        while (!out.isEmpty() && TARGET_SEPARATORS.indexOf(out.charAt(out.length() - 1)) >= 0) {
+            out = out.substring(0, out.length() - 1).trim();
+        }
+        return out;
     }
 
     private static boolean looksLikeUtilityRequest(String text) {

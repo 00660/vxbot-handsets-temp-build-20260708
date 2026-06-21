@@ -270,6 +270,11 @@ public final class BotService extends Service {
             BotLog.i(this, "notice.skip.context", "未命中@或当前发起人锁 " + message.display());
             return;
         }
+        String codexSessionId = MessageRouter.extractCodexSessionSwitch(message.text, config);
+        if (codexSessionId != null) {
+            handleCodexSessionSwitchCommand(config, message, codexSessionId);
+            return;
+        }
         if (MessageRouter.isCodexModeExitCommand(message.text, config)) {
             if (sessionStore.isSessionCodexMode(this, message, config)) {
                 handleCodexExitCommand(config, message);
@@ -301,6 +306,51 @@ public final class BotService extends Service {
             return false;
         }
         return message.postTime + STARTUP_NOTIFICATION_GRACE_MS < serviceStartedAtMs;
+    }
+
+    private void handleCodexSessionSwitchCommand(BotConfig config, WxMessage message, String sessionId) {
+        if (!config.isFollowUpSenderAllowed(message.senderName)) {
+            BotLog.i(this, "codex.session.switch.not_allowed",
+                    "Codex 会话切换拒绝，发起人不在续聊控制人白名单 group="
+                            + message.sessionName + " sender=" + message.senderName);
+            return;
+        }
+        String target = sessionId == null ? "" : sessionId.trim();
+        SharedPreferences.Editor editor = BotConfig.prefs(this).edit();
+        String reply;
+        if (target.isEmpty()) {
+            editor.remove("happyDirectSessionId");
+            reply = "Codex 会话已切回自动选择。";
+        } else {
+            editor.putString("happyDirectSessionId", target);
+            reply = "Codex 会话已切换：" + target;
+        }
+        editor.apply();
+        BotLog.i(this, "codex.session.switch", target.isEmpty()
+                ? "已清除 Happy Codex sessionId " + message.display()
+                : "已切换 Happy Codex sessionId=" + target + " " + message.display());
+        sendCommandAck(config, message, reply, "codex-session-switch");
+    }
+
+    private void sendCommandAck(BotConfig config, WxMessage message, String reply, String reason) {
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, reason + ".ack.abort", "hs daemon 未就绪，无法发送确认");
+            return;
+        }
+        pauseLogOverlayForOperation(config);
+        try {
+            WechatDriver driver = new WechatDriver(config.hsPort);
+            if (!driver.openTargetChatForReply(this, config, message)) {
+                BotLog.e(this, reason + ".ack.open.fail", "目标会话打开失败 " + message.sessionName);
+                return;
+            }
+            boolean sent = driver.sendTextInCurrentChat(this, config, message.sessionName, reply, false);
+            if (sent) {
+                sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
+            }
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
     }
 
     private void handleCodexExitCommand(BotConfig config, WxMessage message) {
