@@ -14,7 +14,16 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.UUID;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
 
 final class HappyDirectClient {
     private static final String CLIENT_HEADER = "vxbot-apk-happy-direct/1";
@@ -51,13 +60,23 @@ final class HappyDirectClient {
 
     String requestCodex(Context context, BotConfig config, String prompt) throws Exception {
         if (isBlank(config.happyDirectToken)
-                || isBlank(config.happyDirectSecret)
-                || isBlank(config.happyDirectSessionId)) {
-            throw new IllegalStateException("Happy 直连缺少 token/secret/sessionId");
+                || isBlank(config.happyDirectSecret)) {
+            throw new IllegalStateException("Happy 直连缺少 token/secret");
         }
         String server = trimServer(config.happyDirectServerUrl);
         byte[] accountSecret = HappyCrypto.decodeBase64Any(config.happyDirectSecret);
-        SessionRef session = resolveSession(server, config.happyDirectToken, accountSecret, config.happyDirectSessionId);
+        String sessionId = config.happyDirectSessionId;
+        if (isBlank(sessionId)) {
+            try {
+                sessionId = spawnCodexSession(server, config.happyDirectToken, accountSecret, config);
+                BotConfig.prefs(context).edit().putString("happyDirectSessionId", sessionId).apply();
+                BotLog.i(context, "codex.happy_direct.spawn", "Happy 已拉起 Codex sessionId=" + sessionId);
+            } catch (Exception e) {
+                BotLog.w(context, "codex.happy_direct.spawn.fail",
+                        "Happy 机器 RPC 拉起失败，尝试最近活跃 session: " + e.getMessage());
+            }
+        }
+        SessionRef session = resolveSessionWithRetry(server, config.happyDirectToken, accountSecret, sessionId);
         int beforeSeq = latestSeq(server, config.happyDirectToken, session.id);
         int sentSeq = sendUserMessage(server, config.happyDirectToken, session, prompt, config);
         Reply reply = waitForReply(server, config.happyDirectToken, session,
@@ -67,27 +86,160 @@ final class HappyDirectClient {
         return reply.text.isEmpty() ? "Codex 已完成，但没有返回文本。" : reply.text;
     }
 
-    private SessionRef resolveSession(String server, String token, byte[] accountSecret, String sessionId) throws Exception {
-        JSONObject data = httpJson(server + "/v1/sessions", "GET", token, null);
-        JSONArray sessions = data.optJSONArray("sessions");
-        if (sessions == null) {
-            throw new IllegalStateException("Happy sessions 响应为空");
+    private String spawnCodexSession(String server, String token, byte[] accountSecret, BotConfig config) throws Exception {
+        MachineRef machine = resolveMachine(server, token, accountSecret, config.happyDirectMachineId);
+        JSONObject params = new JSONObject()
+                .put("type", "spawn-in-directory")
+                .put("directory", config.happyDirectCwd)
+                .put("approvedNewDirectoryCreation", false)
+                .put("agent", "codex");
+        String encryptedParams = HappyCrypto.encodeBase64(
+                HappyCrypto.encryptJson(params.toString(), machine.key, machine.variant));
+        JSONObject ack = socketRpc(server, token, machine.id + ":spawn-happy-session", encryptedParams);
+        if (!ack.optBoolean("ok", false)) {
+            throw new IllegalStateException(ack.optString("error", "RPC call failed"));
         }
+        String encryptedResult = ack.optString("result", "");
+        if (encryptedResult.isEmpty()) {
+            throw new IllegalStateException("RPC 返回为空");
+        }
+        String json = HappyCrypto.decryptToJson(HappyCrypto.decodeBase64Any(encryptedResult), machine.key, machine.variant);
+        JSONObject result = new JSONObject(json == null ? "{}" : json);
+        String type = result.optString("type", "");
+        if ("success".equals(type) && !result.optString("sessionId", "").isEmpty()) {
+            return result.optString("sessionId");
+        }
+        if (!result.optString("error", "").isEmpty()) {
+            throw new IllegalStateException(result.optString("error"));
+        }
+        if ("requestToApproveDirectoryCreation".equals(type)) {
+            throw new IllegalStateException("Happy 机器要求确认创建目录 " + result.optString("directory", ""));
+        }
+        throw new IllegalStateException(result.optString("errorMessage", "Happy 机器拉起 Codex 失败"));
+    }
+
+    private MachineRef resolveMachine(String server, String token, byte[] accountSecret, String machineId) throws Exception {
+        JSONArray machines = httpJsonArray(server + "/v1/machines", token);
+        if (machines.length() == 0) {
+            throw new IllegalStateException("Happy machines 响应为空");
+        }
+        String target = machineId == null ? "" : machineId.trim();
         JSONObject found = null;
-        String target = sessionId.trim();
-        for (int i = 0; i < sessions.length(); i++) {
-            JSONObject item = sessions.optJSONObject(i);
-            if (item == null) {
-                continue;
+        if (target.isEmpty()) {
+            long bestScore = Long.MIN_VALUE;
+            for (int i = 0; i < machines.length(); i++) {
+                JSONObject item = machines.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                long score = Math.max(item.optLong("activeAt", 0), item.optLong("updatedAt", 0));
+                if (item.optBoolean("active", false)) {
+                    score += 10_000_000_000_000L;
+                }
+                if (found == null || score > bestScore) {
+                    found = item;
+                    bestScore = score;
+                }
             }
-            String id = item.optString("id", "");
-            if (id.equals(target) || id.startsWith(target)) {
-                found = item;
-                break;
+        } else {
+            for (int i = 0; i < machines.length(); i++) {
+                JSONObject item = machines.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String id = item.optString("id", "");
+                if (id.equals(target) || id.startsWith(target)) {
+                    found = item;
+                    break;
+                }
             }
         }
         if (found == null) {
-            throw new IllegalStateException("未找到 Happy sessionId=" + target);
+            throw new IllegalStateException(target.isEmpty()
+                    ? "未找到可用 Happy machine"
+                    : "未找到 Happy machineId=" + target);
+        }
+        String dataKey = found.optString("dataEncryptionKey", "");
+        if (!dataKey.isEmpty() && !"null".equalsIgnoreCase(dataKey)) {
+            byte[] encoded = HappyCrypto.decodeBase64Any(dataKey);
+            if (encoded.length < 2 || encoded[0] != 0) {
+                throw new IllegalStateException("不支持的 Happy machine dataEncryptionKey");
+            }
+            TweetNaclFast.Box.KeyPair contentKeyPair = HappyCrypto.deriveContentKeyPair(accountSecret);
+            byte[] machineKey = HappyCrypto.decryptBoxBundle(slice(encoded, 1), contentKeyPair.getSecretKey());
+            if (machineKey == null || machineKey.length != 32) {
+                throw new IllegalStateException("Happy machine key 解密失败");
+            }
+            return new MachineRef(found.optString("id"), machineKey, "dataKey");
+        }
+        return new MachineRef(found.optString("id"), accountSecret, "legacy");
+    }
+
+    private SessionRef resolveSessionWithRetry(String server, String token, byte[] accountSecret, String sessionId) throws Exception {
+        String target = sessionId == null ? "" : sessionId.trim();
+        Exception last = null;
+        int attempts = target.isEmpty() ? 1 : 12;
+        for (int i = 0; i < attempts; i++) {
+            try {
+                return resolveSession(server, token, accountSecret, target);
+            } catch (Exception e) {
+                last = e;
+                if (i + 1 >= attempts) {
+                    break;
+                }
+                Thread.sleep(500L);
+            }
+        }
+        throw last == null ? new IllegalStateException("Happy session 解析失败") : last;
+    }
+
+    private SessionRef resolveSession(String server, String token, byte[] accountSecret, String sessionId) throws Exception {
+        String target = sessionId == null ? "" : sessionId.trim();
+        JSONObject data = httpJson(server + (target.isEmpty()
+                ? "/v2/sessions/active?limit=50"
+                : "/v1/sessions"), "GET", token, null);
+        JSONArray sessions = data.optJSONArray("sessions");
+        if ((sessions == null || sessions.length() == 0) && target.isEmpty()) {
+            data = httpJson(server + "/v1/sessions", "GET", token, null);
+            sessions = data.optJSONArray("sessions");
+        }
+        if (sessions == null || sessions.length() == 0) {
+            throw new IllegalStateException("Happy sessions 响应为空");
+        }
+        JSONObject found = null;
+        if (target.isEmpty()) {
+            long bestScore = Long.MIN_VALUE;
+            for (int i = 0; i < sessions.length(); i++) {
+                JSONObject item = sessions.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                long score = Math.max(item.optLong("activeAt", 0), item.optLong("updatedAt", 0));
+                if (item.optBoolean("active", false)) {
+                    score += 10_000_000_000_000L;
+                }
+                if (found == null || score > bestScore) {
+                    found = item;
+                    bestScore = score;
+                }
+            }
+        } else {
+            for (int i = 0; i < sessions.length(); i++) {
+                JSONObject item = sessions.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String id = item.optString("id", "");
+                if (id.equals(target) || id.startsWith(target)) {
+                    found = item;
+                    break;
+                }
+            }
+        }
+        if (found == null) {
+            throw new IllegalStateException(target.isEmpty()
+                    ? "未找到可用 Happy session"
+                    : "未找到 Happy sessionId=" + target);
         }
         String dataKey = found.optString("dataEncryptionKey", "");
         if (!dataKey.isEmpty() && !"null".equalsIgnoreCase(dataKey)) {
@@ -269,7 +421,139 @@ final class HappyDirectClient {
         return "";
     }
 
+    private static JSONObject socketRpc(String server, String token, String method, String params) throws Exception {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                .build();
+        CountDownLatch connected = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicReference<JSONObject> resultRef = new AtomicReference<>();
+        AtomicReference<Exception> errorRef = new AtomicReference<>();
+        Request request = new Request.Builder()
+                .url(socketUrl(server))
+                .build();
+        WebSocket socket = client.newWebSocket(request, new WebSocketListener() {
+            @Override
+            public void onMessage(WebSocket webSocket, String text) {
+                try {
+                    handleSocketMessage(webSocket, token, text, connected, done, resultRef, errorRef);
+                } catch (Exception e) {
+                    errorRef.compareAndSet(null, e);
+                    connected.countDown();
+                    done.countDown();
+                }
+            }
+
+            @Override
+            public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+                errorRef.compareAndSet(null, new IllegalStateException(t.getMessage()));
+                connected.countDown();
+                done.countDown();
+            }
+
+            @Override
+            public void onClosed(WebSocket webSocket, int code, String reason) {
+                if (resultRef.get() == null) {
+                    errorRef.compareAndSet(null, new IllegalStateException("Socket closed " + code + " " + reason));
+                    connected.countDown();
+                    done.countDown();
+                }
+            }
+        });
+        try {
+            if (!connected.await(15, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("等待 Happy Socket 连接超时");
+            }
+            if (errorRef.get() != null) {
+                throw errorRef.get();
+            }
+            JSONArray event = new JSONArray()
+                    .put("rpc-call")
+                    .put(new JSONObject()
+                            .put("method", method)
+                            .put("params", params));
+            if (!socket.send("421" + event)) {
+                throw new IllegalStateException("Happy Socket 发送失败");
+            }
+            if (!done.await(35, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("等待 Happy RPC ack 超时");
+            }
+            if (errorRef.get() != null) {
+                throw errorRef.get();
+            }
+            JSONObject result = resultRef.get();
+            if (result == null) {
+                throw new IllegalStateException("Happy RPC 无返回");
+            }
+            return result;
+        } finally {
+            socket.cancel();
+            client.dispatcher().executorService().shutdown();
+        }
+    }
+
+    private static void handleSocketMessage(WebSocket socket, String token, String text,
+                                           CountDownLatch connected,
+                                           CountDownLatch done,
+                                           AtomicReference<JSONObject> resultRef,
+                                           AtomicReference<Exception> errorRef) throws Exception {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        if ("2".equals(text)) {
+            socket.send("3");
+            return;
+        }
+        if (text.startsWith("0")) {
+            JSONObject auth = new JSONObject()
+                    .put("token", token)
+                    .put("happyClient", CLIENT_HEADER);
+            socket.send("40" + auth);
+            return;
+        }
+        if (text.startsWith("40")) {
+            connected.countDown();
+            return;
+        }
+        if (text.startsWith("44")) {
+            errorRef.compareAndSet(null, new IllegalStateException("Happy Socket auth failed " + text.substring(2)));
+            connected.countDown();
+            done.countDown();
+            return;
+        }
+        if (text.startsWith("431")) {
+            JSONArray ack = new JSONArray(text.substring(3));
+            JSONObject result = ack.optJSONObject(0);
+            if (result == null) {
+                errorRef.compareAndSet(null, new IllegalStateException("Happy RPC ack 格式异常"));
+            } else {
+                resultRef.set(result);
+            }
+            done.countDown();
+        }
+    }
+
+    private static String socketUrl(String server) {
+        String text = trimServer(server);
+        if (text.startsWith("https://")) {
+            text = "wss://" + text.substring("https://".length());
+        } else if (text.startsWith("http://")) {
+            text = "ws://" + text.substring("http://".length());
+        }
+        return text + "/v1/updates/?EIO=4&transport=websocket";
+    }
+
     private static JSONObject httpJson(String url, String method, String token, JSONObject body) throws Exception {
+        String text = httpText(url, method, token, body);
+        return text.trim().isEmpty() ? new JSONObject() : new JSONObject(text);
+    }
+
+    private static JSONArray httpJsonArray(String url, String token) throws Exception {
+        String text = httpText(url, "GET", token, null);
+        return text.trim().isEmpty() ? new JSONArray() : new JSONArray(text);
+    }
+
+    private static String httpText(String url, String method, String token, JSONObject body) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod(method);
         conn.setConnectTimeout(8000);
@@ -291,7 +575,7 @@ final class HappyDirectClient {
         if (code < 200 || code >= 300) {
             throw new IllegalStateException("HTTP " + code + " " + trim(text));
         }
-        return text.trim().isEmpty() ? new JSONObject() : new JSONObject(text);
+        return text;
     }
 
     private static String readAll(InputStream in) throws Exception {
@@ -365,6 +649,18 @@ final class HappyDirectClient {
         final String variant;
 
         SessionRef(String id, byte[] key, String variant) {
+            this.id = id;
+            this.key = key;
+            this.variant = variant;
+        }
+    }
+
+    private static final class MachineRef {
+        final String id;
+        final byte[] key;
+        final String variant;
+
+        MachineRef(String id, byte[] key, String variant) {
             this.id = id;
             this.key = key;
             this.variant = variant;

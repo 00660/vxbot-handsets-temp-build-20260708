@@ -15,6 +15,7 @@ public final class BotConfig {
     public static final String DEFAULT_CHAT_ENDPOINT = "http://192.168.2.157:8317/v1/chat/completions";
     public static final String DEFAULT_HAPPY_CODEX_ENDPOINT = "http://192.168.2.204:8731/v1/codex";
     public static final String DEFAULT_HAPPY_DIRECT_SERVER_URL = "https://api.cluster-fluster.com";
+    public static final String DEFAULT_HAPPY_DIRECT_CWD = "/workspace";
     private static final String LEGACY_HAPPY_CODEX_ENDPOINT_LOCAL = "http://127.0.0.1:8731/v1/codex";
     private static final String LEGACY_HAPPY_CODEX_ENDPOINT_157 = "http://192.168.2.157:8731/v1/codex";
     public static final String DEFAULT_API_KEY = "client-key-1";
@@ -263,6 +264,8 @@ public final class BotConfig {
     public final String happyDirectToken;
     public final String happyDirectSecret;
     public final String happyDirectSessionId;
+    public final String happyDirectMachineId;
+    public final String happyDirectCwd;
     public final String apiKey;
     public final String model;
     public final String systemPrompt;
@@ -359,6 +362,8 @@ public final class BotConfig {
         happyDirectToken = prefs.getString("happyDirectToken", "").trim();
         happyDirectSecret = prefs.getString("happyDirectSecret", "").trim();
         happyDirectSessionId = prefs.getString("happyDirectSessionId", "").trim();
+        happyDirectMachineId = prefs.getString("happyDirectMachineId", "").trim();
+        happyDirectCwd = normalizeTextFallback(prefs.getString("happyDirectCwd", DEFAULT_HAPPY_DIRECT_CWD), DEFAULT_HAPPY_DIRECT_CWD);
         apiKey = normalizeApiKey(prefs.getString("apiKey", DEFAULT_API_KEY));
         model = prefs.getString("model", "gpt-5.5");
         systemPrompt = prefs.getString("systemPrompt", "你是微信群里的机器人，回复短、自然、接上下文。");

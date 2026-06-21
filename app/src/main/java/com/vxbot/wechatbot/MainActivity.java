@@ -79,6 +79,8 @@ public final class MainActivity extends Activity {
     private EditText happyDirectSessionId;
     private EditText happyDirectToken;
     private EditText happyDirectSecret;
+    private EditText happyDirectMachineId;
+    private EditText happyDirectCwd;
     private TextView happyDirectPairingInfo;
     private EditText apiKey;
     private EditText model;
@@ -333,7 +335,9 @@ public final class MainActivity extends Activity {
         happyCodexEndpoint = edit(upstreamPage, "Happy Codex 桥接接口", BotConfig.DEFAULT_HAPPY_CODEX_ENDPOINT, false);
         enableHappyDirectCodex = switchRow(upstreamPage, "Happy Codex 直连 session");
         happyDirectServerUrl = edit(upstreamPage, "Happy Server", BotConfig.DEFAULT_HAPPY_DIRECT_SERVER_URL, false);
-        happyDirectSessionId = edit(upstreamPage, "Happy Codex sessionId", "", false);
+        happyDirectSessionId = edit(upstreamPage, "Happy Codex sessionId，可空自动选最近活跃", "", false);
+        happyDirectMachineId = edit(upstreamPage, "Happy machineId，可空自动选在线机器", "", false);
+        happyDirectCwd = edit(upstreamPage, "Happy Codex 工作目录", BotConfig.DEFAULT_HAPPY_DIRECT_CWD, false);
         happyDirectToken = edit(upstreamPage, "Happy token", "", false);
         happyDirectSecret = edit(upstreamPage, "Happy account secret", "", false);
         happyDirectPairingInfo = text("Happy 配对未生成", 13, MUTED, Typeface.NORMAL);
@@ -710,6 +714,8 @@ public final class MainActivity extends Activity {
             enableHappyDirectCodex.setChecked(config.enableHappyDirectCodex);
             happyDirectServerUrl.setText(config.happyDirectServerUrl);
             happyDirectSessionId.setText(config.happyDirectSessionId);
+            happyDirectMachineId.setText(config.happyDirectMachineId);
+            happyDirectCwd.setText(config.happyDirectCwd);
             happyDirectToken.setText(config.happyDirectToken);
             happyDirectSecret.setText(config.happyDirectSecret);
             refreshHappyDirectPairingInfo();
@@ -820,6 +826,8 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableHappyDirectCodex", enableHappyDirectCodex.isChecked());
         e.putString("happyDirectServerUrl", happyDirectServerUrl.getText().toString());
         e.putString("happyDirectSessionId", happyDirectSessionId.getText().toString());
+        e.putString("happyDirectMachineId", happyDirectMachineId.getText().toString());
+        e.putString("happyDirectCwd", happyDirectCwd.getText().toString());
         e.putString("happyDirectToken", happyDirectToken.getText().toString());
         e.putString("happyDirectSecret", happyDirectSecret.getText().toString());
         e.putString("apiKey", apiKey.getText().toString());
