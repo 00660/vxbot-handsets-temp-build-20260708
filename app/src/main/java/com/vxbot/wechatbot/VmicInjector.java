@@ -12,6 +12,8 @@ final class VmicInjector {
     private static final String VMIC_PLAY = "/vendor/bin/vmic_play";
     private static final String VMIC_PLAY_MODULE = "/data/adb/modules/mido_vmic_hal/system/vendor/bin/vmic_play";
     private static final String VMIC_PUSH = "/vendor/bin/vmic_push";
+    private static final String VMIC_PUSH_INSTANTNOODLEP_MODULE =
+            "/data/adb/modules/instantnoodlep_vmic/system/vendor/bin/vmic_push";
 
     private VmicInjector() {
     }
@@ -21,17 +23,18 @@ final class VmicInjector {
             BotLog.w(context, "vmic.inject.skip", "reason=" + reason + " invalid file");
             return false;
         }
-        String helper = findPlayableHelper(context);
-        if (helper.isEmpty()) {
+        Helper helper = findPlayableHelper(context);
+        if (helper.path.isEmpty()) {
             BotLog.w(context, "vmic.inject.unavailable", "reason=" + reason
-                    + " helper missing: " + VMIC_PLAY);
+                    + " helper missing: " + VMIC_PLAY + " / " + VMIC_PUSH);
             return false;
         }
         int waitMs = Math.max(8000, timeoutMs);
-        String command = shellQuote(helper) + " " + shellQuote(file.getAbsolutePath()) + " 48000 1";
+        String command = shellQuote(helper.path) + " " + shellQuote(file.getAbsolutePath()) + " 48000 1";
         ShellResult result = runRoot(command, waitMs);
         if (result.code == 0) {
             BotLog.i(context, "vmic.inject.done", "reason=" + reason
+                    + " helper=" + helper.name
                     + " file=" + file.getAbsolutePath()
                     + " size=" + file.length()
                     + " elapsedMs=" + result.elapsedMs
@@ -39,6 +42,7 @@ final class VmicInjector {
             return true;
         }
         BotLog.w(context, "vmic.inject.fail", "reason=" + reason
+                + " helper=" + helper.name
                 + " code=" + result.code
                 + " elapsedMs=" + result.elapsedMs
                 + " out=" + trim(result.output));
@@ -46,24 +50,32 @@ final class VmicInjector {
     }
 
     static boolean helperPresent(Context context) {
-        return !findPlayableHelper(context).isEmpty();
+        return !findPlayableHelper(context).path.isEmpty();
     }
 
-    private static String findPlayableHelper(Context context) {
+    private static Helper findPlayableHelper(Context context) {
         ShellResult vendor = runRoot("[ -x " + shellQuote(VMIC_PLAY) + " ] && echo " + shellQuote(VMIC_PLAY) + " || true", 4000);
         if (vendor.output != null && vendor.output.contains(VMIC_PLAY)) {
-            return VMIC_PLAY;
+            return new Helper("vmic_play", VMIC_PLAY);
         }
         ShellResult module = runRoot("[ -x " + shellQuote(VMIC_PLAY_MODULE) + " ] && echo " + shellQuote(VMIC_PLAY_MODULE) + " || true", 4000);
         if (module.output != null && module.output.contains(VMIC_PLAY_MODULE)) {
-            return VMIC_PLAY_MODULE;
+            return new Helper("vmic_play_module", VMIC_PLAY_MODULE);
+        }
+        ShellResult push = runRoot("[ -x " + shellQuote(VMIC_PUSH) + " ] && echo " + shellQuote(VMIC_PUSH) + " || true", 4000);
+        if (push.output != null && push.output.contains(VMIC_PUSH)) {
+            return new Helper("vmic_push", VMIC_PUSH);
+        }
+        ShellResult instantnoodlep = runRoot("[ -x " + shellQuote(VMIC_PUSH_INSTANTNOODLEP_MODULE) + " ] && echo "
+                + shellQuote(VMIC_PUSH_INSTANTNOODLEP_MODULE) + " || true", 4000);
+        if (instantnoodlep.output != null && instantnoodlep.output.contains(VMIC_PUSH_INSTANTNOODLEP_MODULE)) {
+            return new Helper("vmic_push_instantnoodlep_module", VMIC_PUSH_INSTANTNOODLEP_MODULE);
         }
         if (context != null) {
-            ShellResult push = runRoot("[ -x " + shellQuote(VMIC_PUSH) + " ] && echo vmic_push || true", 4000);
-            BotLog.i(context, "vmic.inject.helper", "vmic_play=false vmic_push="
-                    + (push.output != null && push.output.contains("vmic_push")));
+            BotLog.i(context, "vmic.inject.helper",
+                    "vmic_play=false vmic_push=false instantnoodlep_module=false");
         }
-        return "";
+        return new Helper("", "");
     }
 
     private static ShellResult runRoot(String command, int timeoutMs) {
@@ -130,6 +142,16 @@ final class VmicInjector {
             this.code = code;
             this.output = output;
             this.elapsedMs = elapsedMs;
+        }
+    }
+
+    private static final class Helper {
+        final String name;
+        final String path;
+
+        Helper(String name, String path) {
+            this.name = name;
+            this.path = path;
         }
     }
 }
