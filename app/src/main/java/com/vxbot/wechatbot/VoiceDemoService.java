@@ -95,6 +95,8 @@ public final class VoiceDemoService extends Service {
             pressAndPlayFile(intent);
         } else if ("pressTts".equalsIgnoreCase(mode) || "pressText".equalsIgnoreCase(mode)) {
             pressAndSpeakTts(intent);
+        } else if ("vmicTts".equalsIgnoreCase(mode) || "vmicText".equalsIgnoreCase(mode)) {
+            injectRemoteTts(intent);
         } else if ("file".equalsIgnoreCase(mode)) {
             playFile(intent, stringExtra(intent, "path", ""));
         } else if ("tts".equalsIgnoreCase(mode) || "text".equalsIgnoreCase(mode)) {
@@ -123,6 +125,26 @@ public final class VoiceDemoService extends Service {
     private void pressAndPlayFile(Intent intent) throws Exception {
         String path = stringExtra(intent, "path", "");
         playFileWithPress(intent, path, "press-file");
+    }
+
+    private void injectRemoteTts(Intent intent) throws Exception {
+        String text = stringExtra(intent, "text", "");
+        File remoteFile = generateRemoteTtsFile(intent, text);
+        try {
+            if (remoteFile == null || !remoteFile.isFile() || remoteFile.length() <= 44) {
+                throw new IllegalStateException("remote TTS file missing");
+            }
+            int durationMs = readMediaDurationMs(remoteFile);
+            BotLog.i(this, "voice.demo.tts.vmic.start", remoteFile.getAbsolutePath()
+                    + " size=" + remoteFile.length() + " durationMs=" + durationMs);
+            if (!VmicInjector.injectFile(this, remoteFile, Math.max(8000, durationMs + 5000), "vmic-tts")) {
+                throw new IllegalStateException("vmic inject failed");
+            }
+            BotLog.i(this, "voice.demo.tts.vmic.done", remoteFile.getAbsolutePath()
+                    + " durationMs=" + durationMs);
+        } finally {
+            cleanupTtsFile(intent, remoteFile);
+        }
     }
 
     private void pressAndSpeakTts(Intent intent) throws Exception {
