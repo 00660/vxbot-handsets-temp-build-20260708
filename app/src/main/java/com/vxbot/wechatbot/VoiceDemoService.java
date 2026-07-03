@@ -137,6 +137,11 @@ public final class VoiceDemoService extends Service {
             int durationMs = readMediaDurationMs(remoteFile);
             BotLog.i(this, "voice.demo.tts.vmic.start", remoteFile.getAbsolutePath()
                     + " size=" + remoteFile.length() + " durationMs=" + durationMs);
+            int preInjectMs = Math.max(0, intExtra(intent, "preVmicInjectMs", 0));
+            if (preInjectMs > 0) {
+                BotLog.i(this, "voice.demo.tts.vmic.delay", "delayMs=" + preInjectMs);
+                SystemClock.sleep(preInjectMs);
+            }
             if (!VmicInjector.injectFile(this, remoteFile, Math.max(8000, durationMs + 5000), "vmic-tts")) {
                 throw new IllegalStateException("vmic inject failed");
             }
