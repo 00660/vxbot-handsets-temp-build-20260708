@@ -403,9 +403,15 @@ public final class VoiceDemoService extends Service {
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            player.start();
-            while (player.isPlaying()) {
-                SystemClock.sleep(80);
+            int durationMs = Math.max(0, player.getDuration());
+            if (VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), reason)) {
+                BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
+            } else {
+                BotLog.w(this, "voice.demo.file.vmic.fallback", path + " durationMs=" + durationMs);
+                player.start();
+                while (player.isPlaying()) {
+                    SystemClock.sleep(80);
+                }
             }
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
