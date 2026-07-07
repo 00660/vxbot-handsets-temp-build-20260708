@@ -176,7 +176,6 @@ public final class MainActivity extends Activity {
     private Switch stayInCodexSession;
     private TextView logView;
     private TextView statusView;
-    private TextView newPhoneStatus;
     private boolean loadingConfig;
     private int selectedTabIndex = -1;
     private boolean fullScreenChromeVisible = false;
@@ -319,19 +318,6 @@ public final class MainActivity extends Activity {
         statusPage.addView(buttonRow(
                 button("亮度权限", v -> openWriteSettingsPermission()),
                 button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
-        TextView newPhoneTitle = text("小米 9A 新机", 16, INK, Typeface.BOLD);
-        newPhoneTitle.setPadding(0, dp(10), 0, dp(6));
-        statusPage.addView(newPhoneTitle);
-        newPhoneStatus = text("未读取", 13, MUTED, Typeface.NORMAL);
-        newPhoneStatus.setTextIsSelectable(true);
-        newPhoneStatus.setPadding(dp(10), dp(10), dp(10), dp(10));
-        newPhoneStatus.setBackground(round(Color.rgb(248, 250, 252), dp(10), 1, Color.rgb(226, 232, 240)));
-        statusPage.addView(newPhoneStatus, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        statusPage.addView(buttonRow(
-                button("生成新机", v -> generateNewPhoneFromUi()),
-                button("读取新机", v -> readNewPhoneFromUi()),
-                button("关闭新机", v -> disableNewPhoneFromUi())));
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
@@ -1576,46 +1562,6 @@ public final class MainActivity extends Activity {
         toast(ok ? "已尝试调到最亮" : "已关闭低亮窗口，系统亮度权限未开");
         refreshLogs();
         refreshStatus();
-    }
-
-    private void generateNewPhoneFromUi() {
-        setNewPhoneStatus("正在生成新机...");
-        uiWorker.execute(() -> {
-            NewPhoneController.ShellResult result = NewPhoneController.generate(this);
-            runOnUiThread(() -> finishNewPhoneAction("生成新机", result));
-        });
-    }
-
-    private void readNewPhoneFromUi() {
-        setNewPhoneStatus("正在读取新机状态...");
-        uiWorker.execute(() -> {
-            NewPhoneController.ShellResult result = NewPhoneController.readProfile(this);
-            runOnUiThread(() -> finishNewPhoneAction("读取新机", result));
-        });
-    }
-
-    private void disableNewPhoneFromUi() {
-        setNewPhoneStatus("正在关闭新机...");
-        uiWorker.execute(() -> {
-            NewPhoneController.ShellResult result = NewPhoneController.disable(this);
-            runOnUiThread(() -> finishNewPhoneAction("关闭新机", result));
-        });
-    }
-
-    private void finishNewPhoneAction(String label, NewPhoneController.ShellResult result) {
-        String output = result.output == null ? "" : result.output.trim();
-        String text = label + " code=" + result.code + " elapsedMs=" + result.elapsedMs
-                + (output.isEmpty() ? "\n无输出" : "\n" + output);
-        setNewPhoneStatus(text);
-        toast(result.code == 0 ? label + "完成" : label + "失败，看日志");
-        refreshLogs();
-        refreshStatus();
-    }
-
-    private void setNewPhoneStatus(String text) {
-        if (newPhoneStatus != null) {
-            newPhoneStatus.setText(text == null || text.trim().isEmpty() ? "无输出" : text.trim());
-        }
     }
 
     private void requestPostNotificationIfNeeded() {
