@@ -6,13 +6,16 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
 import android.graphics.Rect;
 import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaPlayer;
+import android.media.MediaRecorder;
 import android.media.PlaybackParams;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,6 +26,7 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -49,8 +53,8 @@ public final class VoiceDemoService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        ensureForeground();
         Intent safeIntent = intent == null ? new Intent() : intent;
+        ensureForeground(safeIntent);
         new Thread(() -> {
             try {
                 runMode(safeIntent);
@@ -97,6 +101,8 @@ public final class VoiceDemoService extends Service {
             pressAndSpeakTts(intent);
         } else if ("vmicTts".equalsIgnoreCase(mode) || "vmicText".equalsIgnoreCase(mode)) {
             injectRemoteTts(intent);
+        } else if ("vmicRecordTest".equalsIgnoreCase(mode)) {
+            runVmicRecordTest(intent);
         } else if ("file".equalsIgnoreCase(mode)) {
             playFile(intent, stringExtra(intent, "path", ""));
         } else if ("tts".equalsIgnoreCase(mode) || "text".equalsIgnoreCase(mode)) {
@@ -149,6 +155,43 @@ public final class VoiceDemoService extends Service {
                     + " durationMs=" + durationMs);
         } finally {
             cleanupTtsFile(intent, remoteFile);
+        }
+    }
+
+    private void runVmicRecordTest(Intent intent) throws Exception {
+        String text = stringExtra(intent, "text", "这是虚拟麦录音测试。");
+        BotConfig config = BotConfig.load(this);
+        File ttsFile = null;
+        try {
+            ttsFile = TtsCache.prepare(this, config, text, "vmic-record-test", 60000, 1);
+            if (ttsFile == null || !ttsFile.isFile() || ttsFile.length() <= 44) {
+                throw new IllegalStateException("TTS 没有生成可注入音频");
+            }
+            int durationMs = readMediaDurationMs(ttsFile);
+            int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
+            File recordFile = newVmicRecordFile();
+            RecordingJob job = startMicRecording(recordFile, recordMs);
+            int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
+            SystemClock.sleep(warmupMs);
+            BotLog.i(this, "voice.demo.vmic.record.inject",
+                    "tts=" + ttsFile.getAbsolutePath()
+                            + " durationMs=" + durationMs
+                            + " recordMs=" + recordMs
+                            + " record=" + recordFile.getAbsolutePath());
+            boolean injected = VmicInjector.injectFile(this, ttsFile, Math.max(8000, durationMs + 5000), "vmic-record-test");
+            job.await(recordMs + 3000L);
+            if (!recordFile.isFile() || recordFile.length() <= 44) {
+                throw new IllegalStateException("录音文件为空 injected=" + injected);
+            }
+            BotLog.write(this, injected ? "INFO" : "WARN", "voice.demo.vmic.record.done",
+                    "虚拟麦录音测试完成 injected=" + injected
+                            + " record=" + recordFile.getAbsolutePath()
+                            + " size=" + recordFile.length());
+            playFile(intent, recordFile.getAbsolutePath());
+        } finally {
+            if (ttsFile != null) {
+                TtsCache.cleanup(this, ttsFile, "vmic-record-test");
+            }
         }
     }
 
@@ -735,6 +778,132 @@ public final class VoiceDemoService extends Service {
         }
     }
 
+    private File newVmicRecordFile() throws Exception {
+        File dir = new File(getFilesDir(), "vmic-recordings");
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            throw new IllegalStateException("mkdir failed: " + dir.getAbsolutePath());
+        }
+        return new File(dir, "vxbot-vmic-record-" + SystemClock.uptimeMillis() + ".wav");
+    }
+
+    private RecordingJob startMicRecording(File output, int recordMs) {
+        RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs));
+        job.start();
+        return job;
+    }
+
+    private final class RecordingJob implements Runnable {
+        private final File output;
+        private final int recordMs;
+        private final Thread thread;
+
+        RecordingJob(File output, int recordMs) {
+            this.output = output;
+            this.recordMs = recordMs;
+            this.thread = new Thread(this, "vmic-record-test");
+        }
+
+        void start() {
+            thread.start();
+        }
+
+        void await(long timeoutMs) throws InterruptedException {
+            thread.join(Math.max(1000L, timeoutMs));
+            if (thread.isAlive()) {
+                thread.interrupt();
+                thread.join(1000L);
+            }
+        }
+
+        @Override
+        public void run() {
+            AudioRecord recorder = null;
+            try {
+                int minBuffer = AudioRecord.getMinBufferSize(
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT);
+                if (minBuffer <= 0) {
+                    throw new IllegalStateException("bad minBuffer=" + minBuffer);
+                }
+                int bufferSize = Math.max(minBuffer, SAMPLE_RATE);
+                recorder = new AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        bufferSize);
+                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                    throw new IllegalStateException("AudioRecord init failed state=" + recorder.getState());
+                }
+                ByteArrayOutputStream pcm = new ByteArrayOutputStream(SAMPLE_RATE * 2 * Math.max(1, recordMs / 1000));
+                byte[] buffer = new byte[bufferSize];
+                long endAt = SystemClock.uptimeMillis() + recordMs;
+                recorder.startRecording();
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.start",
+                        "file=" + output.getAbsolutePath() + " recordMs=" + recordMs + " buffer=" + bufferSize);
+                while (!Thread.currentThread().isInterrupted() && SystemClock.uptimeMillis() < endAt) {
+                    int read = recorder.read(buffer, 0, buffer.length);
+                    if (read > 0) {
+                        pcm.write(buffer, 0, read);
+                    } else {
+                        SystemClock.sleep(20);
+                    }
+                }
+                recorder.stop();
+                writeWavFile(output, pcm.toByteArray(), SAMPLE_RATE);
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.file",
+                        "file=" + output.getAbsolutePath() + " size=" + output.length());
+            } catch (Exception e) {
+                BotLog.e(VoiceDemoService.this, "voice.demo.vmic.record.fail",
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
+            } finally {
+                if (recorder != null) {
+                    recorder.release();
+                }
+            }
+        }
+    }
+
+    private static void writeWavFile(File file, byte[] pcm, int sampleRate) throws Exception {
+        int dataSize = pcm == null ? 0 : pcm.length;
+        int byteRate = sampleRate * 2;
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            writeAscii(out, "RIFF");
+            writeLe32(out, 36 + dataSize);
+            writeAscii(out, "WAVE");
+            writeAscii(out, "fmt ");
+            writeLe32(out, 16);
+            writeLe16(out, 1);
+            writeLe16(out, 1);
+            writeLe32(out, sampleRate);
+            writeLe32(out, byteRate);
+            writeLe16(out, 2);
+            writeLe16(out, 16);
+            writeAscii(out, "data");
+            writeLe32(out, dataSize);
+            if (pcm != null && pcm.length > 0) {
+                out.write(pcm);
+            }
+        }
+    }
+
+    private static void writeAscii(FileOutputStream out, String text) throws Exception {
+        out.write(text.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    private static void writeLe16(FileOutputStream out, int value) throws Exception {
+        out.write(value & 0xff);
+        out.write((value >>> 8) & 0xff);
+    }
+
+    private static void writeLe32(FileOutputStream out, int value) throws Exception {
+        out.write(value & 0xff);
+        out.write((value >>> 8) & 0xff);
+        out.write((value >>> 16) & 0xff);
+        out.write((value >>> 24) & 0xff);
+    }
+
     private void cleanupTtsFile(Intent intent, File file) {
         if (file == null || !boolExtra(intent, "deleteTtsFile", true)) {
             return;
@@ -903,7 +1072,7 @@ public final class VoiceDemoService extends Service {
         return "";
     }
 
-    private void ensureForeground() {
+    private void ensureForeground(Intent intent) {
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager != null) {
             manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID, "Voice Demo", NotificationManager.IMPORTANCE_LOW));
@@ -917,7 +1086,15 @@ public final class VoiceDemoService extends Service {
                 .setContentText("Testing WeChat voice bubble")
                 .setOngoing(false)
                 .build();
-        startForeground(NOTIFICATION_ID, notification);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
+            if ("vmicRecordTest".equalsIgnoreCase(stringExtra(intent, "mode", ""))) {
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            }
+            startForeground(NOTIFICATION_ID, notification, type);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
     }
 
     private void sendFinishBroadcast(Intent source) {

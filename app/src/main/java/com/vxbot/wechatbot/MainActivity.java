@@ -51,6 +51,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_EX_SOURCE_IMAGE = 6606;
     private static final int REQ_EX_SOURCE_FILE = 6607;
     private static final int REQ_DOUBAO_COOKIE_FILE = 6608;
+    private static final int REQ_RECORD_AUDIO = 6609;
     private static final int BG = 0xFFF6F8FB;
     private static final int INK = 0xFF182033;
     private static final int MUTED = 0xFF5E6B82;
@@ -318,6 +319,8 @@ public final class MainActivity extends Activity {
         statusPage.addView(buttonRow(
                 button("亮度权限", v -> openWriteSettingsPermission()),
                 button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
+        statusPage.addView(buttonRow(
+                button("虚拟麦录音测试", v -> startVmicRecordTest())));
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
@@ -1360,6 +1363,27 @@ public final class MainActivity extends Activity {
         });
     }
 
+    private void startVmicRecordTest() {
+        saveConfig();
+        if (!recordAudioPermissionGranted()) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
+            toast("先授权录音权限，再点一次测试");
+            refreshStatus();
+            return;
+        }
+        BotConfig config = BotConfig.load(this);
+        Intent intent = new Intent(this, VoiceDemoService.class)
+                .putExtra("mode", "vmicRecordTest")
+                .putExtra("text", "这是虚拟麦录音测试，听到这句话说明虚拟麦注入和录音链路已打通。")
+                .putExtra("hsPort", config.hsPort)
+                .putExtra("speechRate", config.ttsSpeed)
+                .putExtra("deleteTtsFile", true);
+        startForegroundService(intent);
+        BotLog.i(this, "vmic.record.test.ui.start", "已启动虚拟麦录音测试");
+        toast("虚拟麦录音测试已启动");
+        refreshLogs();
+    }
+
     private void playPreviewAudio(File file) {
         try {
             releasePreviewPlayer();
@@ -1427,6 +1451,7 @@ public final class MainActivity extends Activity {
                 + "\n授权=检测中"
                 + "\n辅助功能=" + (accessibilityServiceEnabled() ? "已开" : "未开")
                 + "\n悬浮窗=" + (overlayEnabled() ? "已开" : "未开")
+                + "\n录音权限=" + (recordAudioPermissionGranted() ? "已开" : "未开")
                 + "\n通知监听=" + (notificationListenerEnabled() ? "已开" : "未开")
                 + "\n上游=" + config.chatEndpoint
                 + "\n支付回调=" + config.paymentCallbackUrl;
@@ -1447,6 +1472,7 @@ public final class MainActivity extends Activity {
                         + "\n授权=" + (shizukuPerm ? "已授权" : "未授权")
                         + "\n辅助功能=" + (accessibilityServiceEnabled() ? "已开" : "未开")
                         + "\n悬浮窗=" + (overlayEnabled() ? "已开" : "未开")
+                        + "\n录音权限=" + (recordAudioPermissionGranted() ? "已开" : "未开")
                         + "\n通知监听=" + (notificationListenerEnabled() ? "已开" : "未开")
                         + "\n上游=" + config.chatEndpoint
                         + "\n支付回调=" + config.paymentCallbackUrl);
@@ -1457,6 +1483,10 @@ public final class MainActivity extends Activity {
     private boolean notificationListenerEnabled() {
         String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
         return flat != null && flat.contains(getPackageName());
+    }
+
+    private boolean recordAudioPermissionGranted() {
+        return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
     }
 
     private boolean accessibilityServiceEnabled() {

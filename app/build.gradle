@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 132
-        versionName "0.1.131-control-dot-fgsfix"
+        versionCode 133
+        versionName "0.1.132-control-dot-vmic-test"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
