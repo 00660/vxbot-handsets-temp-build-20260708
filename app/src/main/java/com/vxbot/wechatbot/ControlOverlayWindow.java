@@ -22,9 +22,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public final class ControlOverlayWindow {
-    private static final int DOT_SIZE_DP = 42;
-    private static final int PANEL_WIDTH_DP = 188;
-    private static final int PANEL_HEIGHT_DP = 46;
+    private static final int DOT_SIZE_DP = 28;
+    private static final int PANEL_WIDTH_DP = 234;
+    private static final int PANEL_HEIGHT_DP = 44;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -105,7 +105,7 @@ public final class ControlOverlayWindow {
         dotView = new TextView(context);
         dotView.setText("");
         dotView.setGravity(Gravity.CENTER);
-        dotView.setBackground(circleBackground(Color.WHITE));
+        dotView.setBackground(circleBackground(0xDDFFFFFF));
         dotView.setElevation(dp(8));
         root.addView(dotView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -131,6 +131,13 @@ public final class ControlOverlayWindow {
         LinearLayout.LayoutParams pauseParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
         pauseParams.setMargins(dp(6), 0, 0, 0);
         panel.addView(pauseButton, pauseParams);
+
+        TextView collapseButton = actionButton("收起");
+        collapseButton.setBackground(roundBackground(0xFF475569));
+        collapseButton.setOnClickListener(v -> setExpanded(false));
+        LinearLayout.LayoutParams collapseParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        collapseParams.setMargins(dp(6), 0, 0, 0);
+        panel.addView(collapseButton, collapseParams);
 
         root.addView(panel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
