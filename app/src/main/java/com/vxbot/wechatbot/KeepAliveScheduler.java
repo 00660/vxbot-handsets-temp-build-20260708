@@ -39,13 +39,23 @@ public final class KeepAliveScheduler {
     }
 
     public static void startBotService(Context context, String reason) {
+        if (BotRuntimeControls.isPaused(context)) {
+            BotLog.i(context, "keepalive.start_service.skip_paused", "机器人已暂停，跳过拉起 BotService reason=" + reason);
+            return;
+        }
         Intent intent = new Intent(context, BotService.class);
         intent.setAction(BotService.ACTION_START);
         intent.putExtra("reason", reason == null ? "" : reason);
-        if (Build.VERSION.SDK_INT >= 26) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (RuntimeException e) {
+            BotLog.e(context, "keepalive.start_service.fail",
+                    "拉起 BotService 失败 reason=" + reason + " error=" + e.getClass().getSimpleName() + " " + e.getMessage());
+            return;
         }
         BotLog.i(context, "keepalive.start_service", "已拉起 BotService reason=" + reason);
     }

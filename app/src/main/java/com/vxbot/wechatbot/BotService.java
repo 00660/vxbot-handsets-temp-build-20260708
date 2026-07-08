@@ -46,6 +46,7 @@ public final class BotService extends Service {
     private volatile boolean botStartedOnce;
     private volatile boolean operationActive;
     private LogOverlayWindow logOverlay;
+    private ControlOverlayWindow controlOverlay;
     private final SharedPreferences.OnSharedPreferenceChangeListener configListener = (prefs, key) -> {
         if (key == null || "enableLogOverlay".equals(key) || "keepLogOverlayDuringOperation".equals(key)) {
             syncLogOverlay(BotConfig.load(this));
@@ -71,10 +72,15 @@ public final class BotService extends Service {
     public void onCreate() {
         super.onCreate();
         serviceStartedAtMs = System.currentTimeMillis();
-        startForeground(1, buildStatusNotification("机器人运行中"));
+        if (!startStatusForegroundSafely()) {
+            stopSelf();
+            return;
+        }
         KeepAliveScheduler.schedule(this);
         MorningGreetingScheduler.schedule(this);
         GarbageCleaner.runIfDue(this, "service-create");
+        controlOverlay = new ControlOverlayWindow(this);
+        controlOverlay.show();
         logOverlay = new LogOverlayWindow(this);
         BotConfig.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
         BotConfig initialConfig = BotConfig.load(this);
@@ -110,6 +116,10 @@ public final class BotService extends Service {
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
+        }
+        if (shouldSkipActionForPause(action)) {
+            BotLog.w(this, "runtime.pause.skip_action", "机器人已暂停，跳过 action=" + action + " reason=" + reason);
+            return START_STICKY;
         }
         if (ACTION_HANDLE_NOTIFICATION.equals(action)) {
             syncLogOverlay(BotConfig.load(this));
@@ -187,6 +197,9 @@ public final class BotService extends Service {
 
     @Override
     public void onDestroy() {
+        if (controlOverlay != null) {
+            controlOverlay.hide();
+        }
         if (logOverlay != null) {
             logOverlay.hide();
         }
@@ -196,6 +209,17 @@ public final class BotService extends Service {
         paymentWorker.shutdownNow();
         BotLog.w(this, "bot.service.destroy", "BotService onDestroy pid=" + Process.myPid());
         super.onDestroy();
+    }
+
+    private boolean startStatusForegroundSafely() {
+        try {
+            startForeground(1, buildStatusNotification("机器人运行中"));
+            return true;
+        } catch (RuntimeException e) {
+            BotLog.e(this, "bot.foreground.fail",
+                    "前台服务启动失败，停止本次服务: " + e.getClass().getSimpleName() + " " + e.getMessage());
+            return false;
+        }
     }
 
     private void syncLogOverlay(BotConfig config) {
@@ -235,6 +259,9 @@ public final class BotService extends Service {
     private void handleMessage(WxMessage message, boolean foregroundCodexOcr) {
         BotConfig config = BotConfig.load(this);
         if (message == null || (message.text.isEmpty() && message.rawContent.isEmpty())) {
+            return;
+        }
+        if (skipIfPaused("notice.skip.paused", "机器人已暂停，忽略通知 " + message.display())) {
             return;
         }
         synchronized (seenNotifications) {
@@ -333,6 +360,9 @@ public final class BotService extends Service {
     }
 
     private void sendCommandAck(BotConfig config, WxMessage message, String reply, String reason) {
+        if (skipIfPaused(reason + ".ack.skip.paused", "机器人已暂停，跳过确认回复 " + message.display())) {
+            return;
+        }
         if (!daemonManager.ensureRunning(this, config)) {
             BotLog.e(this, reason + ".ack.abort", "hs daemon 未就绪，无法发送确认");
             return;
@@ -357,6 +387,9 @@ public final class BotService extends Service {
         sessionStore.clearCodexMode(this, message.sessionName);
         codexForegroundWatcher.stop(this, "codex-exit-command");
         BotLog.i(this, "codex.session.exit", "已退出本群 Codex 模式并准备返回后台 " + message.display());
+        if (skipIfPaused("codex.session.exit.back.skip.paused", "机器人已暂停，跳过退出后的微信前台操作 " + message.display())) {
+            return;
+        }
         if (!daemonManager.ensureRunning(this, config)) {
             BotLog.e(this, "codex.session.exit.back.abort", "hs daemon 未就绪，无法执行返回后台");
             return;
@@ -371,6 +404,9 @@ public final class BotService extends Service {
 
     private void enterCodexForegroundMode(BotConfig config, WxMessage message) {
         if (config == null || message == null || !config.stayInCodexSession) {
+            return;
+        }
+        if (skipIfPaused("codex.session.enter.skip.paused", "机器人已暂停，跳过进入 Codex 前台会话 " + message.display())) {
             return;
         }
         if (!daemonManager.ensureRunning(this, config)) {
@@ -426,6 +462,9 @@ public final class BotService extends Service {
     }
 
     private void workerReply(BotConfig config, WxMessage message, MessageRouter.Route route) {
+        if (skipIfPaused("reply.skip.paused", "机器人已暂停，跳过回复 " + message.display())) {
+            return;
+        }
         if (!daemonManager.ensureRunning(this, config)) {
             BotLog.e(this, "reply.abort", "hs daemon 未就绪");
             return;
@@ -526,6 +565,10 @@ public final class BotService extends Service {
             if (!opened) {
                 cleanupPreparedFutureIfDone(preparedVoiceFuture, "open-failed");
                 BotLog.e(this, "reply.abort", "目标会话未打开，取消发送 " + message.display());
+                return;
+            }
+            if (skipIfPaused("reply.send.skip.paused", "机器人已暂停，取消发送 " + message.display())) {
+                cleanupPreparedFutureIfDone(preparedVoiceFuture, "paused-before-send");
                 return;
             }
             if ("__IMAGE_FLOW__".equals(reply)) {
@@ -640,7 +683,7 @@ public final class BotService extends Service {
         codexForegroundWatcher.start(this, config, message.sessionName, watchSender, new CodexForegroundWatcher.Callback() {
             @Override
             public boolean isOperationActive() {
-                return operationActive;
+                return operationActive || BotRuntimeControls.isPaused(BotService.this);
             }
 
             @Override
@@ -650,6 +693,10 @@ public final class BotService extends Service {
 
             @Override
             public void onMessage(WxMessage foregroundMessage) {
+                if (BotRuntimeControls.isPaused(BotService.this)) {
+                    BotLog.i(BotService.this, "codex.foreground.skip.paused", "机器人已暂停，忽略前台 OCR 消息");
+                    return;
+                }
                 worker.execute(() -> handleForegroundCodexMessage(foregroundMessage));
             }
         });
@@ -731,6 +778,27 @@ public final class BotService extends Service {
                 || "__VIDEO_FLOW__".equals(reply)
                 || "__STICKER_FLOW__".equals(reply)
                 || "__TTS_FLOW__".equals(reply);
+    }
+
+    private boolean shouldSkipActionForPause(String action) {
+        if (!BotRuntimeControls.isPaused(this)) {
+            return false;
+        }
+        return ACTION_HANDLE_NOTIFICATION.equals(action)
+                || ACTION_START.equals(action)
+                || ACTION_TEST_OCR.equals(action)
+                || ACTION_DUMP_OCR.equals(action)
+                || ACTION_BROADCAST_TEXT.equals(action)
+                || ACTION_DEBUG_OPEN_IMAGE_SHARE.equals(action)
+                || ACTION_MORNING_GREETING.equals(action);
+    }
+
+    private boolean skipIfPaused(String tag, String message) {
+        if (!BotRuntimeControls.isPaused(this)) {
+            return false;
+        }
+        BotLog.i(this, tag, message);
+        return true;
     }
 
     private String randomReportReply(BotConfig config) {
