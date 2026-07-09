@@ -21,6 +21,7 @@ final class VmicInjector {
     private static final String MTK_VIRTUAL_MIC_CTL = "/proc/mtk_virtual_mic_ctl";
     private static final String MTK_VIRTUAL_MIC_PCM = "/proc/mtk_virtual_mic_pcm";
     private static final String MTK_VIRTUAL_MIC_STATUS = "/proc/mtk_virtual_mic_status";
+    private static final int MTK_PROC_TARGET_PEAK = 22938;
     private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
@@ -186,11 +187,13 @@ final class VmicInjector {
         int frames = pcm.length / 2;
         int durationMs = Math.max(1, Math.round(frames * 1000f / wav.sampleRate));
         int controlRate = mtkProcControlRate(wav.sampleRate);
+        int pcmPeak = pcmPeak(pcm);
         BotLog.i(context, "vmic.inject.proc.audio", "sourceRate=" + wav.sampleRate
                 + " controlRate=" + controlRate
                 + " channels=" + wav.channels
                 + " dataBytes=" + wav.dataSize
                 + " pcmBytes=" + pcm.length
+                + " pcmPeak=" + pcmPeak
                 + " durationMs=" + durationMs);
         return new ProcAudio(out, durationMs, wav.sampleRate, controlRate);
     }
@@ -268,7 +271,7 @@ final class VmicInjector {
         if (wav.channels == 1) {
             byte[] out = new byte[sourceFrames * 2];
             System.arraycopy(wav.bytes, wav.dataOffset, out, 0, out.length);
-            return out;
+            return limitPcmPeak(out, MTK_PROC_TARGET_PEAK);
         }
         byte[] out = new byte[sourceFrames * 2];
         for (int i = 0; i < sourceFrames; i++) {
@@ -276,7 +279,39 @@ final class VmicInjector {
             out[i * 2] = (byte) (sample & 0xff);
             out[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
         }
+        return limitPcmPeak(out, MTK_PROC_TARGET_PEAK);
+    }
+
+    private static byte[] limitPcmPeak(byte[] pcm, int targetPeak) {
+        int peak = pcmPeak(pcm);
+        if (peak <= targetPeak || peak <= 0) {
+            return pcm;
+        }
+        byte[] out = new byte[pcm.length];
+        for (int i = 0; i + 1 < pcm.length; i += 2) {
+            int sample = (short) le16(pcm, i);
+            int scaled = Math.round(sample * targetPeak / (float) peak);
+            if (scaled > Short.MAX_VALUE) {
+                scaled = Short.MAX_VALUE;
+            } else if (scaled < Short.MIN_VALUE) {
+                scaled = Short.MIN_VALUE;
+            }
+            out[i] = (byte) (scaled & 0xff);
+            out[i + 1] = (byte) ((scaled >>> 8) & 0xff);
+        }
         return out;
+    }
+
+    private static int pcmPeak(byte[] pcm) {
+        int peak = 0;
+        for (int i = 0; i + 1 < pcm.length; i += 2) {
+            int sample = (short) le16(pcm, i);
+            int value = Math.abs(sample);
+            if (value > peak) {
+                peak = value;
+            }
+        }
+        return peak;
     }
 
     private static int monoSampleAt(WavData wav, int frame) {
