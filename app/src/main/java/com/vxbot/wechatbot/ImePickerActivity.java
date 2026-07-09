@@ -9,15 +9,15 @@ import android.view.inputmethod.InputMethodManager;
 public final class ImePickerActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private int requestCount;
+    private boolean requestedWithFocus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setFinishOnTouchOutside(true);
         BotLog.i(this, "control.ime.activity", "输入法切换桥接页已启动");
-        requestPickerDelayed(120);
-        requestPickerDelayed(500);
-        handler.postDelayed(this::finish, 4500);
+        requestPickerDelayed(350);
+        handler.postDelayed(this::finish, 3500);
     }
 
     @Override
@@ -45,6 +45,9 @@ public final class ImePickerActivity extends Activity {
     }
 
     private void showPicker() {
+        if (requestedWithFocus || requestCount >= 3) {
+            return;
+        }
         try {
             InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
             if (imm == null) {
@@ -52,6 +55,9 @@ public final class ImePickerActivity extends Activity {
             } else {
                 imm.showInputMethodPicker();
                 requestCount++;
+                if (hasWindowFocus()) {
+                    requestedWithFocus = true;
+                }
                 BotLog.i(this, "control.ime.picker", "已请求系统输入法切换面板 count="
                         + requestCount + " focus=" + hasWindowFocus());
             }
