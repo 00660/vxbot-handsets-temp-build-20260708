@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`147`
-- `versionName`：`0.1.146-ime-focus-on-expand`
+- `versionCode`：`148`
+- `versionName`：`0.1.147-vmic-record-source-rate`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-09：修复虚拟麦录音测试固定采样率。`VmicInjector` 已按 TTS WAV 原始采样率写内核，但 `VoiceDemoService` 的录音测试仍用固定 `16000Hz` 创建 `AudioRecord` 并写录音 WAV 头，可能导致测试回放慢、噪声判断失真；v148 改为读取 TTS WAV `fmt` chunk 的原始采样率，录音和输出 WAV 头都使用该采样率。版本升到 `versionCode=148` / `versionName=0.1.147-vmic-record-source-rate`。
 - 2026-07-09：修复非机器人前台时小白点输入法面板不稳定。问题根因是桌面/微信前台时机器人悬浮窗还不是稳定 IME focus client，输入法按钮点击瞬间再抢焦点会被系统偶发吞掉；v147 改为小白点展开面板时就切成可聚焦窗口，并加 `FLAG_NOT_TOUCH_MODAL` 避免面板外点击被全屏吞掉，收起时恢复非焦点；输入法按钮仍只延迟 50ms 请求一次系统面板。版本升到 `versionCode=147` / `versionName=0.1.146-ime-focus-on-expand`。
 - 2026-07-09：调整小白点输入法面板单次延迟。保留 v145 的 1.5s 防抖和单次请求，把获取焦点后的 `showInputMethodPicker()` 延迟从 20ms 调整为 50ms。版本升到 `versionCode=146` / `versionName=0.1.145-direct-ime-50ms`。
 - 2026-07-09：给小白点输入法按钮增加防抖。v144 已改为延迟 20ms 只请求一次系统输入法面板，但按钮连续触发仍会多次拉起；v145 增加 1.5s 冷却窗口，同一轮只接受一次输入法面板请求。版本升到 `versionCode=145` / `versionName=0.1.144-direct-ime-debounce`。

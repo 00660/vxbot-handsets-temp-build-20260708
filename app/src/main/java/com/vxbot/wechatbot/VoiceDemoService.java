@@ -28,6 +28,7 @@ import android.speech.tts.UtteranceProgressListener;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -174,14 +175,16 @@ public final class VoiceDemoService extends Service {
                 throw new IllegalStateException("TTS 没有生成可注入音频");
             }
             int durationMs = readMediaDurationMs(ttsFile);
+            int recordRate = readWavSampleRate(ttsFile);
             int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
             File recordFile = newVmicRecordFile();
-            RecordingJob job = startMicRecording(recordFile, recordMs);
+            RecordingJob job = startMicRecording(recordFile, recordMs, recordRate);
             int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
             SystemClock.sleep(warmupMs);
             BotLog.i(this, "voice.demo.vmic.record.inject",
                     "tts=" + ttsFile.getAbsolutePath()
                             + " durationMs=" + durationMs
+                            + " recordRate=" + recordRate
                             + " recordMs=" + recordMs
                             + " record=" + recordFile.getAbsolutePath());
             boolean injected = VmicInjector.injectFile(this, ttsFile, Math.max(8000, durationMs + 5000), "vmic-record-test");
@@ -192,6 +195,7 @@ public final class VoiceDemoService extends Service {
             BotLog.write(this, injected ? "INFO" : "WARN", "voice.demo.vmic.record.done",
                     "虚拟麦录音测试完成 injected=" + injected
                             + " record=" + recordFile.getAbsolutePath()
+                            + " recordRate=" + recordRate
                             + " size=" + recordFile.length());
             playFile(intent, recordFile.getAbsolutePath());
         } finally {
@@ -785,6 +789,41 @@ public final class VoiceDemoService extends Service {
         }
     }
 
+    private int readWavSampleRate(File file) throws Exception {
+        byte[] header = new byte[4096];
+        int read;
+        try (FileInputStream in = new FileInputStream(file)) {
+            read = in.read(header);
+        }
+        if (read < 44 || !"RIFF".equals(ascii(header, 0, 4)) || !"WAVE".equals(ascii(header, 8, 4))) {
+            throw new IllegalStateException("not a WAV file: " + file.getAbsolutePath());
+        }
+        int offset = 12;
+        while (offset + 24 <= read) {
+            String id = ascii(header, offset, 4);
+            int size = le32(header, offset + 4);
+            int chunkData = offset + 8;
+            if (size < 0 || chunkData > read) {
+                throw new IllegalStateException("bad WAV chunk: " + id);
+            }
+            if ("fmt ".equals(id)) {
+                int audioFormat = le16(header, chunkData);
+                int channels = le16(header, chunkData + 2);
+                int sampleRate = le32(header, chunkData + 4);
+                int bitsPerSample = le16(header, chunkData + 14);
+                if (audioFormat != 1 || channels < 1 || sampleRate < 1 || bitsPerSample != 16) {
+                    throw new IllegalStateException("unsupported WAV fmt=" + audioFormat
+                            + " channels=" + channels
+                            + " rate=" + sampleRate
+                            + " bits=" + bitsPerSample);
+                }
+                return sampleRate;
+            }
+            offset = chunkData + size + (size & 1);
+        }
+        throw new IllegalStateException("WAV fmt chunk missing: " + file.getAbsolutePath());
+    }
+
     private File newVmicRecordFile() throws Exception {
         File dir = new File(getFilesDir(), "vmic-recordings");
         if (!dir.isDirectory() && !dir.mkdirs()) {
@@ -793,8 +832,8 @@ public final class VoiceDemoService extends Service {
         return new File(dir, "vxbot-vmic-record-" + SystemClock.uptimeMillis() + ".wav");
     }
 
-    private RecordingJob startMicRecording(File output, int recordMs) {
-        RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs));
+    private RecordingJob startMicRecording(File output, int recordMs, int sampleRate) {
+        RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs), sampleRate);
         job.start();
         return job;
     }
@@ -802,11 +841,13 @@ public final class VoiceDemoService extends Service {
     private final class RecordingJob implements Runnable {
         private final File output;
         private final int recordMs;
+        private final int sampleRate;
         private final Thread thread;
 
-        RecordingJob(File output, int recordMs) {
+        RecordingJob(File output, int recordMs, int sampleRate) {
             this.output = output;
             this.recordMs = recordMs;
+            this.sampleRate = sampleRate;
             this.thread = new Thread(this, "vmic-record-test");
         }
 
@@ -827,28 +868,31 @@ public final class VoiceDemoService extends Service {
             AudioRecord recorder = null;
             try {
                 int minBuffer = AudioRecord.getMinBufferSize(
-                        SAMPLE_RATE,
+                        sampleRate,
                         AudioFormat.CHANNEL_IN_MONO,
                         AudioFormat.ENCODING_PCM_16BIT);
                 if (minBuffer <= 0) {
-                    throw new IllegalStateException("bad minBuffer=" + minBuffer);
+                    throw new IllegalStateException("bad minBuffer=" + minBuffer + " rate=" + sampleRate);
                 }
-                int bufferSize = Math.max(minBuffer, SAMPLE_RATE);
+                int bufferSize = Math.max(minBuffer, sampleRate);
                 recorder = new AudioRecord(
                         MediaRecorder.AudioSource.MIC,
-                        SAMPLE_RATE,
+                        sampleRate,
                         AudioFormat.CHANNEL_IN_MONO,
                         AudioFormat.ENCODING_PCM_16BIT,
                         bufferSize);
                 if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                     throw new IllegalStateException("AudioRecord init failed state=" + recorder.getState());
                 }
-                ByteArrayOutputStream pcm = new ByteArrayOutputStream(SAMPLE_RATE * 2 * Math.max(1, recordMs / 1000));
+                ByteArrayOutputStream pcm = new ByteArrayOutputStream(sampleRate * 2 * Math.max(1, recordMs / 1000));
                 byte[] buffer = new byte[bufferSize];
                 long endAt = SystemClock.uptimeMillis() + recordMs;
                 recorder.startRecording();
                 BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.start",
-                        "file=" + output.getAbsolutePath() + " recordMs=" + recordMs + " buffer=" + bufferSize);
+                        "file=" + output.getAbsolutePath()
+                                + " recordMs=" + recordMs
+                                + " rate=" + sampleRate
+                                + " buffer=" + bufferSize);
                 while (!Thread.currentThread().isInterrupted() && SystemClock.uptimeMillis() < endAt) {
                     int read = recorder.read(buffer, 0, buffer.length);
                     if (read > 0) {
@@ -858,9 +902,11 @@ public final class VoiceDemoService extends Service {
                     }
                 }
                 recorder.stop();
-                writeWavFile(output, pcm.toByteArray(), SAMPLE_RATE);
+                writeWavFile(output, pcm.toByteArray(), sampleRate);
                 BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.file",
-                        "file=" + output.getAbsolutePath() + " size=" + output.length());
+                        "file=" + output.getAbsolutePath()
+                                + " rate=" + sampleRate
+                                + " size=" + output.length());
             } catch (Exception e) {
                 BotLog.e(VoiceDemoService.this, "voice.demo.vmic.record.fail",
                         e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -909,6 +955,24 @@ public final class VoiceDemoService extends Service {
         out.write((value >>> 8) & 0xff);
         out.write((value >>> 16) & 0xff);
         out.write((value >>> 24) & 0xff);
+    }
+
+    private static String ascii(byte[] bytes, int offset, int length) {
+        if (offset < 0 || length < 0 || offset + length > bytes.length) {
+            return "";
+        }
+        return new String(bytes, offset, length, StandardCharsets.US_ASCII);
+    }
+
+    private static int le16(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xff) | ((bytes[offset + 1] & 0xff) << 8);
+    }
+
+    private static int le32(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xff)
+                | ((bytes[offset + 1] & 0xff) << 8)
+                | ((bytes[offset + 2] & 0xff) << 16)
+                | ((bytes[offset + 3] & 0xff) << 24);
     }
 
     private void cleanupTtsFile(Intent intent, File file) {
