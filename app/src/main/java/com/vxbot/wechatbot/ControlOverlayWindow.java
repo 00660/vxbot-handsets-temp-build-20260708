@@ -16,6 +16,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -158,9 +159,13 @@ public final class ControlOverlayWindow {
 
     private void showInputMethodPicker() {
         try {
-            Intent picker = new Intent(context, ImePickerActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(picker);
+            InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm == null) {
+                BotLog.e(context, "control.ime.fail", "InputMethodManager 不可用");
+                return;
+            }
+            imm.showInputMethodPicker();
+            BotLog.i(context, "control.ime.picker", "已请求系统输入法切换面板");
         } catch (Exception e) {
             BotLog.e(context, "control.ime.fail", e.getClass().getSimpleName() + " " + e.getMessage());
         }

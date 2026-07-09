@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 140
-        versionName "0.1.139-vmic-source-rate"
+        versionCode 141
+        versionName "0.1.140-direct-ime-picker"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
