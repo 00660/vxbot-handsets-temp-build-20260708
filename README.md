@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`151`
-- `versionName`：`0.1.150-vmic-full-wav-rate`
+- `versionCode`：`152`
+- `versionName`：`0.1.151-vmic-no-loop`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-10：修复 MTK proc 虚拟麦注入结束后循环导致的尾部重复/拖尾。v151 已能正确解析嵌套 WAV 并按 `controlRate=32000` 注入，但 `VmicInjector` 仍写 `loop 1`，TTS 播完后内核会从头循环；v152 改为写 `loop 0`，让源 PCM 结束后输出静音，不重复开头。版本升到 `versionCode=152` / `versionName=0.1.151-vmic-no-loop`。
 - 2026-07-10：修复虚拟麦录音测试读取采样率只读 4096 字节导致的 `bad WAV chunk: data`。千问 TTS 嵌套 WAV 外层 `data` 大于 4096 字节，v150 注入逻辑已正确，但录音测试在注入前读采样率时只读头部，导致还没进入 `VmicInjector` 就失败；v151 改为完整读取当前 TTS WAV 后再复用嵌套 WAV 解析逻辑。版本升到 `versionCode=151` / `versionName=0.1.150-vmic-full-wav-rate`。
 - 2026-07-10：按 Android 录音链路实测修复虚拟麦慢吞吞。远程用 `ffmpeg/sox/scipy` 对比原始 TTS PCM 和手机系统录音机录音，`/proc` 写 `rate 24000` 时录音最佳速度约 `0.76x`、活跃段约为源 TTS 的 `1.32x`；批量测试 `24000/30000/32000/36000/48000` 后，`rate 32000` 最接近原始 TTS，速度误差约 `1.5%`。v150 保持 TTS PCM 原始字节不重采样，只把 MTK proc 控制 rate 按 `sampleRate * 4 / 3` 写入内核。版本升到 `versionCode=150` / `versionName=0.1.149-vmic-android-rate`。
 - 2026-07-10：修复千问 TTS 嵌套 WAV 导致虚拟麦全噪声。实测 TTS 文件为外层 WAV 的 `data` 内再嵌一个 `RIFF/WAVE`，且内层 `data` 长度声明异常偏大；旧逻辑把外层 `data` 直接当 PCM 注入内核，实际灌入了 WAV 头和错误字节流。v149 让 `VmicInjector` 和录音测试采样率读取在发现嵌套 `RIFF/WAVE` 时递归展开到真实 PCM，并只对这种嵌套 data 按实际剩余长度容错截断。版本升到 `versionCode=149` / `versionName=0.1.148-vmic-nested-wav`。

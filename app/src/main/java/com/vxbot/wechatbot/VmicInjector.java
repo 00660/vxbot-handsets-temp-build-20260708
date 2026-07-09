@@ -118,7 +118,7 @@ final class VmicInjector {
             String raw = shellQuote(audio.file.getAbsolutePath());
             String startCommand = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
                     + "echo rate " + audio.controlRate + " > " + ctl + "; "
-                    + "echo loop 1 > " + ctl + " 2>/dev/null || true; "
+                    + "echo loop 0 > " + ctl + " 2>/dev/null || true; "
                     + "cat " + raw + " > " + pcm + "; rc=$?; "
                     + "[ $rc -eq 0 ] || exit $rc; "
                     + "echo enable 1 > " + ctl + "; rc=$?; "
