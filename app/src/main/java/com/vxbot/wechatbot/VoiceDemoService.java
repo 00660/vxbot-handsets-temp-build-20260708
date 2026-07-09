@@ -795,31 +795,61 @@ public final class VoiceDemoService extends Service {
         try (FileInputStream in = new FileInputStream(file)) {
             read = in.read(header);
         }
-        if (read < 44 || !"RIFF".equals(ascii(header, 0, 4)) || !"WAVE".equals(ascii(header, 8, 4))) {
+        return readWavSampleRate(header, 0, read, false, file, 0);
+    }
+
+    private int readWavSampleRate(byte[] bytes, int base, int limit, boolean allowTruncatedData, File file, int depth)
+            throws Exception {
+        if (limit - base < 44 || !"RIFF".equals(ascii(bytes, base, 4))
+                || !"WAVE".equals(ascii(bytes, base + 8, 4))) {
             throw new IllegalStateException("not a WAV file: " + file.getAbsolutePath());
         }
-        int offset = 12;
-        while (offset + 24 <= read) {
-            String id = ascii(header, offset, 4);
-            int size = le32(header, offset + 4);
+        int sampleRate = 0;
+        int dataOffset = -1;
+        int dataSize = 0;
+        int offset = base + 12;
+        while (offset + 8 <= limit) {
+            String id = ascii(bytes, offset, 4);
+            int size = le32(bytes, offset + 4);
             int chunkData = offset + 8;
-            if (size < 0 || chunkData > read) {
+            int remaining = limit - chunkData;
+            if (size < 0 || chunkData > limit) {
                 throw new IllegalStateException("bad WAV chunk: " + id);
             }
+            if (size > remaining) {
+                if ("data".equals(id) && allowTruncatedData && remaining > 0) {
+                    size = remaining;
+                } else {
+                    throw new IllegalStateException("bad WAV chunk: " + id);
+                }
+            }
             if ("fmt ".equals(id)) {
-                int audioFormat = le16(header, chunkData);
-                int channels = le16(header, chunkData + 2);
-                int sampleRate = le32(header, chunkData + 4);
-                int bitsPerSample = le16(header, chunkData + 14);
+                if (size < 16) {
+                    throw new IllegalStateException("short WAV fmt chunk: " + file.getAbsolutePath());
+                }
+                int audioFormat = le16(bytes, chunkData);
+                int channels = le16(bytes, chunkData + 2);
+                sampleRate = le32(bytes, chunkData + 4);
+                int bitsPerSample = le16(bytes, chunkData + 14);
                 if (audioFormat != 1 || channels < 1 || sampleRate < 1 || bitsPerSample != 16) {
                     throw new IllegalStateException("unsupported WAV fmt=" + audioFormat
                             + " channels=" + channels
                             + " rate=" + sampleRate
                             + " bits=" + bitsPerSample);
                 }
-                return sampleRate;
+            } else if ("data".equals(id) && size > dataSize) {
+                dataOffset = chunkData;
+                dataSize = size;
             }
             offset = chunkData + size + (size & 1);
+        }
+        if (depth < 2 && dataOffset >= 0 && dataSize >= 44 && "RIFF".equals(ascii(bytes, dataOffset, 4))
+                && "WAVE".equals(ascii(bytes, dataOffset + 8, 4))) {
+            return readWavSampleRate(bytes, dataOffset, Math.min(limit, dataOffset + dataSize),
+                    true, file, depth + 1);
+        }
+        if (sampleRate > 0) {
+            return sampleRate;
         }
         throw new IllegalStateException("WAV fmt chunk missing: " + file.getAbsolutePath());
     }

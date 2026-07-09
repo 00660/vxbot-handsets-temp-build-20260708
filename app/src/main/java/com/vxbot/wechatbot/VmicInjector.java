@@ -193,7 +193,13 @@ final class VmicInjector {
 
     private static WavData readWav(File file) throws IOException {
         byte[] bytes = readAll(file);
-        if (bytes.length < 44 || !"RIFF".equals(ascii(bytes, 0, 4)) || !"WAVE".equals(ascii(bytes, 8, 4))) {
+        return readWav(bytes, 0, bytes.length, false, 0);
+    }
+
+    private static WavData readWav(byte[] bytes, int base, int limit, boolean allowTruncatedData, int depth)
+            throws IOException {
+        if (limit - base < 44 || !"RIFF".equals(ascii(bytes, base, 4))
+                || !"WAVE".equals(ascii(bytes, base + 8, 4))) {
             throw new IOException("not a RIFF/WAVE file");
         }
         int audioFormat = 0;
@@ -202,13 +208,21 @@ final class VmicInjector {
         int bitsPerSample = 0;
         int dataOffset = -1;
         int dataSize = 0;
-        int offset = 12;
-        while (offset + 8 <= bytes.length) {
+        int offset = base + 12;
+        while (offset + 8 <= limit) {
             String id = ascii(bytes, offset, 4);
             int size = le32(bytes, offset + 4);
             int chunkData = offset + 8;
-            if (size < 0 || chunkData > bytes.length || size > bytes.length - chunkData) {
+            int remaining = limit - chunkData;
+            if (size < 0 || chunkData > limit) {
                 throw new IOException("bad wav chunk: " + id);
+            }
+            if (size > remaining) {
+                if ("data".equals(id) && allowTruncatedData && remaining > 0) {
+                    size = remaining;
+                } else {
+                    throw new IOException("bad wav chunk: " + id);
+                }
             }
             if ("fmt ".equals(id)) {
                 if (size < 16) {
@@ -231,6 +245,10 @@ final class VmicInjector {
                     + " rate=" + sampleRate
                     + " bits=" + bitsPerSample
                     + " data=" + dataSize);
+        }
+        if (depth < 2 && dataSize >= 44 && "RIFF".equals(ascii(bytes, dataOffset, 4))
+                && "WAVE".equals(ascii(bytes, dataOffset + 8, 4))) {
+            return readWav(bytes, dataOffset, dataOffset + dataSize, true, depth + 1);
         }
         return new WavData(bytes, dataOffset, dataSize, channels, sampleRate);
     }
