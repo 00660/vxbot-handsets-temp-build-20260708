@@ -174,9 +174,6 @@ final class VmicInjector {
         WavData wav = readWav(wavFile);
         int controlRate = mtkProcControlRate(wav.sampleRate);
         byte[] pcm = toMonoPcm(wav);
-        if (controlRate != wav.sampleRate) {
-            pcm = resampleMonoPcm(pcm, wav.sampleRate, controlRate);
-        }
         pcm = limitPcmPeak(pcm, MTK_PROC_TARGET_PEAK);
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
@@ -198,14 +195,13 @@ final class VmicInjector {
                 + " dataBytes=" + wav.dataSize
                 + " pcmBytes=" + pcm.length
                 + " pcmPeak=" + pcmPeak
-                + " resampled=" + (controlRate != wav.sampleRate)
+                + " resampled=false"
                 + " durationMs=" + durationMs);
         return new ProcAudio(out, durationMs, wav.sampleRate, controlRate);
     }
 
     private static int mtkProcControlRate(int sampleRate) {
-        int compensated = Math.round(sampleRate * 4f / 3f);
-        return Math.max(8000, Math.min(192000, compensated));
+        return Math.max(8000, Math.min(192000, sampleRate));
     }
 
     private static WavData readWav(File file) throws IOException {
@@ -285,34 +281,6 @@ final class VmicInjector {
             out[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
         }
         return out;
-    }
-
-    private static byte[] resampleMonoPcm(byte[] pcm, int sourceRate, int targetRate) {
-        int sourceFrames = pcm.length / 2;
-        if (sourceFrames <= 1 || sourceRate <= 0 || targetRate <= 0 || sourceRate == targetRate) {
-            return pcm;
-        }
-        int targetFrames = Math.max(1, Math.round(sourceFrames * (targetRate / (float) sourceRate)));
-        byte[] out = new byte[targetFrames * 2];
-        for (int i = 0; i < targetFrames; i++) {
-            float sourceIndex = i * (sourceRate / (float) targetRate);
-            int base = (int) sourceIndex;
-            if (base >= sourceFrames - 1) {
-                base = sourceFrames - 1;
-            }
-            float frac = sourceIndex - base;
-            int a = sampleAt(pcm, base);
-            int b = sampleAt(pcm, Math.min(base + 1, sourceFrames - 1));
-            int sample = Math.round(a + (b - a) * frac);
-            out[i * 2] = (byte) (sample & 0xff);
-            out[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
-        }
-        return out;
-    }
-
-    private static int sampleAt(byte[] pcm, int frame) {
-        int offset = frame * 2;
-        return (short) le16(pcm, offset);
     }
 
     private static byte[] limitPcmPeak(byte[] pcm, int targetPeak) {

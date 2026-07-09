@@ -175,7 +175,8 @@ public final class VoiceDemoService extends Service {
                 throw new IllegalStateException("TTS 没有生成可注入音频");
             }
             int durationMs = readMediaDurationMs(ttsFile);
-            int recordRate = readWavSampleRate(ttsFile);
+            int sourceRate = readWavSampleRate(ttsFile);
+            int recordRate = 48000;
             int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
             int audioSource = audioSourceExtra(intent);
             String audioSourceName = audioSourceName(audioSource);
@@ -186,6 +187,7 @@ public final class VoiceDemoService extends Service {
             BotLog.i(this, "voice.demo.vmic.record.inject",
                     "tts=" + ttsFile.getAbsolutePath()
                             + " durationMs=" + durationMs
+                            + " sourceRate=" + sourceRate
                             + " recordRate=" + recordRate
                             + " recordMs=" + recordMs
                             + " audioSource=" + audioSourceName
