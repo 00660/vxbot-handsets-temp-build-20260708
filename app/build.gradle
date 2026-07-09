@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 150
-        versionName "0.1.149-vmic-android-rate"
+        versionCode 151
+        versionName "0.1.150-vmic-full-wav-rate"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

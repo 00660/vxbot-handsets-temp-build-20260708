@@ -790,12 +790,25 @@ public final class VoiceDemoService extends Service {
     }
 
     private int readWavSampleRate(File file) throws Exception {
-        byte[] header = new byte[4096];
-        int read;
-        try (FileInputStream in = new FileInputStream(file)) {
-            read = in.read(header);
+        long length = file.length();
+        if (length <= 0 || length > 32L * 1024L * 1024L) {
+            throw new IllegalStateException("bad WAV size: " + length);
         }
-        return readWavSampleRate(header, 0, read, false, file, 0);
+        byte[] bytes = new byte[(int) length];
+        int offset = 0;
+        try (FileInputStream in = new FileInputStream(file)) {
+            while (offset < bytes.length) {
+                int read = in.read(bytes, offset, bytes.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        if (offset != bytes.length) {
+            throw new IllegalStateException("short WAV read: " + offset + "/" + bytes.length);
+        }
+        return readWavSampleRate(bytes, 0, bytes.length, false, file, 0);
     }
 
     private int readWavSampleRate(byte[] bytes, int base, int limit, boolean allowTruncatedData, File file, int depth)
