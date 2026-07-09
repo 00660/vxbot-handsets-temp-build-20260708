@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`141`
-- `versionName`：`0.1.140-direct-ime-picker`
+- `versionCode`：`142`
+- `versionName`：`0.1.141-direct-ime-focus`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-09：修复悬浮小白点直接弹系统输入法面板。v141 直接从 `FLAG_NOT_FOCUSABLE` 悬浮窗调用 `showInputMethodPicker()` 会记录请求但不显示面板；v142 点击“输入法”时临时让小白点窗口获取焦点，调用系统 `InputMethodManager.showInputMethodPicker()` 后自动恢复非焦点悬浮窗，不恢复透明 Activity 路线。版本升到 `versionCode=142` / `versionName=0.1.141-direct-ime-focus`。
 - 2026-07-09：重写悬浮小白点输入法切换。删除透明 `ImePickerActivity` 桥接页和延迟重复请求逻辑，小白点“输入法”按钮直接调用 `InputMethodManager.showInputMethodPicker()` 弹出系统输入法选择面板；不再启动透明 Activity。版本升到 `versionCode=141` / `versionName=0.1.140-direct-ime-picker`。
 - 2026-07-09：修复 Redmi 9A/dandelion v18 内核动态采样率虚拟麦 APK 注入链路。`VmicInjector` 对 MTK proc 路径不再把 TTS WAV 强制重采样到 48k，而是读取 WAV 原始采样率，写入 `/proc/mtk_virtual_mic_pcm` 前先向 `/proc/mtk_virtual_mic_ctl` 下发 `rate <hz>`；单声道 16-bit WAV 直接拷贝原始 PCM，多声道仅降为 mono 且保持采样率；WAV 解析改为选择最大的有效 `data` chunk，避免异常小 chunk 导致 `pcmBytes=2`。版本升到 `versionCode=140` / `versionName=0.1.139-vmic-source-rate`。
 - 2026-07-09：修复悬浮小白点输入法按钮交互。点击“输入法”只打开系统输入法选择器，不再主动收起小白点面板；选择器由系统在用户选择后自动关闭。版本升到 `versionCode=139` / `versionName=0.1.138-ime-picker-keep-panel`。
