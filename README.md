@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`148`
-- `versionName`：`0.1.147-vmic-record-source-rate`
+- `versionCode`：`150`
+- `versionName`：`0.1.149-vmic-android-rate`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-10：按 Android 录音链路实测修复虚拟麦慢吞吞。远程用 `ffmpeg/sox/scipy` 对比原始 TTS PCM 和手机系统录音机录音，`/proc` 写 `rate 24000` 时录音最佳速度约 `0.76x`、活跃段约为源 TTS 的 `1.32x`；批量测试 `24000/30000/32000/36000/48000` 后，`rate 32000` 最接近原始 TTS，速度误差约 `1.5%`。v150 保持 TTS PCM 原始字节不重采样，只把 MTK proc 控制 rate 按 `sampleRate * 4 / 3` 写入内核。版本升到 `versionCode=150` / `versionName=0.1.149-vmic-android-rate`。
 - 2026-07-10：修复千问 TTS 嵌套 WAV 导致虚拟麦全噪声。实测 TTS 文件为外层 WAV 的 `data` 内再嵌一个 `RIFF/WAVE`，且内层 `data` 长度声明异常偏大；旧逻辑把外层 `data` 直接当 PCM 注入内核，实际灌入了 WAV 头和错误字节流。v149 让 `VmicInjector` 和录音测试采样率读取在发现嵌套 `RIFF/WAVE` 时递归展开到真实 PCM，并只对这种嵌套 data 按实际剩余长度容错截断。版本升到 `versionCode=149` / `versionName=0.1.148-vmic-nested-wav`。
 - 2026-07-09：修复虚拟麦录音测试固定采样率。`VmicInjector` 已按 TTS WAV 原始采样率写内核，但 `VoiceDemoService` 的录音测试仍用固定 `16000Hz` 创建 `AudioRecord` 并写录音 WAV 头，可能导致测试回放慢、噪声判断失真；v148 改为读取 TTS WAV `fmt` chunk 的原始采样率，录音和输出 WAV 头都使用该采样率。版本升到 `versionCode=148` / `versionName=0.1.147-vmic-record-source-rate`。
 - 2026-07-09：修复非机器人前台时小白点输入法面板不稳定。问题根因是桌面/微信前台时机器人悬浮窗还不是稳定 IME focus client，输入法按钮点击瞬间再抢焦点会被系统偶发吞掉；v147 改为小白点展开面板时就切成可聚焦窗口，并加 `FLAG_NOT_TOUCH_MODAL` 避免面板外点击被全屏吞掉，收起时恢复非焦点；输入法按钮仍只延迟 50ms 请求一次系统面板。版本升到 `versionCode=147` / `versionName=0.1.146-ime-focus-on-expand`。

@@ -117,7 +117,7 @@ final class VmicInjector {
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
             String raw = shellQuote(audio.file.getAbsolutePath());
             String startCommand = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
-                    + "echo rate " + audio.sampleRate + " > " + ctl + "; "
+                    + "echo rate " + audio.controlRate + " > " + ctl + "; "
                     + "echo loop 1 > " + ctl + " 2>/dev/null || true; "
                     + "cat " + raw + " > " + pcm + "; rc=$?; "
                     + "[ $rc -eq 0 ] || exit $rc; "
@@ -139,6 +139,7 @@ final class VmicInjector {
                     + " pcm=" + audio.file.getAbsolutePath()
                     + " bytes=" + audio.file.length()
                     + " rate=" + audio.sampleRate
+                    + " controlRate=" + audio.controlRate
                     + " durationMs=" + audio.durationMs
                     + " holdMs=" + holdMs
                     + " out=" + trim(started.output));
@@ -151,6 +152,7 @@ final class VmicInjector {
                     + " file=" + file.getAbsolutePath()
                     + " size=" + file.length()
                     + " pcmRate=" + audio.sampleRate
+                    + " controlRate=" + audio.controlRate
                     + " pcmBytes=" + audio.file.length()
                     + " elapsedMs=" + elapsed
                     + " stopCode=" + stopped.code
@@ -183,12 +185,19 @@ final class VmicInjector {
         }
         int frames = pcm.length / 2;
         int durationMs = Math.max(1, Math.round(frames * 1000f / wav.sampleRate));
+        int controlRate = mtkProcControlRate(wav.sampleRate);
         BotLog.i(context, "vmic.inject.proc.audio", "sourceRate=" + wav.sampleRate
+                + " controlRate=" + controlRate
                 + " channels=" + wav.channels
                 + " dataBytes=" + wav.dataSize
                 + " pcmBytes=" + pcm.length
                 + " durationMs=" + durationMs);
-        return new ProcAudio(out, durationMs, wav.sampleRate);
+        return new ProcAudio(out, durationMs, wav.sampleRate, controlRate);
+    }
+
+    private static int mtkProcControlRate(int sampleRate) {
+        int compensated = Math.round(sampleRate * 4f / 3f);
+        return Math.max(8000, Math.min(192000, compensated));
     }
 
     private static WavData readWav(File file) throws IOException {
@@ -378,11 +387,13 @@ final class VmicInjector {
         final File file;
         final int durationMs;
         final int sampleRate;
+        final int controlRate;
 
-        ProcAudio(File file, int durationMs, int sampleRate) {
+        ProcAudio(File file, int durationMs, int sampleRate, int controlRate) {
             this.file = file;
             this.durationMs = durationMs;
             this.sampleRate = sampleRate;
+            this.controlRate = controlRate;
         }
     }
 
