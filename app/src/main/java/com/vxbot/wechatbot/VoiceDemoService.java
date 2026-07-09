@@ -1002,7 +1002,7 @@ public final class VoiceDemoService extends Service {
     }
 
     private static int audioSourceExtra(Intent intent) {
-        String value = stringExtra(intent, "audioSource", "MIC").trim().toUpperCase(Locale.US);
+        String value = stringExtra(intent, "audioSource", "UNPROCESSED").trim().toUpperCase(Locale.US);
         if ("VOICE_RECOGNITION".equals(value) || "VR".equals(value)) {
             return MediaRecorder.AudioSource.VOICE_RECOGNITION;
         }
