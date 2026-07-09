@@ -25,7 +25,7 @@ public final class ControlOverlayWindow {
     private static final int DOT_SIZE_DP = 28;
     private static final int PANEL_WIDTH_DP = 234;
     private static final int PANEL_HEIGHT_DP = 44;
-    private static final int SHOW_IME_PICKER_DELAY_MS = 20;
+    private static final int SHOW_IME_PICKER_DELAY_MS = 50;
     private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 1200;
     private static final long IME_PICKER_CLICK_COOLDOWN_MS = 1500L;
 
