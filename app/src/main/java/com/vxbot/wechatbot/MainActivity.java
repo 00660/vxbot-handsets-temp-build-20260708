@@ -177,6 +177,7 @@ public final class MainActivity extends Activity {
     private Switch stayInCodexSession;
     private TextView logView;
     private TextView statusView;
+    private View vmicRecordTestRow;
     private boolean loadingConfig;
     private int selectedTabIndex = -1;
     private boolean fullScreenChromeVisible = false;
@@ -319,8 +320,9 @@ public final class MainActivity extends Activity {
         statusPage.addView(buttonRow(
                 button("亮度权限", v -> openWriteSettingsPermission()),
                 button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
-        statusPage.addView(buttonRow(
-                button("虚拟麦录音测试", v -> startVmicRecordTest())));
+        vmicRecordTestRow = buttonRow(button("虚拟麦录音测试", v -> startVmicRecordTest()));
+        vmicRecordTestRow.setVisibility(View.GONE);
+        statusPage.addView(vmicRecordTestRow);
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
@@ -1459,17 +1461,24 @@ public final class MainActivity extends Activity {
         uiWorker.execute(() -> {
             boolean shizuku = ShizukuBridge.available();
             boolean shizukuPerm = ShizukuBridge.hasPermission();
+            boolean rootPerm = RootAccessChecker.hasRootPermission();
+            boolean vmicSupported = VmicInjector.helperPresent(this);
             String hs = new HsClient(config.hsPort).healthLabel();
             String hsRuntime = HsDaemonManager.runtimeStatus(this);
             runOnUiThread(() -> {
                 if (statusView == null) {
                     return;
                 }
+                if (vmicRecordTestRow != null) {
+                    vmicRecordTestRow.setVisibility(vmicSupported ? View.VISIBLE : View.GONE);
+                }
                 statusView.setText("模式=" + config.activeMode
                         + "\nAPK记录=" + hsRuntime
                         + "\nhs端口=" + hs
+                        + "\nRoot=" + (rootPerm ? "已授权" : "未授权")
                         + "\nShizuku=" + (shizuku ? "在线" : "离线")
-                        + "\n授权=" + (shizukuPerm ? "已授权" : "未授权")
+                        + "\n授权=" + ((rootPerm || shizukuPerm) ? "已授权" : "未授权")
+                        + "\n虚拟麦=" + (vmicSupported ? "已支持" : "不支持")
                         + "\n辅助功能=" + (accessibilityServiceEnabled() ? "已开" : "未开")
                         + "\n悬浮窗=" + (overlayEnabled() ? "已开" : "未开")
                         + "\n录音权限=" + (recordAudioPermissionGranted() ? "已开" : "未开")

@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`135`
-- `versionName`：`0.1.134-vmic-48k-serial`
+- `versionCode`：`136`
+- `versionName`：`0.1.135-runtime-ui-fixes`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -148,6 +148,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 ## 最近交接
 
 - 2026-07-09：修复 Redmi 9A/dandelion 虚拟麦音质。`VmicInjector` 改为把 TTS WAV 转成 `48000Hz/s16le/mono` PCM 后写入 `/proc/mtk_virtual_mic_pcm`，并对虚拟麦注入加全局串行锁，避免多次测试或并发语音同时写内核虚拟麦造成叠音、噪声和失真。版本升到 `versionCode=135` / `versionName=0.1.134-vmic-48k-serial`。
+- 2026-07-09：运行页通用化。虚拟麦录音测试按钮仅在检测到 `/proc/mtk_virtual_mic_*` 或可用 helper 时显示；授权状态改为 root 或 Shizuku 任一授权即显示已授权；悬浮小白点输入法按钮改为通过临时 Activity 调起系统输入法选择器。版本升到 `versionCode=136` / `versionName=0.1.135-runtime-ui-fixes`。
 - 2026-07-07：适配 Redmi 9A/dandelion 内核 proc 虚拟麦。`VmicInjector` 优先检测 `/proc/mtk_virtual_mic_ctl`、`/proc/mtk_virtual_mic_pcm`、`/proc/mtk_virtual_mic_status`，把机器人生成的 TTS WAV 在进程内转成 PCM 后通过 root 写入内核虚拟麦，并在按住微信语音期间启停 `enable`；旧 `vmic_play` / `vmic_push` helper 保留为兜底。版本升到 `versionCode=131` / `versionName=0.1.130-redmi9a-proc-vmic`。
 - 2026-07-03：适配 1+8P PE13 虚拟麦模块。`VmicInjector` 先复用 mido 的 `vmic_play`，找不到时改走 `/vendor/bin/vmic_push`，并增加 `/data/adb/modules/instantnoodlep_vmic/system/vendor/bin/vmic_push` 兜底；TTS WAV 仍由机器人进程生成后通过 root helper 灌入虚拟麦。版本升到 `versionCode=130` / `versionName=0.1.129-instantnoodlep-vmic`。
 - 2026-06-20：修正 Codex 桥接失败路径。容器内 `happy-codex-bridge` 默认直接驱动本地 `codex app-server`，不再因为缺 `/root/.happy/access.key` 阻断机器人 Codex；APK 侧 `CODEX` 路由只走 `happyCodexEndpoint`，桥接失败时记录 `codex.happy.fail` 并终止本次回复，不再回退普通聊天上游；版本升到 `versionCode=113` / `versionName=0.1.112-codex-bridge-no-fallback`。
