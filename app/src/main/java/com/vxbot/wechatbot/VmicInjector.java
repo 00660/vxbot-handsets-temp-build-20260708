@@ -21,7 +21,7 @@ final class VmicInjector {
     private static final String MTK_VIRTUAL_MIC_CTL = "/proc/mtk_virtual_mic_ctl";
     private static final String MTK_VIRTUAL_MIC_PCM = "/proc/mtk_virtual_mic_pcm";
     private static final String MTK_VIRTUAL_MIC_STATUS = "/proc/mtk_virtual_mic_status";
-    private static final int MTK_PROC_TARGET_PEAK = 22938;
+    private static final int MTK_PROC_TARGET_PEAK = 10000;
     private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
