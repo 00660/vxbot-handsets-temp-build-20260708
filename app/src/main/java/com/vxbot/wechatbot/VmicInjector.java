@@ -199,8 +199,7 @@ final class VmicInjector {
     }
 
     private static int mtkProcControlRate(int sampleRate) {
-        int compensated = Math.round(sampleRate * 4f / 3f);
-        return Math.max(8000, Math.min(192000, compensated));
+        return Math.max(8000, Math.min(192000, sampleRate));
     }
 
     private static WavData readWav(File file) throws IOException {
