@@ -189,6 +189,7 @@ public final class ControlOverlayWindow {
             return;
         }
         params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         try {
             windowManager.updateViewLayout(root, params);
             root.requestFocus();
@@ -218,18 +219,21 @@ public final class ControlOverlayWindow {
     }
 
     private void restoreOverlayNotFocusableDelayed() {
-        handler.postDelayed(() -> {
-            if (params == null || windowManager == null || root == null
-                    || (params.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0) {
-                return;
-            }
-            params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-            try {
-                windowManager.updateViewLayout(root, params);
-            } catch (Exception e) {
-                BotLog.e(context, "control.ime.restore.fail", e.getClass().getSimpleName() + " " + e.getMessage());
-            }
-        }, RESTORE_NOT_FOCUSABLE_DELAY_MS);
+        handler.postDelayed(this::restoreOverlayNotFocusable, RESTORE_NOT_FOCUSABLE_DELAY_MS);
+    }
+
+    private void restoreOverlayNotFocusable() {
+        if (params == null || windowManager == null || root == null
+                || (params.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0) {
+            return;
+        }
+        params.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
+        try {
+            windowManager.updateViewLayout(root, params);
+        } catch (Exception e) {
+            BotLog.e(context, "control.ime.restore.fail", e.getClass().getSimpleName() + " " + e.getMessage());
+        }
     }
 
     private void updatePauseButton() {
@@ -250,6 +254,11 @@ public final class ControlOverlayWindow {
         root.getChildAt(1).setVisibility(expanded ? View.VISIBLE : View.GONE);
         resize(expanded ? dp(PANEL_WIDTH_DP) : dp(DOT_SIZE_DP),
                 expanded ? dp(PANEL_HEIGHT_DP) : dp(DOT_SIZE_DP));
+        if (expanded) {
+            makeOverlayFocusableForPicker();
+        } else {
+            restoreOverlayNotFocusable();
+        }
         updatePauseButton();
     }
 

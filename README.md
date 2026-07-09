@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`146`
-- `versionName`：`0.1.145-direct-ime-50ms`
+- `versionCode`：`147`
+- `versionName`：`0.1.146-ime-focus-on-expand`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-09：修复非机器人前台时小白点输入法面板不稳定。问题根因是桌面/微信前台时机器人悬浮窗还不是稳定 IME focus client，输入法按钮点击瞬间再抢焦点会被系统偶发吞掉；v147 改为小白点展开面板时就切成可聚焦窗口，并加 `FLAG_NOT_TOUCH_MODAL` 避免面板外点击被全屏吞掉，收起时恢复非焦点；输入法按钮仍只延迟 50ms 请求一次系统面板。版本升到 `versionCode=147` / `versionName=0.1.146-ime-focus-on-expand`。
 - 2026-07-09：调整小白点输入法面板单次延迟。保留 v145 的 1.5s 防抖和单次请求，把获取焦点后的 `showInputMethodPicker()` 延迟从 20ms 调整为 50ms。版本升到 `versionCode=146` / `versionName=0.1.145-direct-ime-50ms`。
 - 2026-07-09：给小白点输入法按钮增加防抖。v144 已改为延迟 20ms 只请求一次系统输入法面板，但按钮连续触发仍会多次拉起；v145 增加 1.5s 冷却窗口，同一轮只接受一次输入法面板请求。版本升到 `versionCode=145` / `versionName=0.1.144-direct-ime-debounce`。
 - 2026-07-09：修正小白点输入法面板反复弹出。v143 的 120/420/900ms 三次请求会导致系统输入法面板被反复拉起；v144 改为点击后先让悬浮窗临时获取焦点，再延迟 20ms 只请求一次 `InputMethodManager.showInputMethodPicker()`，随后恢复非焦点悬浮窗。版本升到 `versionCode=144` / `versionName=0.1.143-direct-ime-20ms`。
