@@ -177,8 +177,10 @@ public final class VoiceDemoService extends Service {
             int durationMs = readMediaDurationMs(ttsFile);
             int recordRate = readWavSampleRate(ttsFile);
             int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
+            int audioSource = audioSourceExtra(intent);
+            String audioSourceName = audioSourceName(audioSource);
             File recordFile = newVmicRecordFile();
-            RecordingJob job = startMicRecording(recordFile, recordMs, recordRate);
+            RecordingJob job = startMicRecording(recordFile, recordMs, recordRate, audioSource, audioSourceName);
             int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
             SystemClock.sleep(warmupMs);
             BotLog.i(this, "voice.demo.vmic.record.inject",
@@ -186,6 +188,7 @@ public final class VoiceDemoService extends Service {
                             + " durationMs=" + durationMs
                             + " recordRate=" + recordRate
                             + " recordMs=" + recordMs
+                            + " audioSource=" + audioSourceName
                             + " record=" + recordFile.getAbsolutePath());
             boolean injected = VmicInjector.injectFile(this, ttsFile, Math.max(8000, durationMs + 5000), "vmic-record-test");
             job.await(recordMs + 3000L);
@@ -196,11 +199,17 @@ public final class VoiceDemoService extends Service {
                     "虚拟麦录音测试完成 injected=" + injected
                             + " record=" + recordFile.getAbsolutePath()
                             + " recordRate=" + recordRate
+                            + " audioSource=" + audioSourceName
                             + " size=" + recordFile.length());
             playFile(intent, recordFile.getAbsolutePath());
         } finally {
             if (ttsFile != null) {
-                TtsCache.cleanup(this, ttsFile, "vmic-record-test");
+                if (boolExtra(intent, "deleteTtsFile", true)) {
+                    TtsCache.cleanup(this, ttsFile, "vmic-record-test");
+                } else {
+                    BotLog.i(this, "tts.prepare.keep",
+                            "reason=vmic-record-test file=" + ttsFile.getAbsolutePath());
+                }
             }
             VMIC_RECORD_TEST_RUNNING.set(false);
         }
@@ -875,8 +884,10 @@ public final class VoiceDemoService extends Service {
         return new File(dir, "vxbot-vmic-record-" + SystemClock.uptimeMillis() + ".wav");
     }
 
-    private RecordingJob startMicRecording(File output, int recordMs, int sampleRate) {
-        RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs), sampleRate);
+    private RecordingJob startMicRecording(File output, int recordMs, int sampleRate,
+                                           int audioSource, String audioSourceName) {
+        RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs), sampleRate,
+                audioSource, audioSourceName);
         job.start();
         return job;
     }
@@ -885,12 +896,16 @@ public final class VoiceDemoService extends Service {
         private final File output;
         private final int recordMs;
         private final int sampleRate;
+        private final int audioSource;
+        private final String audioSourceName;
         private final Thread thread;
 
-        RecordingJob(File output, int recordMs, int sampleRate) {
+        RecordingJob(File output, int recordMs, int sampleRate, int audioSource, String audioSourceName) {
             this.output = output;
             this.recordMs = recordMs;
             this.sampleRate = sampleRate;
+            this.audioSource = audioSource;
+            this.audioSourceName = audioSourceName;
             this.thread = new Thread(this, "vmic-record-test");
         }
 
@@ -919,7 +934,7 @@ public final class VoiceDemoService extends Service {
                 }
                 int bufferSize = Math.max(minBuffer, sampleRate);
                 recorder = new AudioRecord(
-                        MediaRecorder.AudioSource.MIC,
+                        audioSource,
                         sampleRate,
                         AudioFormat.CHANNEL_IN_MONO,
                         AudioFormat.ENCODING_PCM_16BIT,
@@ -935,6 +950,8 @@ public final class VoiceDemoService extends Service {
                         "file=" + output.getAbsolutePath()
                                 + " recordMs=" + recordMs
                                 + " rate=" + sampleRate
+                                + " actualRate=" + recorder.getSampleRate()
+                                + " audioSource=" + audioSourceName
                                 + " buffer=" + bufferSize);
                 while (!Thread.currentThread().isInterrupted() && SystemClock.uptimeMillis() < endAt) {
                     int read = recorder.read(buffer, 0, buffer.length);
@@ -982,6 +999,40 @@ public final class VoiceDemoService extends Service {
                 out.write(pcm);
             }
         }
+    }
+
+    private static int audioSourceExtra(Intent intent) {
+        String value = stringExtra(intent, "audioSource", "MIC").trim().toUpperCase(Locale.US);
+        if ("VOICE_RECOGNITION".equals(value) || "VR".equals(value)) {
+            return MediaRecorder.AudioSource.VOICE_RECOGNITION;
+        }
+        if ("VOICE_COMMUNICATION".equals(value) || "VC".equals(value)) {
+            return MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+        }
+        if ("CAMCORDER".equals(value)) {
+            return MediaRecorder.AudioSource.CAMCORDER;
+        }
+        if ("UNPROCESSED".equals(value) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return MediaRecorder.AudioSource.UNPROCESSED;
+        }
+        return MediaRecorder.AudioSource.MIC;
+    }
+
+    private static String audioSourceName(int audioSource) {
+        if (audioSource == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+            return "VOICE_RECOGNITION";
+        }
+        if (audioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION) {
+            return "VOICE_COMMUNICATION";
+        }
+        if (audioSource == MediaRecorder.AudioSource.CAMCORDER) {
+            return "CAMCORDER";
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                && audioSource == MediaRecorder.AudioSource.UNPROCESSED) {
+            return "UNPROCESSED";
+        }
+        return "MIC";
     }
 
     private static void writeAscii(FileOutputStream out, String text) throws Exception {
