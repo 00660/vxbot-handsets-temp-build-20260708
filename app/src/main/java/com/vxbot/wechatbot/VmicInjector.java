@@ -21,44 +21,47 @@ final class VmicInjector {
     private static final String MTK_VIRTUAL_MIC_CTL = "/proc/mtk_virtual_mic_ctl";
     private static final String MTK_VIRTUAL_MIC_PCM = "/proc/mtk_virtual_mic_pcm";
     private static final String MTK_VIRTUAL_MIC_STATUS = "/proc/mtk_virtual_mic_status";
-    private static final int MTK_VIRTUAL_MIC_RATE = 8000;
+    private static final int MTK_VIRTUAL_MIC_RATE = 48000;
+    private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
     }
 
     static boolean injectFile(Context context, File file, int timeoutMs, String reason) {
-        if (file == null || !file.isFile() || file.length() <= 44) {
-            BotLog.w(context, "vmic.inject.skip", "reason=" + reason + " invalid file");
-            return false;
-        }
-        Helper procHelper = findMtkProcHelper(context);
-        if (!procHelper.path.isEmpty() && injectMtkProc(context, file, timeoutMs, reason)) {
-            return true;
-        }
-        Helper helper = findLegacyHelper(context);
-        if (helper.path.isEmpty()) {
-            BotLog.w(context, "vmic.inject.unavailable", "reason=" + reason
-                    + " helper missing: " + MTK_VIRTUAL_MIC_CTL + " / " + VMIC_PLAY + " / " + VMIC_PUSH);
-            return false;
-        }
-        int waitMs = Math.max(8000, timeoutMs);
-        String command = shellQuote(helper.path) + " " + shellQuote(file.getAbsolutePath()) + " 48000 1";
-        ShellResult result = runRoot(command, waitMs);
-        if (result.code == 0) {
-            BotLog.i(context, "vmic.inject.done", "reason=" + reason
+        synchronized (INJECT_LOCK) {
+            if (file == null || !file.isFile() || file.length() <= 44) {
+                BotLog.w(context, "vmic.inject.skip", "reason=" + reason + " invalid file");
+                return false;
+            }
+            Helper procHelper = findMtkProcHelper(context);
+            if (!procHelper.path.isEmpty() && injectMtkProc(context, file, timeoutMs, reason)) {
+                return true;
+            }
+            Helper helper = findLegacyHelper(context);
+            if (helper.path.isEmpty()) {
+                BotLog.w(context, "vmic.inject.unavailable", "reason=" + reason
+                        + " helper missing: " + MTK_VIRTUAL_MIC_CTL + " / " + VMIC_PLAY + " / " + VMIC_PUSH);
+                return false;
+            }
+            int waitMs = Math.max(8000, timeoutMs);
+            String command = shellQuote(helper.path) + " " + shellQuote(file.getAbsolutePath()) + " 48000 1";
+            ShellResult result = runRoot(command, waitMs);
+            if (result.code == 0) {
+                BotLog.i(context, "vmic.inject.done", "reason=" + reason
+                        + " helper=" + helper.name
+                        + " file=" + file.getAbsolutePath()
+                        + " size=" + file.length()
+                        + " elapsedMs=" + result.elapsedMs
+                        + " out=" + trim(result.output));
+                return true;
+            }
+            BotLog.w(context, "vmic.inject.fail", "reason=" + reason
                     + " helper=" + helper.name
-                    + " file=" + file.getAbsolutePath()
-                    + " size=" + file.length()
+                    + " code=" + result.code
                     + " elapsedMs=" + result.elapsedMs
                     + " out=" + trim(result.output));
-            return true;
+            return false;
         }
-        BotLog.w(context, "vmic.inject.fail", "reason=" + reason
-                + " helper=" + helper.name
-                + " code=" + result.code
-                + " elapsedMs=" + result.elapsedMs
-                + " out=" + trim(result.output));
-        return false;
     }
 
     static boolean helperPresent(Context context) {
@@ -164,7 +167,7 @@ final class VmicInjector {
 
     private static ProcAudio prepareMtkProcAudio(Context context, File wavFile) throws IOException {
         WavData wav = readWav(wavFile);
-        byte[] pcm = to8000MonoPcm(wav);
+        byte[] pcm = toTargetRateMonoPcm(wav, MTK_VIRTUAL_MIC_RATE);
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
         }
@@ -225,13 +228,13 @@ final class VmicInjector {
         return new WavData(bytes, dataOffset, dataSize, channels, sampleRate);
     }
 
-    private static byte[] to8000MonoPcm(WavData wav) {
+    private static byte[] toTargetRateMonoPcm(WavData wav, int targetRate) {
         int sourceFrameBytes = wav.channels * 2;
         int sourceFrames = wav.dataSize / sourceFrameBytes;
-        int outputFrames = Math.max(1, Math.round(sourceFrames * MTK_VIRTUAL_MIC_RATE / (float) wav.sampleRate));
+        int outputFrames = Math.max(1, Math.round(sourceFrames * targetRate / (float) wav.sampleRate));
         byte[] out = new byte[outputFrames * 2];
         for (int i = 0; i < outputFrames; i++) {
-            double sourcePos = i * (double) wav.sampleRate / MTK_VIRTUAL_MIC_RATE;
+            double sourcePos = i * (double) wav.sampleRate / targetRate;
             int leftFrame = Math.min(sourceFrames - 1, (int) Math.floor(sourcePos));
             int rightFrame = Math.min(sourceFrames - 1, leftFrame + 1);
             double frac = sourcePos - leftFrame;

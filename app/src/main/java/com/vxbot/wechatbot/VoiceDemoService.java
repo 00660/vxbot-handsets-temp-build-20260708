@@ -40,6 +40,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class VoiceDemoService extends Service {
     private static final String CHANNEL_ID = "voice_demo";
@@ -50,6 +51,7 @@ public final class VoiceDemoService extends Service {
     private static final String DEFAULT_QWEN_TTS_VOICE = BotConfig.DEFAULT_TTS_VOICE;
     static final String ACTION_VOICE_DEMO_FINISH = "com.vxbot.wechatbot.action.VOICE_DEMO_FINISH";
     static final String EXTRA_REQUEST_ID = "requestId";
+    private static final AtomicBoolean VMIC_RECORD_TEST_RUNNING = new AtomicBoolean(false);
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -159,6 +161,10 @@ public final class VoiceDemoService extends Service {
     }
 
     private void runVmicRecordTest(Intent intent) throws Exception {
+        if (!VMIC_RECORD_TEST_RUNNING.compareAndSet(false, true)) {
+            BotLog.w(this, "voice.demo.vmic.record.skip_busy", "已有虚拟麦录音测试正在运行，跳过本次请求");
+            return;
+        }
         String text = stringExtra(intent, "text", "这是虚拟麦录音测试。");
         BotConfig config = BotConfig.load(this);
         File ttsFile = null;
@@ -192,6 +198,7 @@ public final class VoiceDemoService extends Service {
             if (ttsFile != null) {
                 TtsCache.cleanup(this, ttsFile, "vmic-record-test");
             }
+            VMIC_RECORD_TEST_RUNNING.set(false);
         }
     }
 
