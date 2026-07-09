@@ -27,6 +27,7 @@ public final class ControlOverlayWindow {
     private static final int PANEL_HEIGHT_DP = 44;
     private static final int SHOW_IME_PICKER_DELAY_MS = 20;
     private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 1200;
+    private static final long IME_PICKER_CLICK_COOLDOWN_MS = 1500L;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -49,6 +50,7 @@ public final class ControlOverlayWindow {
     private int downX;
     private int downY;
     private boolean moved;
+    private long lastImePickerClickMs;
 
     public ControlOverlayWindow(Context context) {
         this.context = context.getApplicationContext();
@@ -163,6 +165,12 @@ public final class ControlOverlayWindow {
 
     private void showInputMethodPicker() {
         try {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastImePickerClickMs < IME_PICKER_CLICK_COOLDOWN_MS) {
+                BotLog.i(context, "control.ime.skip", "输入法面板请求过近，跳过重复触发");
+                return;
+            }
+            lastImePickerClickMs = now;
             makeOverlayFocusableForPicker();
             requestInputMethodPickerDelayed(SHOW_IME_PICKER_DELAY_MS);
             restoreOverlayNotFocusableDelayed();
