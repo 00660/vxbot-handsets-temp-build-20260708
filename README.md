@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`136`
-- `versionName`：`0.1.135-runtime-ui-fixes`
+- `versionCode`：`140`
+- `versionName`：`0.1.139-vmic-source-rate`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,9 +147,10 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-09：修复 Redmi 9A/dandelion v18 内核动态采样率虚拟麦 APK 注入链路。`VmicInjector` 对 MTK proc 路径不再把 TTS WAV 强制重采样到 48k，而是读取 WAV 原始采样率，写入 `/proc/mtk_virtual_mic_pcm` 前先向 `/proc/mtk_virtual_mic_ctl` 下发 `rate <hz>`；单声道 16-bit WAV 直接拷贝原始 PCM，多声道仅降为 mono 且保持采样率；WAV 解析改为选择最大的有效 `data` chunk，避免异常小 chunk 导致 `pcmBytes=2`。版本升到 `versionCode=140` / `versionName=0.1.139-vmic-source-rate`。
 - 2026-07-09：修复悬浮小白点输入法按钮交互。点击“输入法”只打开系统输入法选择器，不再主动收起小白点面板；选择器由系统在用户选择后自动关闭。版本升到 `versionCode=139` / `versionName=0.1.138-ime-picker-keep-panel`。
 - 2026-07-09：修复悬浮小白点输入法切换。`ImePickerActivity` 不再在 `onCreate()` 立即调用一次后快速退出，改为在 `onResume()` 和窗口获得焦点后请求 `InputMethodManager.showInputMethodPicker()`，有焦点后停止重复请求，并保留桥接页数秒，避免系统输入法选择器被过早关闭。版本升到 `versionCode=138` / `versionName=0.1.137-ime-picker-focus-once`。
-- 2026-07-09：修复 Redmi 9A/dandelion 虚拟麦音质。`VmicInjector` 改为把 TTS WAV 转成 `48000Hz/s16le/mono` PCM 后写入 `/proc/mtk_virtual_mic_pcm`，并对虚拟麦注入加全局串行锁，避免多次测试或并发语音同时写内核虚拟麦造成叠音、噪声和失真。版本升到 `versionCode=135` / `versionName=0.1.134-vmic-48k-serial`。
+- 2026-07-09：曾尝试把 Redmi 9A/dandelion 虚拟麦 APK 侧统一转成 `48000Hz/s16le/mono` PCM；该路线不适配 v18 动态采样率内核，后续以 `versionCode=140` 的原始采样率直写方案为准。
 - 2026-07-09：运行页通用化。虚拟麦录音测试按钮仅在检测到 `/proc/mtk_virtual_mic_*` 或可用 helper 时显示；授权状态改为 root 或 Shizuku 任一授权即显示已授权；悬浮小白点输入法按钮改为通过临时 Activity 调起系统输入法选择器。版本升到 `versionCode=136` / `versionName=0.1.135-runtime-ui-fixes`。
 - 2026-07-07：适配 Redmi 9A/dandelion 内核 proc 虚拟麦。`VmicInjector` 优先检测 `/proc/mtk_virtual_mic_ctl`、`/proc/mtk_virtual_mic_pcm`、`/proc/mtk_virtual_mic_status`，把机器人生成的 TTS WAV 在进程内转成 PCM 后通过 root 写入内核虚拟麦，并在按住微信语音期间启停 `enable`；旧 `vmic_play` / `vmic_push` helper 保留为兜底。版本升到 `versionCode=131` / `versionName=0.1.130-redmi9a-proc-vmic`。
 - 2026-07-03：适配 1+8P PE13 虚拟麦模块。`VmicInjector` 先复用 mido 的 `vmic_play`，找不到时改走 `/vendor/bin/vmic_push`，并增加 `/data/adb/modules/instantnoodlep_vmic/system/vendor/bin/vmic_push` 兜底；TTS WAV 仍由机器人进程生成后通过 root helper 灌入虚拟麦。版本升到 `versionCode=130` / `versionName=0.1.129-instantnoodlep-vmic`。

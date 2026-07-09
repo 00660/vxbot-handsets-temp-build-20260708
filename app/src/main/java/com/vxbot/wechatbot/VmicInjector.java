@@ -21,7 +21,6 @@ final class VmicInjector {
     private static final String MTK_VIRTUAL_MIC_CTL = "/proc/mtk_virtual_mic_ctl";
     private static final String MTK_VIRTUAL_MIC_PCM = "/proc/mtk_virtual_mic_pcm";
     private static final String MTK_VIRTUAL_MIC_STATUS = "/proc/mtk_virtual_mic_status";
-    private static final int MTK_VIRTUAL_MIC_RATE = 48000;
     private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
@@ -118,6 +117,7 @@ final class VmicInjector {
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
             String raw = shellQuote(audio.file.getAbsolutePath());
             String startCommand = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo rate " + audio.sampleRate + " > " + ctl + "; "
                     + "echo loop 1 > " + ctl + " 2>/dev/null || true; "
                     + "cat " + raw + " > " + pcm + "; rc=$?; "
                     + "[ $rc -eq 0 ] || exit $rc; "
@@ -138,6 +138,7 @@ final class VmicInjector {
                     + " source=" + file.getAbsolutePath()
                     + " pcm=" + audio.file.getAbsolutePath()
                     + " bytes=" + audio.file.length()
+                    + " rate=" + audio.sampleRate
                     + " durationMs=" + audio.durationMs
                     + " holdMs=" + holdMs
                     + " out=" + trim(started.output));
@@ -149,6 +150,7 @@ final class VmicInjector {
                     + " helper=mtk_virtual_mic_proc"
                     + " file=" + file.getAbsolutePath()
                     + " size=" + file.length()
+                    + " pcmRate=" + audio.sampleRate
                     + " pcmBytes=" + audio.file.length()
                     + " elapsedMs=" + elapsed
                     + " stopCode=" + stopped.code
@@ -167,7 +169,7 @@ final class VmicInjector {
 
     private static ProcAudio prepareMtkProcAudio(Context context, File wavFile) throws IOException {
         WavData wav = readWav(wavFile);
-        byte[] pcm = toTargetRateMonoPcm(wav, MTK_VIRTUAL_MIC_RATE);
+        byte[] pcm = toSourceRateMonoPcm(wav);
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
         }
@@ -180,8 +182,13 @@ final class VmicInjector {
             stream.write(pcm);
         }
         int frames = pcm.length / 2;
-        int durationMs = Math.max(1, Math.round(frames * 1000f / MTK_VIRTUAL_MIC_RATE));
-        return new ProcAudio(out, durationMs);
+        int durationMs = Math.max(1, Math.round(frames * 1000f / wav.sampleRate));
+        BotLog.i(context, "vmic.inject.proc.audio", "sourceRate=" + wav.sampleRate
+                + " channels=" + wav.channels
+                + " dataBytes=" + wav.dataSize
+                + " pcmBytes=" + pcm.length
+                + " durationMs=" + durationMs);
+        return new ProcAudio(out, durationMs, wav.sampleRate);
     }
 
     private static WavData readWav(File file) throws IOException {
@@ -211,7 +218,7 @@ final class VmicInjector {
                 channels = le16(bytes, chunkData + 2);
                 sampleRate = le32(bytes, chunkData + 4);
                 bitsPerSample = le16(bytes, chunkData + 14);
-            } else if ("data".equals(id)) {
+            } else if ("data".equals(id) && size > dataSize) {
                 dataOffset = chunkData;
                 dataSize = size;
             }
@@ -228,24 +235,17 @@ final class VmicInjector {
         return new WavData(bytes, dataOffset, dataSize, channels, sampleRate);
     }
 
-    private static byte[] toTargetRateMonoPcm(WavData wav, int targetRate) {
+    private static byte[] toSourceRateMonoPcm(WavData wav) {
         int sourceFrameBytes = wav.channels * 2;
         int sourceFrames = wav.dataSize / sourceFrameBytes;
-        int outputFrames = Math.max(1, Math.round(sourceFrames * targetRate / (float) wav.sampleRate));
-        byte[] out = new byte[outputFrames * 2];
-        for (int i = 0; i < outputFrames; i++) {
-            double sourcePos = i * (double) wav.sampleRate / targetRate;
-            int leftFrame = Math.min(sourceFrames - 1, (int) Math.floor(sourcePos));
-            int rightFrame = Math.min(sourceFrames - 1, leftFrame + 1);
-            double frac = sourcePos - leftFrame;
-            int left = monoSampleAt(wav, leftFrame);
-            int right = monoSampleAt(wav, rightFrame);
-            int sample = (int) Math.round(left + (right - left) * frac);
-            if (sample > Short.MAX_VALUE) {
-                sample = Short.MAX_VALUE;
-            } else if (sample < Short.MIN_VALUE) {
-                sample = Short.MIN_VALUE;
-            }
+        if (wav.channels == 1) {
+            byte[] out = new byte[sourceFrames * 2];
+            System.arraycopy(wav.bytes, wav.dataOffset, out, 0, out.length);
+            return out;
+        }
+        byte[] out = new byte[sourceFrames * 2];
+        for (int i = 0; i < sourceFrames; i++) {
+            int sample = monoSampleAt(wav, i);
             out[i * 2] = (byte) (sample & 0xff);
             out[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
         }
@@ -359,10 +359,12 @@ final class VmicInjector {
     private static final class ProcAudio {
         final File file;
         final int durationMs;
+        final int sampleRate;
 
-        ProcAudio(File file, int durationMs) {
+        ProcAudio(File file, int durationMs, int sampleRate) {
             this.file = file;
             this.durationMs = durationMs;
+            this.sampleRate = sampleRate;
         }
     }
 
