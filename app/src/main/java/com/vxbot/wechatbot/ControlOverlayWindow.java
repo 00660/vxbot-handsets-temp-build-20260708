@@ -25,7 +25,8 @@ public final class ControlOverlayWindow {
     private static final int DOT_SIZE_DP = 28;
     private static final int PANEL_WIDTH_DP = 234;
     private static final int PANEL_HEIGHT_DP = 44;
-    private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 3500;
+    private static final int SHOW_IME_PICKER_DELAY_MS = 20;
+    private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 1200;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -163,9 +164,7 @@ public final class ControlOverlayWindow {
     private void showInputMethodPicker() {
         try {
             makeOverlayFocusableForPicker();
-            requestInputMethodPickerDelayed(120, 1);
-            requestInputMethodPickerDelayed(420, 2);
-            requestInputMethodPickerDelayed(900, 3);
+            requestInputMethodPickerDelayed(SHOW_IME_PICKER_DELAY_MS);
             restoreOverlayNotFocusableDelayed();
         } catch (Exception e) {
             BotLog.e(context, "control.ime.fail", e.getClass().getSimpleName() + " " + e.getMessage());
@@ -191,7 +190,7 @@ public final class ControlOverlayWindow {
         }
     }
 
-    private void requestInputMethodPickerDelayed(long delayMs, int attempt) {
+    private void requestInputMethodPickerDelayed(long delayMs) {
         handler.postDelayed(() -> {
             try {
                 if (root != null) {
@@ -199,14 +198,13 @@ public final class ControlOverlayWindow {
                 }
                 InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
                 if (imm == null) {
-                    BotLog.e(context, "control.ime.fail", "InputMethodManager 不可用 attempt=" + attempt);
+                    BotLog.e(context, "control.ime.fail", "InputMethodManager 不可用");
                     return;
                 }
                 imm.showInputMethodPicker();
-                BotLog.i(context, "control.ime.picker", "已请求系统输入法切换面板 attempt=" + attempt);
+                BotLog.i(context, "control.ime.picker", "已请求系统输入法切换面板 delayMs=" + delayMs);
             } catch (Exception e) {
-                BotLog.e(context, "control.ime.fail", "attempt=" + attempt + " "
-                        + e.getClass().getSimpleName() + " " + e.getMessage());
+                BotLog.e(context, "control.ime.fail", e.getClass().getSimpleName() + " " + e.getMessage());
             }
         }, Math.max(0L, delayMs));
     }
