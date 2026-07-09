@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-09：修复悬浮小白点输入法按钮交互。点击“输入法”只打开系统输入法选择器，不再主动收起小白点面板；选择器由系统在用户选择后自动关闭。版本升到 `versionCode=139` / `versionName=0.1.138-ime-picker-keep-panel`。
 - 2026-07-09：修复悬浮小白点输入法切换。`ImePickerActivity` 不再在 `onCreate()` 立即调用一次后快速退出，改为在 `onResume()` 和窗口获得焦点后请求 `InputMethodManager.showInputMethodPicker()`，有焦点后停止重复请求，并保留桥接页数秒，避免系统输入法选择器被过早关闭。版本升到 `versionCode=138` / `versionName=0.1.137-ime-picker-focus-once`。
 - 2026-07-09：修复 Redmi 9A/dandelion 虚拟麦音质。`VmicInjector` 改为把 TTS WAV 转成 `48000Hz/s16le/mono` PCM 后写入 `/proc/mtk_virtual_mic_pcm`，并对虚拟麦注入加全局串行锁，避免多次测试或并发语音同时写内核虚拟麦造成叠音、噪声和失真。版本升到 `versionCode=135` / `versionName=0.1.134-vmic-48k-serial`。
 - 2026-07-09：运行页通用化。虚拟麦录音测试按钮仅在检测到 `/proc/mtk_virtual_mic_*` 或可用 helper 时显示；授权状态改为 root 或 Shizuku 任一授权即显示已授权；悬浮小白点输入法按钮改为通过临时 Activity 调起系统输入法选择器。版本升到 `versionCode=136` / `versionName=0.1.135-runtime-ui-fixes`。

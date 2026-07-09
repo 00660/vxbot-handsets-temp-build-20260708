@@ -161,7 +161,6 @@ public final class ControlOverlayWindow {
             Intent picker = new Intent(context, ImePickerActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(picker);
-            setExpanded(false);
         } catch (Exception e) {
             BotLog.e(context, "control.ime.fail", e.getClass().getSimpleName() + " " + e.getMessage());
         }
