@@ -181,7 +181,7 @@ public final class VoiceDemoService extends Service {
             int audioSource = audioSourceExtra(intent);
             String audioSourceName = audioSourceName(audioSource);
             File recordFile = newVmicRecordFile();
-            RecordingJob job = startMicRecording(recordFile, recordMs, recordRate, audioSource, audioSourceName);
+            RecordingHandle job = startMicRecording(recordFile, recordMs, recordRate, audioSource, audioSourceName);
             int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
             SystemClock.sleep(warmupMs);
             BotLog.i(this, "voice.demo.vmic.record.inject",
@@ -886,15 +886,88 @@ public final class VoiceDemoService extends Service {
         return new File(dir, "vxbot-vmic-record-" + SystemClock.uptimeMillis() + ".wav");
     }
 
-    private RecordingJob startMicRecording(File output, int recordMs, int sampleRate,
-                                           int audioSource, String audioSourceName) {
+    private RecordingHandle startMicRecording(File output, int recordMs, int sampleRate,
+                                              int audioSource, String audioSourceName) {
+        String tinycap = findTinycapBinary();
+        if (!tinycap.isEmpty()) {
+            TinycapRecordingJob job = new TinycapRecordingJob(output, Math.max(1000, recordMs),
+                    sampleRate, tinycap);
+            job.start();
+            return job;
+        }
         RecordingJob job = new RecordingJob(output, Math.max(1000, recordMs), sampleRate,
                 audioSource, audioSourceName);
         job.start();
         return job;
     }
 
-    private final class RecordingJob implements Runnable {
+    private interface RecordingHandle {
+        void await(long timeoutMs) throws InterruptedException;
+    }
+
+    private final class TinycapRecordingJob implements Runnable, RecordingHandle {
+        private final File output;
+        private final int recordMs;
+        private final int sampleRate;
+        private final String tinycap;
+        private final Thread thread;
+
+        TinycapRecordingJob(File output, int recordMs, int sampleRate, String tinycap) {
+            this.output = output;
+            this.recordMs = recordMs;
+            this.sampleRate = sampleRate;
+            this.tinycap = tinycap;
+            this.thread = new Thread(this, "vmic-record-tinycap");
+        }
+
+        void start() {
+            thread.start();
+        }
+
+        @Override
+        public void await(long timeoutMs) throws InterruptedException {
+            thread.join(Math.max(1000L, timeoutMs));
+            if (thread.isAlive()) {
+                thread.interrupt();
+                thread.join(1000L);
+            }
+        }
+
+        @Override
+        public void run() {
+            try {
+                int seconds = Math.max(1, (recordMs + 999) / 1000);
+                String path = output.getAbsolutePath();
+                String owner = android.os.Process.myUid() + ":" + android.os.Process.myUid();
+                String command = "rm -f " + shellQuote(path) + "; "
+                        + shellQuote(tinycap) + " " + shellQuote(path)
+                        + " -D 1 -d 1 -c 1 -r " + sampleRate + " -b 32 -t " + seconds + "; "
+                        + "rc=$?; "
+                        + "[ -f " + shellQuote(path) + " ] && chown " + owner + " " + shellQuote(path)
+                        + " && chmod 600 " + shellQuote(path)
+                        + " && restorecon " + shellQuote(path) + " 2>/dev/null || true; "
+                        + "exit $rc";
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.tinycap.start",
+                        "file=" + path + " recordMs=" + recordMs + " seconds=" + seconds
+                                + " rate=" + sampleRate + " tinycap=" + tinycap);
+                String out = runRootCommand(command);
+                if (!output.isFile() || output.length() <= 44) {
+                    throw new IllegalStateException("tinycap empty: " + out);
+                }
+                boolean converted = convertTinycapS32WavToS16(output);
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.tinycap.file",
+                        "file=" + path + " rate=" + sampleRate
+                                + " size=" + output.length()
+                                + " convertedS32ToS16=" + converted
+                                + " out=" + out);
+            } catch (Exception e) {
+                BotLog.e(VoiceDemoService.this, "voice.demo.vmic.record.tinycap.fail",
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private final class RecordingJob implements Runnable, RecordingHandle {
         private final File output;
         private final int recordMs;
         private final int sampleRate;
@@ -915,7 +988,8 @@ public final class VoiceDemoService extends Service {
             thread.start();
         }
 
-        void await(long timeoutMs) throws InterruptedException {
+        @Override
+        public void await(long timeoutMs) throws InterruptedException {
             thread.join(Math.max(1000L, timeoutMs));
             if (thread.isAlive()) {
                 thread.interrupt();
@@ -978,6 +1052,90 @@ public final class VoiceDemoService extends Service {
                 }
             }
         }
+    }
+
+    private String findTinycapBinary() {
+        String out = runRootCommand("for p in /data/local/tmp/tinycap /system/bin/tinycap /vendor/bin/tinycap; do "
+                + "[ -x \"$p\" ] && echo \"$p\" && exit 0; done");
+        if (out == null) {
+            return "";
+        }
+        for (String line : out.split("\\n")) {
+            String path = line.trim();
+            if (path.endsWith("/tinycap")) {
+                return path;
+            }
+        }
+        return "";
+    }
+
+    private static boolean convertTinycapS32WavToS16(File file) throws Exception {
+        byte[] bytes = readFileBytes(file, 32L * 1024L * 1024L);
+        if (bytes.length < 44 || !"RIFF".equals(ascii(bytes, 0, 4))
+                || !"WAVE".equals(ascii(bytes, 8, 4))) {
+            throw new IllegalStateException("tinycap output is not WAV");
+        }
+        int audioFormat = 0;
+        int channels = 0;
+        int sampleRate = 0;
+        int bitsPerSample = 0;
+        int dataOffset = -1;
+        int dataSize = 0;
+        int offset = 12;
+        while (offset + 8 <= bytes.length) {
+            String id = ascii(bytes, offset, 4);
+            int size = le32(bytes, offset + 4);
+            int chunkData = offset + 8;
+            int remaining = bytes.length - chunkData;
+            if (size < 0 || chunkData > bytes.length || size > remaining) {
+                throw new IllegalStateException("bad tinycap WAV chunk: " + id);
+            }
+            if ("fmt ".equals(id)) {
+                if (size < 16) {
+                    throw new IllegalStateException("short tinycap WAV fmt");
+                }
+                audioFormat = le16(bytes, chunkData);
+                channels = le16(bytes, chunkData + 2);
+                sampleRate = le32(bytes, chunkData + 4);
+                bitsPerSample = le16(bytes, chunkData + 14);
+            } else if ("data".equals(id)) {
+                dataOffset = chunkData;
+                dataSize = size;
+            }
+            offset = chunkData + size + (size & 1);
+        }
+        if (audioFormat != 1 || channels != 1 || sampleRate < 1 || dataOffset < 0 || dataSize <= 0) {
+            throw new IllegalStateException("unsupported tinycap WAV fmt=" + audioFormat
+                    + " channels=" + channels + " rate=" + sampleRate + " data=" + dataSize);
+        }
+        if (bitsPerSample == 16) {
+            return false;
+        }
+        if (bitsPerSample != 32 || (dataSize % 4) != 0) {
+            throw new IllegalStateException("unsupported tinycap bits=" + bitsPerSample);
+        }
+        byte[] pcm16 = new byte[(dataSize / 4) * 2];
+        int out = 0;
+        for (int in = dataOffset; in + 3 < dataOffset + dataSize; in += 4) {
+            int sample32 = le32(bytes, in);
+            int sample16 = sample32 >> 8;
+            if (sample16 > Short.MAX_VALUE) {
+                sample16 = Short.MAX_VALUE;
+            } else if (sample16 < Short.MIN_VALUE) {
+                sample16 = Short.MIN_VALUE;
+            }
+            pcm16[out++] = (byte) (sample16 & 0xff);
+            pcm16[out++] = (byte) ((sample16 >>> 8) & 0xff);
+        }
+        File tmp = new File(file.getParentFile(), file.getName() + ".s16.tmp");
+        writeWavFile(tmp, pcm16, sampleRate);
+        if (!file.delete()) {
+            throw new IllegalStateException("delete tinycap source failed: " + file.getAbsolutePath());
+        }
+        if (!tmp.renameTo(file)) {
+            throw new IllegalStateException("replace tinycap WAV failed: " + file.getAbsolutePath());
+        }
+        return true;
     }
 
     private static void writeWavFile(File file, byte[] pcm, int sampleRate) throws Exception {
@@ -1069,6 +1227,33 @@ public final class VoiceDemoService extends Service {
                 | ((bytes[offset + 1] & 0xff) << 8)
                 | ((bytes[offset + 2] & 0xff) << 16)
                 | ((bytes[offset + 3] & 0xff) << 24);
+    }
+
+    private static byte[] readFileBytes(File file, long maxBytes) throws Exception {
+        long length = file.length();
+        if (length <= 0 || length > maxBytes) {
+            throw new IllegalStateException("bad file size: " + length);
+        }
+        byte[] bytes = new byte[(int) length];
+        int offset = 0;
+        try (FileInputStream in = new FileInputStream(file)) {
+            while (offset < bytes.length) {
+                int read = in.read(bytes, offset, bytes.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        if (offset != bytes.length) {
+            throw new IllegalStateException("short file read: " + offset + "/" + bytes.length);
+        }
+        return bytes;
+    }
+
+    private static String shellQuote(String value) {
+        String text = value == null ? "" : value;
+        return "'" + text.replace("'", "'\"'\"'") + "'";
     }
 
     private void cleanupTtsFile(Intent intent, File file) {
