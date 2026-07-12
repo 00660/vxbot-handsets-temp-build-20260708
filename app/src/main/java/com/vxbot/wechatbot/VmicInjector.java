@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 final class VmicInjector {
@@ -31,7 +30,6 @@ final class VmicInjector {
     private static final int MTK_PROC_TARGET_PEAK = 10000;
     private static final int MTK_PROC_STATUS_POLL_MS = 100;
     private static final int MTK_PROC_TAIL_MS = 800;
-    private static final int MIN_WECHAT_VOICE_PCM_MS = 3200;
     private static final int MAX_DECODED_PCM_BYTES = 64 * 1024 * 1024;
     private static final Object INJECT_LOCK = new Object();
 
@@ -123,7 +121,7 @@ final class VmicInjector {
     private static boolean injectMtkProc(Context context, File file, int timeoutMs, String reason) {
         ProcAudio audio = null;
         try {
-            audio = prepareMtkProcAudio(context, file, reason);
+            audio = prepareMtkProcAudio(context, file);
             String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
             String pcm = shellQuote(MTK_VIRTUAL_MIC_PCM);
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
@@ -233,7 +231,7 @@ final class VmicInjector {
         return -1;
     }
 
-    private static ProcAudio prepareMtkProcAudio(Context context, File sourceFile, String reason) throws IOException {
+    private static ProcAudio prepareMtkProcAudio(Context context, File sourceFile) throws IOException {
         PcmData source;
         if (isWav(sourceFile)) {
             WavData wav = readWav(sourceFile);
@@ -244,17 +242,6 @@ final class VmicInjector {
         int controlRate = mtkProcControlRate(source.sampleRate);
         byte[] pcm = source.channels == 1 ? source.bytes : toMonoPcm(source.bytes, source.channels);
         pcm = limitPcmPeak(pcm, MTK_PROC_TARGET_PEAK);
-        if (reason != null && reason.startsWith("press-")) {
-            int minimumBytes = controlRate * 2 * MIN_WECHAT_VOICE_PCM_MS / 1000;
-            if (pcm.length < minimumBytes) {
-                int originalBytes = pcm.length;
-                pcm = Arrays.copyOf(pcm, minimumBytes);
-                BotLog.i(context, "vmic.inject.proc.pad", "reason=" + reason
-                        + " originalBytes=" + originalBytes
-                        + " paddedBytes=" + pcm.length
-                        + " minimumMs=" + MIN_WECHAT_VOICE_PCM_MS);
-            }
-        }
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
         }
