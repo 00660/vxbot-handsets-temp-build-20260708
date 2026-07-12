@@ -137,6 +137,7 @@ public final class VoiceDemoService extends Service {
             BotLog.w(this, "voice.demo.vmic.file.record.skip_busy", "已有虚拟麦录音测试正在运行");
             return;
         }
+        SystemRecorderRecordingJob job = null;
         try {
             String path = stringExtra(intent, "path", "");
             File source = new File(path);
@@ -144,24 +145,22 @@ public final class VoiceDemoService extends Service {
                 throw new IllegalArgumentException("file not found: " + path);
             }
             int durationMs = readMediaDurationMs(source);
-            int recordRate = 48000;
-            int recordMs = Math.max(5000, durationMs + 2200);
-            int audioSource = audioSourceExtra(intent);
-            String audioSourceName = audioSourceName(audioSource);
+            int recordRate = 44100;
             File recordFile = newVmicRecordFile();
-            RecordingJob job = new RecordingJob(recordFile, recordMs, recordRate,
-                    audioSource, audioSourceName);
+            job = new SystemRecorderRecordingJob(recordFile, recordRate);
             job.start();
             SystemClock.sleep(500);
             BotLog.i(this, "voice.demo.vmic.file.record.inject",
                     "source=" + source.getAbsolutePath()
                             + " durationMs=" + durationMs
                             + " recordRate=" + recordRate
-                            + " audioSource=" + audioSourceName
+                            + " channels=2 audioSource=MIC"
                             + " record=" + recordFile.getAbsolutePath());
             boolean injected = VmicInjector.injectFile(this, source,
                     Math.max(8000, durationMs + 5000), "vmic-file-record");
-            job.await(recordMs + 3000L);
+            SystemClock.sleep(1500);
+            job.requestStop();
+            job.await(5000);
             if (!recordFile.isFile() || recordFile.length() <= 44) {
                 throw new IllegalStateException("录音文件为空 injected=" + injected);
             }
@@ -172,6 +171,9 @@ public final class VoiceDemoService extends Service {
                             + " size=" + recordFile.length());
             playFile(intent, recordFile.getAbsolutePath());
         } finally {
+            if (job != null) {
+                job.requestStop();
+            }
             VMIC_RECORD_TEST_RUNNING.set(false);
         }
     }
@@ -227,45 +229,51 @@ public final class VoiceDemoService extends Service {
             return;
         }
         File sourceFile = null;
+        SystemRecorderRecordingJob job = null;
         try {
-            sourceFile = createVmicRecordTestSource();
+            BotConfig config = BotConfig.load(this);
+            sourceFile = TtsCache.prepare(this, config,
+                    "这是虚拟麦真实录音测试，当前通道音频应当清晰完整。",
+                    "vmic-record-test", 60000, 1);
+            if (sourceFile == null || !sourceFile.isFile() || sourceFile.length() <= 44) {
+                throw new IllegalStateException("虚拟麦测试 TTS 生成失败");
+            }
             int durationMs = readMediaDurationMs(sourceFile);
-            int sourceRate = readWavSampleRate(sourceFile);
-            int recordRate = 48000;
-            int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
-            int audioSource = audioSourceExtra(intent);
-            String audioSourceName = audioSourceName(audioSource);
+            int recordRate = 44100;
             File recordFile = newVmicRecordFile();
-            RecordingHandle job = startMicRecording(recordFile, recordMs, recordRate, audioSource, audioSourceName);
+            job = new SystemRecorderRecordingJob(recordFile, recordRate);
+            job.start();
             int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
             SystemClock.sleep(warmupMs);
             BotLog.i(this, "voice.demo.vmic.record.inject",
-                    "source=" + sourceFile.getAbsolutePath()
+                    "provider=" + config.ttsProvider
+                            + " source=" + sourceFile.getAbsolutePath()
                             + " durationMs=" + durationMs
-                            + " sourceRate=" + sourceRate
                             + " recordRate=" + recordRate
-                            + " recordMs=" + recordMs
-                            + " audioSource=" + audioSourceName
+                            + " channels=2 audioSource=MIC"
                             + " record=" + recordFile.getAbsolutePath());
             boolean injected = VmicInjector.injectFile(this, sourceFile,
                     Math.max(8000, durationMs + 5000), "vmic-record-test");
-            job.await(recordMs + 3000L);
+            SystemClock.sleep(1500);
+            job.requestStop();
+            job.await(5000);
             if (!recordFile.isFile() || recordFile.length() <= 44) {
                 throw new IllegalStateException("录音文件为空 injected=" + injected);
             }
             BotLog.write(this, injected ? "INFO" : "WARN", "voice.demo.vmic.record.done",
                     "虚拟麦录音测试完成 injected=" + injected
+                            + " provider=" + config.ttsProvider
                             + " record=" + recordFile.getAbsolutePath()
                             + " recordRate=" + recordRate
-                            + " audioSource=" + audioSourceName
+                            + " channels=2 audioSource=MIC"
                             + " size=" + recordFile.length());
             playFile(intent, recordFile.getAbsolutePath());
         } finally {
+            if (job != null) {
+                job.requestStop();
+            }
             if (sourceFile != null && boolExtra(intent, "deleteSourceFile", true)) {
-                if (!sourceFile.delete() && sourceFile.exists()) {
-                    BotLog.w(this, "voice.demo.vmic.source.delete.fail",
-                            sourceFile.getAbsolutePath());
-                }
+                TtsCache.cleanup(this, sourceFile, "vmic-record-test");
             }
             VMIC_RECORD_TEST_RUNNING.set(false);
         }
@@ -1149,6 +1157,89 @@ public final class VoiceDemoService extends Service {
         }
     }
 
+    private final class SystemRecorderRecordingJob implements Runnable, RecordingHandle {
+        private final File output;
+        private final int sampleRate;
+        private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+        private final Thread thread;
+
+        SystemRecorderRecordingJob(File output, int sampleRate) {
+            this.output = output;
+            this.sampleRate = sampleRate;
+            this.thread = new Thread(this, "vmic-record-system-compatible");
+        }
+
+        void start() {
+            thread.start();
+        }
+
+        void requestStop() {
+            stopRequested.set(true);
+        }
+
+        @Override
+        public void await(long timeoutMs) throws InterruptedException {
+            thread.join(Math.max(1000L, timeoutMs));
+            if (thread.isAlive()) {
+                thread.interrupt();
+                thread.join(1000L);
+            }
+        }
+
+        @Override
+        public void run() {
+            AudioRecord recorder = null;
+            try {
+                int minBuffer = AudioRecord.getMinBufferSize(
+                        sampleRate,
+                        AudioFormat.CHANNEL_IN_STEREO,
+                        AudioFormat.ENCODING_PCM_16BIT);
+                if (minBuffer <= 0) {
+                    throw new IllegalStateException("bad stereo minBuffer=" + minBuffer);
+                }
+                int bufferSize = Math.max(minBuffer, sampleRate * 4);
+                recorder = new AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        sampleRate,
+                        AudioFormat.CHANNEL_IN_STEREO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        bufferSize);
+                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                    throw new IllegalStateException("stereo AudioRecord init failed state=" + recorder.getState());
+                }
+                ByteArrayOutputStream pcm = new ByteArrayOutputStream(sampleRate * 4 * 10);
+                byte[] buffer = new byte[bufferSize];
+                recorder.startRecording();
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.system.start",
+                        "file=" + output.getAbsolutePath()
+                                + " rate=" + recorder.getSampleRate()
+                                + " channels=2 audioSource=MIC"
+                                + " buffer=" + bufferSize);
+                while (!Thread.currentThread().isInterrupted() && !stopRequested.get()) {
+                    int read = recorder.read(buffer, 0, buffer.length);
+                    if (read > 0) {
+                        pcm.write(buffer, 0, read);
+                    } else {
+                        SystemClock.sleep(20);
+                    }
+                }
+                recorder.stop();
+                writeWavFile(output, pcm.toByteArray(), sampleRate, 2);
+                BotLog.i(VoiceDemoService.this, "voice.demo.vmic.record.system.file",
+                        "file=" + output.getAbsolutePath()
+                                + " rate=" + sampleRate
+                                + " channels=2 size=" + output.length());
+            } catch (Exception e) {
+                BotLog.e(VoiceDemoService.this, "voice.demo.vmic.record.system.fail",
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
+            } finally {
+                if (recorder != null) {
+                    recorder.release();
+                }
+            }
+        }
+    }
+
     private String findTinycapBinary() {
         String out = runRootCommand("for p in /data/local/tmp/tinycap /system/bin/tinycap /vendor/bin/tinycap; do "
                 + "[ -x \"$p\" ] && echo \"$p\" && exit 0; done");
@@ -1234,8 +1325,13 @@ public final class VoiceDemoService extends Service {
     }
 
     private static void writeWavFile(File file, byte[] pcm, int sampleRate) throws Exception {
+        writeWavFile(file, pcm, sampleRate, 1);
+    }
+
+    private static void writeWavFile(File file, byte[] pcm, int sampleRate, int channels) throws Exception {
         int dataSize = pcm == null ? 0 : pcm.length;
-        int byteRate = sampleRate * 2;
+        int blockAlign = channels * 2;
+        int byteRate = sampleRate * blockAlign;
         try (FileOutputStream out = new FileOutputStream(file)) {
             writeAscii(out, "RIFF");
             writeLe32(out, 36 + dataSize);
@@ -1243,10 +1339,10 @@ public final class VoiceDemoService extends Service {
             writeAscii(out, "fmt ");
             writeLe32(out, 16);
             writeLe16(out, 1);
-            writeLe16(out, 1);
+            writeLe16(out, channels);
             writeLe32(out, sampleRate);
             writeLe32(out, byteRate);
-            writeLe16(out, 2);
+            writeLe16(out, blockAlign);
             writeLe16(out, 16);
             writeAscii(out, "data");
             writeLe32(out, dataSize);
