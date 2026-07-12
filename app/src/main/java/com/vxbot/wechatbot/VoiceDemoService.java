@@ -106,6 +106,8 @@ public final class VoiceDemoService extends Service {
             injectRemoteTts(intent);
         } else if ("vmicFile".equalsIgnoreCase(mode)) {
             injectFile(intent);
+        } else if ("vmicFileRecord".equalsIgnoreCase(mode)) {
+            recordInjectedFile(intent);
         } else if ("vmicRecordTest".equalsIgnoreCase(mode)) {
             runVmicRecordTest(intent);
         } else if ("file".equalsIgnoreCase(mode)) {
@@ -127,6 +129,50 @@ public final class VoiceDemoService extends Service {
         int durationMs = readMediaDurationMs(file);
         if (!VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), "vmic-file")) {
             throw new IllegalStateException("vmic inject failed");
+        }
+    }
+
+    private void recordInjectedFile(Intent intent) throws Exception {
+        if (!VMIC_RECORD_TEST_RUNNING.compareAndSet(false, true)) {
+            BotLog.w(this, "voice.demo.vmic.file.record.skip_busy", "已有虚拟麦录音测试正在运行");
+            return;
+        }
+        try {
+            String path = stringExtra(intent, "path", "");
+            File source = new File(path);
+            if (!source.isFile()) {
+                throw new IllegalArgumentException("file not found: " + path);
+            }
+            int durationMs = readMediaDurationMs(source);
+            int recordRate = 48000;
+            int recordMs = Math.max(5000, durationMs + 2200);
+            int audioSource = audioSourceExtra(intent);
+            String audioSourceName = audioSourceName(audioSource);
+            File recordFile = newVmicRecordFile();
+            RecordingJob job = new RecordingJob(recordFile, recordMs, recordRate,
+                    audioSource, audioSourceName);
+            job.start();
+            SystemClock.sleep(500);
+            BotLog.i(this, "voice.demo.vmic.file.record.inject",
+                    "source=" + source.getAbsolutePath()
+                            + " durationMs=" + durationMs
+                            + " recordRate=" + recordRate
+                            + " audioSource=" + audioSourceName
+                            + " record=" + recordFile.getAbsolutePath());
+            boolean injected = VmicInjector.injectFile(this, source,
+                    Math.max(8000, durationMs + 5000), "vmic-file-record");
+            job.await(recordMs + 3000L);
+            if (!recordFile.isFile() || recordFile.length() <= 44) {
+                throw new IllegalStateException("录音文件为空 injected=" + injected);
+            }
+            BotLog.i(this, "voice.demo.vmic.file.record.done",
+                    "injected=" + injected
+                            + " source=" + source.getAbsolutePath()
+                            + " record=" + recordFile.getAbsolutePath()
+                            + " size=" + recordFile.length());
+            playFile(intent, recordFile.getAbsolutePath());
+        } finally {
+            VMIC_RECORD_TEST_RUNNING.set(false);
         }
     }
 
