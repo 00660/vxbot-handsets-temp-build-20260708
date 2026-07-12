@@ -22,6 +22,8 @@ final class VmicInjector {
     private static final String MTK_VIRTUAL_MIC_PCM = "/proc/mtk_virtual_mic_pcm";
     private static final String MTK_VIRTUAL_MIC_STATUS = "/proc/mtk_virtual_mic_status";
     private static final int MTK_PROC_TARGET_PEAK = 10000;
+    private static final int MTK_PROC_STATUS_POLL_MS = 100;
+    private static final int MTK_PROC_TAIL_MS = 800;
     private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
@@ -134,7 +136,7 @@ final class VmicInjector {
                         + " out=" + trim(started.output));
                 return false;
             }
-            int holdMs = Math.min(Math.max(audio.durationMs + 350, 800), Math.max(1000, timeoutMs));
+            int waitMs = Math.max(1000, timeoutMs);
             BotLog.i(context, "vmic.inject.proc.start", "reason=" + reason
                     + " source=" + file.getAbsolutePath()
                     + " pcm=" + audio.file.getAbsolutePath()
@@ -142,9 +144,18 @@ final class VmicInjector {
                     + " rate=" + audio.sampleRate
                     + " controlRate=" + audio.controlRate
                     + " durationMs=" + audio.durationMs
-                    + " holdMs=" + holdMs
+                    + " waitMs=" + waitMs
                     + " out=" + trim(started.output));
-            SystemClock.sleep(holdMs);
+            ProcConsumption consumption = waitForMtkProcConsumption(status, waitMs);
+            if (consumption.completed) {
+                SystemClock.sleep(MTK_PROC_TAIL_MS);
+            } else {
+                BotLog.w(context, "vmic.inject.proc.consume.timeout", "reason=" + reason
+                        + " sourceFrames=" + consumption.sourceFrames
+                        + " sourceReadFrame=" + consumption.sourceReadFrame
+                        + " waitMs=" + waitMs
+                        + " out=" + trim(consumption.status));
+            }
             ShellResult stopped = runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; cat "
                     + status + " 2>/dev/null || true", 4000);
             long elapsed = SystemClock.uptimeMillis() - start;
@@ -155,6 +166,9 @@ final class VmicInjector {
                     + " pcmRate=" + audio.sampleRate
                     + " controlRate=" + audio.controlRate
                     + " pcmBytes=" + audio.file.length()
+                    + " completed=" + consumption.completed
+                    + " sourceFrames=" + consumption.sourceFrames
+                    + " sourceReadFrame=" + consumption.sourceReadFrame
                     + " elapsedMs=" + elapsed
                     + " stopCode=" + stopped.code
                     + " out=" + trim(stopped.output));
@@ -168,6 +182,46 @@ final class VmicInjector {
                 BotLog.i(context, "vmic.inject.proc.deleted", audio.file.getAbsolutePath());
             }
         }
+    }
+
+    private static ProcConsumption waitForMtkProcConsumption(String statusPath, int timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
+        ProcConsumption last = new ProcConsumption(false, -1, -1, "");
+        while (SystemClock.uptimeMillis() < deadline) {
+            ShellResult status = runRoot("cat " + statusPath + " 2>/dev/null || true", 2000);
+            long sourceFrames = statusValue(status.output, "source_frames");
+            long sourceReadFrame = statusValue(status.output, "source_read_frame");
+            if (sourceFrames > 0 && sourceReadFrame >= 0) {
+                last = new ProcConsumption(sourceReadFrame >= sourceFrames,
+                        sourceFrames, sourceReadFrame, status.output);
+                if (last.completed) {
+                    return last;
+                }
+            }
+            long remainingMs = deadline - SystemClock.uptimeMillis();
+            if (remainingMs > 0) {
+                SystemClock.sleep(Math.min(MTK_PROC_STATUS_POLL_MS, remainingMs));
+            }
+        }
+        return last;
+    }
+
+    private static long statusValue(String status, String key) {
+        if (status == null || status.isEmpty()) {
+            return -1;
+        }
+        String prefix = key + "=";
+        for (String field : status.split("\\s+")) {
+            if (!field.startsWith(prefix)) {
+                continue;
+            }
+            try {
+                return Long.parseLong(field.substring(prefix.length()));
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     private static ProcAudio prepareMtkProcAudio(Context context, File wavFile) throws IOException {
@@ -430,6 +484,20 @@ final class VmicInjector {
             this.durationMs = durationMs;
             this.sampleRate = sampleRate;
             this.controlRate = controlRate;
+        }
+    }
+
+    private static final class ProcConsumption {
+        final boolean completed;
+        final long sourceFrames;
+        final long sourceReadFrame;
+        final String status;
+
+        ProcConsumption(boolean completed, long sourceFrames, long sourceReadFrame, String status) {
+            this.completed = completed;
+            this.sourceFrames = sourceFrames;
+            this.sourceReadFrame = sourceReadFrame;
+            this.status = status;
         }
     }
 
