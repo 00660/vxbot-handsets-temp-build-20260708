@@ -104,6 +104,8 @@ public final class VoiceDemoService extends Service {
             pressAndSpeakTts(intent);
         } else if ("vmicTts".equalsIgnoreCase(mode) || "vmicText".equalsIgnoreCase(mode)) {
             injectRemoteTts(intent);
+        } else if ("vmicFile".equalsIgnoreCase(mode)) {
+            injectFile(intent);
         } else if ("vmicRecordTest".equalsIgnoreCase(mode)) {
             runVmicRecordTest(intent);
         } else if ("file".equalsIgnoreCase(mode)) {
@@ -114,6 +116,18 @@ public final class VoiceDemoService extends Service {
             playTone(intent);
         }
         BotLog.i(this, "voice.demo.done", "mode=" + mode);
+    }
+
+    private void injectFile(Intent intent) throws Exception {
+        String path = stringExtra(intent, "path", "");
+        File file = new File(path);
+        if (!file.isFile()) {
+            throw new IllegalArgumentException("file not found: " + path);
+        }
+        int durationMs = readMediaDurationMs(file);
+        if (!VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), "vmic-file")) {
+            throw new IllegalStateException("vmic inject failed");
+        }
     }
 
     private void pressAndPlayTone(Intent intent) throws Exception {
