@@ -1,14 +1,20 @@
 package com.vxbot.wechatbot;
 
 import android.content.Context;
+import android.media.AudioFormat;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
 import android.os.SystemClock;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
@@ -24,6 +30,7 @@ final class VmicInjector {
     private static final int MTK_PROC_TARGET_PEAK = 10000;
     private static final int MTK_PROC_STATUS_POLL_MS = 100;
     private static final int MTK_PROC_TAIL_MS = 800;
+    private static final int MAX_DECODED_PCM_BYTES = 64 * 1024 * 1024;
     private static final Object INJECT_LOCK = new Object();
 
     private VmicInjector() {
@@ -224,10 +231,16 @@ final class VmicInjector {
         return -1;
     }
 
-    private static ProcAudio prepareMtkProcAudio(Context context, File wavFile) throws IOException {
-        WavData wav = readWav(wavFile);
-        int controlRate = mtkProcControlRate(wav.sampleRate);
-        byte[] pcm = toMonoPcm(wav);
+    private static ProcAudio prepareMtkProcAudio(Context context, File sourceFile) throws IOException {
+        PcmData source;
+        if (isWav(sourceFile)) {
+            WavData wav = readWav(sourceFile);
+            source = new PcmData(toMonoPcm(wav), wav.sampleRate, 1, "wav");
+        } else {
+            source = decodeCompressedAudio(sourceFile);
+        }
+        int controlRate = mtkProcControlRate(source.sampleRate);
+        byte[] pcm = source.channels == 1 ? source.bytes : toMonoPcm(source.bytes, source.channels);
         pcm = limitPcmPeak(pcm, MTK_PROC_TARGET_PEAK);
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
@@ -243,15 +256,16 @@ final class VmicInjector {
         int frames = pcm.length / 2;
         int durationMs = Math.max(1, Math.round(frames * 1000f / controlRate));
         int pcmPeak = pcmPeak(pcm);
-        BotLog.i(context, "vmic.inject.proc.audio", "sourceRate=" + wav.sampleRate
+        BotLog.i(context, "vmic.inject.proc.audio", "sourceType=" + source.type
+                + " sourceRate=" + source.sampleRate
                 + " controlRate=" + controlRate
-                + " channels=" + wav.channels
-                + " dataBytes=" + wav.dataSize
+                + " channels=" + source.channels
+                + " dataBytes=" + source.bytes.length
                 + " pcmBytes=" + pcm.length
                 + " pcmPeak=" + pcmPeak
                 + " resampled=false"
                 + " durationMs=" + durationMs);
-        return new ProcAudio(out, durationMs, wav.sampleRate, controlRate);
+        return new ProcAudio(out, durationMs, source.sampleRate, controlRate);
     }
 
     private static int mtkProcControlRate(int sampleRate) {
@@ -261,6 +275,131 @@ final class VmicInjector {
     private static WavData readWav(File file) throws IOException {
         byte[] bytes = readAll(file);
         return readWav(bytes, 0, bytes.length, false, 0);
+    }
+
+    private static boolean isWav(File file) throws IOException {
+        byte[] header = new byte[12];
+        int offset = 0;
+        try (FileInputStream stream = new FileInputStream(file)) {
+            while (offset < header.length) {
+                int read = stream.read(header, offset, header.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        return offset == header.length
+                && "RIFF".equals(ascii(header, 0, 4))
+                && "WAVE".equals(ascii(header, 8, 4));
+    }
+
+    private static PcmData decodeCompressedAudio(File file) throws IOException {
+        MediaExtractor extractor = new MediaExtractor();
+        MediaCodec codec = null;
+        try {
+            extractor.setDataSource(file.getAbsolutePath());
+            MediaFormat inputFormat = null;
+            String mime = null;
+            for (int i = 0; i < extractor.getTrackCount(); i++) {
+                MediaFormat candidate = extractor.getTrackFormat(i);
+                String candidateMime = candidate.getString(MediaFormat.KEY_MIME);
+                if (candidateMime != null && candidateMime.startsWith("audio/")) {
+                    extractor.selectTrack(i);
+                    inputFormat = candidate;
+                    mime = candidateMime;
+                    break;
+                }
+            }
+            if (inputFormat == null || mime == null) {
+                throw new IOException("compressed audio track not found");
+            }
+
+            int sampleRate = inputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)
+                    ? inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE) : 0;
+            int channels = inputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)
+                    ? inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT) : 0;
+            inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT);
+            codec = MediaCodec.createDecoderByType(mime);
+            codec.configure(inputFormat, null, null, 0);
+            codec.start();
+
+            ByteArrayOutputStream pcm = new ByteArrayOutputStream();
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean inputEnded = false;
+            boolean outputEnded = false;
+            long deadline = SystemClock.uptimeMillis() + 60000;
+            while (!outputEnded && SystemClock.uptimeMillis() < deadline) {
+                if (!inputEnded) {
+                    int inputIndex = codec.dequeueInputBuffer(10000);
+                    if (inputIndex >= 0) {
+                        ByteBuffer input = codec.getInputBuffer(inputIndex);
+                        if (input == null) {
+                            throw new IOException("decoder input buffer unavailable");
+                        }
+                        input.clear();
+                        int size = extractor.readSampleData(input, 0);
+                        if (size < 0) {
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0,
+                                    MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            inputEnded = true;
+                        } else {
+                            codec.queueInputBuffer(inputIndex, 0, size,
+                                    Math.max(0, extractor.getSampleTime()), extractor.getSampleFlags());
+                            extractor.advance();
+                        }
+                    }
+                }
+
+                int outputIndex = codec.dequeueOutputBuffer(info, 10000);
+                if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    MediaFormat outputFormat = codec.getOutputFormat();
+                    sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                    channels = outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                    int encoding = outputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)
+                            ? outputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                            : AudioFormat.ENCODING_PCM_16BIT;
+                    if (encoding != AudioFormat.ENCODING_PCM_16BIT) {
+                        throw new IOException("unsupported decoded pcm encoding: " + encoding);
+                    }
+                } else if (outputIndex >= 0) {
+                    if (info.size > 0 && (info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                        if (pcm.size() + info.size > MAX_DECODED_PCM_BYTES) {
+                            throw new IOException("decoded pcm too large");
+                        }
+                        ByteBuffer output = codec.getOutputBuffer(outputIndex);
+                        if (output == null) {
+                            throw new IOException("decoder output buffer unavailable");
+                        }
+                        byte[] chunk = new byte[info.size];
+                        output.position(info.offset);
+                        output.limit(info.offset + info.size);
+                        output.get(chunk);
+                        pcm.write(chunk, 0, chunk.length);
+                    }
+                    outputEnded = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                    codec.releaseOutputBuffer(outputIndex, false);
+                }
+            }
+            if (!outputEnded) {
+                throw new IOException("audio decoder timeout");
+            }
+            if (sampleRate <= 0 || channels <= 0 || pcm.size() < channels * 2) {
+                throw new IOException("empty decoded pcm rate=" + sampleRate + " channels=" + channels);
+            }
+            return new PcmData(pcm.toByteArray(), sampleRate, channels, mime);
+        } catch (RuntimeException e) {
+            throw new IOException("audio decode failed: " + e.getMessage(), e);
+        } finally {
+            if (codec != null) {
+                try {
+                    codec.stop();
+                } catch (RuntimeException ignored) {
+                }
+                codec.release();
+            }
+            extractor.release();
+        }
     }
 
     private static WavData readWav(byte[] bytes, int base, int limit, boolean allowTruncatedData, int depth)
@@ -333,6 +472,25 @@ final class VmicInjector {
             int sample = monoSampleAt(wav, i);
             out[i * 2] = (byte) (sample & 0xff);
             out[i * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
+        }
+        return out;
+    }
+
+    private static byte[] toMonoPcm(byte[] pcm, int channels) throws IOException {
+        if (channels < 1 || pcm.length < channels * 2) {
+            throw new IOException("invalid decoded pcm channels=" + channels + " bytes=" + pcm.length);
+        }
+        int sourceFrames = pcm.length / (channels * 2);
+        byte[] out = new byte[sourceFrames * 2];
+        for (int frame = 0; frame < sourceFrames; frame++) {
+            int offset = frame * channels * 2;
+            int sum = 0;
+            for (int channel = 0; channel < channels; channel++) {
+                sum += (short) le16(pcm, offset + channel * 2);
+            }
+            int sample = sum / channels;
+            out[frame * 2] = (byte) (sample & 0xff);
+            out[frame * 2 + 1] = (byte) ((sample >>> 8) & 0xff);
         }
         return out;
     }
@@ -514,6 +672,20 @@ final class VmicInjector {
             this.dataSize = dataSize;
             this.channels = channels;
             this.sampleRate = sampleRate;
+        }
+    }
+
+    private static final class PcmData {
+        final byte[] bytes;
+        final int sampleRate;
+        final int channels;
+        final String type;
+
+        PcmData(byte[] bytes, int sampleRate, int channels, String type) {
+            this.bytes = bytes;
+            this.sampleRate = sampleRate;
+            this.channels = channels;
+            this.type = type;
         }
     }
 
