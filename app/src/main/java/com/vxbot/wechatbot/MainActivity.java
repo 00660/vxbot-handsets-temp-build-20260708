@@ -201,6 +201,7 @@ public final class MainActivity extends Activity {
         loadConfigIntoUi();
         selectTab(0);
         requestPostNotificationIfNeeded();
+        KeepAliveScheduler.startBotService(this, "activity-launch");
     }
 
     @Override
@@ -1442,8 +1443,10 @@ public final class MainActivity extends Activity {
             return;
         }
         BotConfig config = BotConfig.load(this);
+        boolean paused = BotRuntimeControls.isPaused(this);
         String base = "模式=" + config.activeMode
                 + "\nAPK记录=" + HsDaemonManager.runtimeStatus(this)
+                + "\n小圆点暂停=" + (paused ? "已启用（机器人启动被阻止）" : "已关闭")
                 + "\nhs端口=检测中"
                 + "\nShizuku=检测中"
                 + "\n授权=检测中"
@@ -1470,6 +1473,8 @@ public final class MainActivity extends Activity {
                 }
                 statusView.setText("模式=" + config.activeMode
                         + "\nAPK记录=" + hsRuntime
+                        + "\n小圆点暂停=" + (BotRuntimeControls.isPaused(this)
+                                ? "已启用（机器人启动被阻止）" : "已关闭")
                         + "\nhs端口=" + hs
                         + "\nRoot=" + (rootPerm ? "已授权" : "未授权")
                         + "\nShizuku=" + (shizuku ? "在线" : "离线")
@@ -1510,6 +1515,9 @@ public final class MainActivity extends Activity {
 
     private void startBotFromUi() {
         saveConfig();
+        if (BotRuntimeControls.isPaused(this)) {
+            BotRuntimeControls.setPaused(this, false, "manual-start");
+        }
         BotConfig config = BotConfig.load(this);
         if (!ensureNoRootAccessibilityReady(config)) {
             refreshStatus();

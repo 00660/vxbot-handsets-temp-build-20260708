@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`162`
-- `versionName`：`0.1.162-vmic-local-test-source`
+- `versionCode`：`163`
+- `versionName`：`0.1.163-boot-hs-recovery`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -147,6 +147,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-07-12：修复重启后机器人/HS 不恢复。临时暂停状态不再跨开机保留；`BootReceiver` 收到开机或用户解锁广播后先恢复 `BotService`，再执行调度与清理。打开 APK 时会尝试恢复未暂停的机器人，但不会擅自清除当前暂停，状态页明确显示“小圆点暂停=已启用（机器人启动被阻止）”；手动点击“启动机器人”会解除暂停。HS 端口 15 秒未就绪时额外记录 `app_process` 的退出码、stdout 和 Java stderr。版本升到 `versionCode=163` / `versionName=0.1.163-boot-hs-recovery`。
 - 2026-07-10：修复 MTK proc 虚拟麦注入结束后循环导致的尾部重复/拖尾。v151 已能正确解析嵌套 WAV 并按 `controlRate=32000` 注入，但 `VmicInjector` 仍写 `loop 1`，TTS 播完后内核会从头循环；v152 改为写 `loop 0`，让源 PCM 结束后输出静音，不重复开头。版本升到 `versionCode=152` / `versionName=0.1.151-vmic-no-loop`。
 - 2026-07-12：拆分 TTS 试听与虚拟麦录音测试。`试听 TTS` 继续只验证上游 TTS 并直接播放；虚拟麦录音测试改用 APK 本地生成的 `24kHz/s16le/mono` 三段测试音，不再读取 TTS Provider、音色和语速，也不再请求上游 TTS，测试流程保持“本地音源 -> 虚拟麦注入 -> 录音 -> 回放录音结果”。版本升到 `versionCode=162` / `versionName=0.1.162-vmic-local-test-source`。
 - 2026-07-10：修复虚拟麦录音测试读取采样率只读 4096 字节导致的 `bad WAV chunk: data`。千问 TTS 嵌套 WAV 外层 `data` 大于 4096 字节，v150 注入逻辑已正确，但录音测试在注入前读采样率时只读头部，导致还没进入 `VmicInjector` 就失败；v151 改为完整读取当前 TTS WAV 后再复用嵌套 WAV 解析逻辑。版本升到 `versionCode=151` / `versionName=0.1.150-vmic-full-wav-rate`。

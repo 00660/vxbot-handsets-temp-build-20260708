@@ -9,9 +9,12 @@ public final class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         String action = intent == null ? "" : intent.getAction();
         BotLog.i(context, "boot.receiver", "收到启动广播 action=" + action);
+        if (BotRuntimeControls.isPaused(context)) {
+            BotRuntimeControls.setPaused(context, false, "boot:" + action);
+        }
+        KeepAliveScheduler.startBotService(context, "boot:" + action);
         KeepAliveScheduler.schedule(context);
         MorningGreetingScheduler.schedule(context);
         GarbageCleaner.runIfDue(context, "boot");
-        KeepAliveScheduler.startBotService(context, "boot:" + action);
     }
 }

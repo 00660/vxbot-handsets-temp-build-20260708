@@ -80,6 +80,9 @@ public final class HsDaemonManager {
                 }
             }
             boolean ok = waitForReady(client, 15000L);
+            if (!ok) {
+                logProcessFailure(context, process);
+            }
             BotLog.write(context, ok ? "INFO" : "ERROR", "hs.ready", ok ? "hs daemon 已就绪" : "hs daemon 未响应");
             recordRuntime(context, ok ? "daemon 已就绪 port=" + config.hsPort : "启动后端口未响应 port=" + config.hsPort);
             return ok;
@@ -252,6 +255,26 @@ public final class HsDaemonManager {
             total += allowed;
         }
         return new String(out.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private static void logProcessFailure(Context context, Process process) {
+        if (process == null) {
+            BotLog.e(context, "hs.process.failure", "HS 启动进程未创建");
+            return;
+        }
+        try {
+            int exit = process.exitValue();
+            String stdout = readProcessStream(process.getInputStream());
+            String stderr = readProcessStream(process.getErrorStream());
+            BotLog.e(context, "hs.process.failure",
+                    "HS 启动进程已退出 exit=" + exit
+                            + " stdout=" + trimForLog(stdout)
+                            + " stderr=" + trimForLog(stderr));
+        } catch (IllegalThreadStateException running) {
+            BotLog.e(context, "hs.process.failure", "HS 启动进程仍在运行，但端口未响应");
+        } catch (IOException e) {
+            BotLog.e(context, "hs.process.failure", "读取 HS Java 错误失败: " + e.getMessage());
+        }
     }
 
     private static String trimForLog(String value) {
