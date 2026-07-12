@@ -536,6 +536,8 @@ public final class VoiceDemoService extends Service {
         }
         MediaPlayer player = new MediaPlayer();
         PressHandle press = null;
+        Thread nativePress = null;
+        int nativeHoldMs = 0;
         try {
             player.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -551,13 +553,27 @@ public final class VoiceDemoService extends Service {
             applyPlaybackSpeed(player, intent, reason);
             BotLog.i(this, "voice.demo.file.ready", path + " size=" + file.length()
                     + " durationMs=" + Math.max(0, player.getDuration()));
-            press = pressDown(intent, reason);
-            if (press == null) {
-                throw new IllegalStateException("WeChat voice press point not confirmed");
+            int durationMs = Math.max(0, player.getDuration());
+            if (RootAccessChecker.hasRootPermission()) {
+                int[] point = resolvePressPoint(intent);
+                if (point == null) {
+                    throw new IllegalStateException("WeChat voice press point not confirmed");
+                }
+                int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
+                nativeHoldMs = prePlaybackMs + Math.max(8000, durationMs + 5000);
+                nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
+                SystemClock.sleep(120);
+                if (!nativePress.isAlive()) {
+                    throw new IllegalStateException("native WeChat voice press failed");
+                }
+            } else {
+                press = pressDown(intent, reason);
+                if (press == null) {
+                    throw new IllegalStateException("WeChat voice press point not confirmed");
+                }
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            int durationMs = Math.max(0, player.getDuration());
             if (VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), reason)) {
                 BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             } else {
@@ -569,12 +585,41 @@ public final class VoiceDemoService extends Service {
             }
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
-            delayBeforeRelease(intent, reason);
-            releasePress(press, reason);
+            if (nativePress != null) {
+                waitForNativeLongPress(nativePress, nativeHoldMs, reason);
+            } else {
+                delayBeforeRelease(intent, reason);
+                releasePress(press, reason);
+            }
             player.release();
             if (audioManager != null && oldVolume >= 0 && boolExtra(intent, "restoreVolume", true)) {
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, oldVolume, 0);
             }
+        }
+    }
+
+    private Thread startNativeLongPress(int x, int y, int holdMs, String reason) {
+        String command = String.format(Locale.US, "input swipe %d %d %d %d %d", x, y, x, y, holdMs);
+        Thread thread = new Thread(() -> {
+            BotLog.i(this, "voice.demo.press.native.start", "reason=" + reason
+                    + " x=" + x + " y=" + y + " holdMs=" + holdMs);
+            runRootCommand(command);
+            BotLog.i(this, "voice.demo.press.native.done", "reason=" + reason
+                    + " x=" + x + " y=" + y + " holdMs=" + holdMs);
+        }, "wechat-native-press");
+        thread.start();
+        return thread;
+    }
+
+    private void waitForNativeLongPress(Thread thread, int holdMs, String reason) {
+        try {
+            thread.join(Math.max(5000L, holdMs + 5000L));
+            if (thread.isAlive()) {
+                BotLog.w(this, "voice.demo.press.native.timeout", "reason=" + reason + " holdMs=" + holdMs);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            BotLog.w(this, "voice.demo.press.native.interrupted", "reason=" + reason);
         }
     }
 
