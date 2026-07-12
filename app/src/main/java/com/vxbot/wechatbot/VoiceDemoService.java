@@ -166,16 +166,11 @@ public final class VoiceDemoService extends Service {
             BotLog.w(this, "voice.demo.vmic.record.skip_busy", "已有虚拟麦录音测试正在运行，跳过本次请求");
             return;
         }
-        String text = stringExtra(intent, "text", "这是虚拟麦录音测试。");
-        BotConfig config = BotConfig.load(this);
-        File ttsFile = null;
+        File sourceFile = null;
         try {
-            ttsFile = TtsCache.prepare(this, config, text, "vmic-record-test", 60000, 1);
-            if (ttsFile == null || !ttsFile.isFile() || ttsFile.length() <= 44) {
-                throw new IllegalStateException("TTS 没有生成可注入音频");
-            }
-            int durationMs = readMediaDurationMs(ttsFile);
-            int sourceRate = readWavSampleRate(ttsFile);
+            sourceFile = createVmicRecordTestSource();
+            int durationMs = readMediaDurationMs(sourceFile);
+            int sourceRate = readWavSampleRate(sourceFile);
             int recordRate = 48000;
             int recordMs = Math.max(intExtra(intent, "recordMs", 0), Math.max(5000, durationMs + 2200));
             int audioSource = audioSourceExtra(intent);
@@ -185,14 +180,15 @@ public final class VoiceDemoService extends Service {
             int warmupMs = Math.max(200, intExtra(intent, "recordWarmupMs", 500));
             SystemClock.sleep(warmupMs);
             BotLog.i(this, "voice.demo.vmic.record.inject",
-                    "tts=" + ttsFile.getAbsolutePath()
+                    "source=" + sourceFile.getAbsolutePath()
                             + " durationMs=" + durationMs
                             + " sourceRate=" + sourceRate
                             + " recordRate=" + recordRate
                             + " recordMs=" + recordMs
                             + " audioSource=" + audioSourceName
                             + " record=" + recordFile.getAbsolutePath());
-            boolean injected = VmicInjector.injectFile(this, ttsFile, Math.max(8000, durationMs + 5000), "vmic-record-test");
+            boolean injected = VmicInjector.injectFile(this, sourceFile,
+                    Math.max(8000, durationMs + 5000), "vmic-record-test");
             job.await(recordMs + 3000L);
             if (!recordFile.isFile() || recordFile.length() <= 44) {
                 throw new IllegalStateException("录音文件为空 injected=" + injected);
@@ -205,12 +201,10 @@ public final class VoiceDemoService extends Service {
                             + " size=" + recordFile.length());
             playFile(intent, recordFile.getAbsolutePath());
         } finally {
-            if (ttsFile != null) {
-                if (boolExtra(intent, "deleteTtsFile", true)) {
-                    TtsCache.cleanup(this, ttsFile, "vmic-record-test");
-                } else {
-                    BotLog.i(this, "tts.prepare.keep",
-                            "reason=vmic-record-test file=" + ttsFile.getAbsolutePath());
+            if (sourceFile != null && boolExtra(intent, "deleteSourceFile", true)) {
+                if (!sourceFile.delete() && sourceFile.exists()) {
+                    BotLog.w(this, "voice.demo.vmic.source.delete.fail",
+                            sourceFile.getAbsolutePath());
                 }
             }
             VMIC_RECORD_TEST_RUNNING.set(false);
@@ -884,6 +878,47 @@ public final class VoiceDemoService extends Service {
             throw new IllegalStateException("mkdir failed: " + dir.getAbsolutePath());
         }
         return new File(dir, "vxbot-vmic-record-" + SystemClock.uptimeMillis() + ".wav");
+    }
+
+    private File createVmicRecordTestSource() throws Exception {
+        final int sampleRate = 24000;
+        final int[] toneHz = {440, 660, 880};
+        final int leadMs = 200;
+        final int toneMs = 700;
+        final int gapMs = 150;
+        final int tailMs = 200;
+        final int totalMs = leadMs + tailMs
+                + toneHz.length * toneMs + (toneHz.length - 1) * gapMs;
+        byte[] pcm = new byte[sampleRate * totalMs / 1000 * 2];
+        int sample = sampleRate * leadMs / 1000;
+        for (int frequency : toneHz) {
+            int toneSamples = sampleRate * toneMs / 1000;
+            int fadeSamples = sampleRate / 100;
+            for (int i = 0; i < toneSamples; i++, sample++) {
+                double gain = 1.0;
+                if (i < fadeSamples) {
+                    gain = (double) i / fadeSamples;
+                } else if (i >= toneSamples - fadeSamples) {
+                    gain = (double) (toneSamples - 1 - i) / fadeSamples;
+                }
+                short value = (short) (Math.sin(2.0 * Math.PI * frequency * i / sampleRate)
+                        * 10000.0 * Math.max(0.0, gain));
+                int offset = sample * 2;
+                pcm[offset] = (byte) (value & 0xff);
+                pcm[offset + 1] = (byte) ((value >>> 8) & 0xff);
+            }
+            sample += sampleRate * gapMs / 1000;
+        }
+        File dir = new File(getFilesDir(), "vmic-recordings");
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            throw new IllegalStateException("mkdir failed: " + dir.getAbsolutePath());
+        }
+        File source = new File(dir, "vxbot-vmic-source-" + SystemClock.uptimeMillis() + ".wav");
+        writeWavFile(source, pcm, sampleRate);
+        BotLog.i(this, "voice.demo.vmic.source.created",
+                "file=" + source.getAbsolutePath() + " rate=" + sampleRate
+                        + " durationMs=" + totalMs + " size=" + source.length());
+        return source;
     }
 
     private RecordingHandle startMicRecording(File output, int recordMs, int sampleRate,

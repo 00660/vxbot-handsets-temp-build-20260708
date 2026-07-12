@@ -1373,13 +1373,9 @@ public final class MainActivity extends Activity {
             refreshStatus();
             return;
         }
-        BotConfig config = BotConfig.load(this);
         Intent intent = new Intent(this, VoiceDemoService.class)
                 .putExtra("mode", "vmicRecordTest")
-                .putExtra("text", "这是虚拟麦录音测试，听到这句话说明虚拟麦注入和录音链路已打通。")
-                .putExtra("hsPort", config.hsPort)
-                .putExtra("speechRate", config.ttsSpeed)
-                .putExtra("deleteTtsFile", true);
+                .putExtra("deleteSourceFile", true);
         startForegroundService(intent);
         BotLog.i(this, "vmic.record.test.ui.start", "已启动虚拟麦录音测试");
         toast("虚拟麦录音测试已启动");
