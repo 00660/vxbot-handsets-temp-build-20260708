@@ -7,9 +7,12 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.SystemClock;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 public final class KeepAliveScheduler {
     private static final int REQUEST_CODE = 6601;
     private static final long INTERVAL_MS = 60_000L;
+    private static final AtomicBoolean START_REQUESTED = new AtomicBoolean();
 
     private KeepAliveScheduler() {
     }
@@ -43,6 +46,14 @@ public final class KeepAliveScheduler {
             BotLog.i(context, "keepalive.start_service.skip_paused", "机器人已暂停，跳过拉起 BotService reason=" + reason);
             return;
         }
+        if (BotService.isRunning()) {
+            BotLog.i(context, "keepalive.alive", "BotService 已存活，不重复拉起 reason=" + reason);
+            return;
+        }
+        if (!START_REQUESTED.compareAndSet(false, true)) {
+            BotLog.i(context, "keepalive.start_service.skip_pending", "BotService 正在拉起，不重复请求 reason=" + reason);
+            return;
+        }
         Intent intent = new Intent(context, BotService.class);
         intent.setAction(BotService.ACTION_START);
         intent.putExtra("reason", reason == null ? "" : reason);
@@ -53,11 +64,16 @@ public final class KeepAliveScheduler {
                 context.startService(intent);
             }
         } catch (RuntimeException e) {
+            START_REQUESTED.set(false);
             BotLog.e(context, "keepalive.start_service.fail",
                     "拉起 BotService 失败 reason=" + reason + " error=" + e.getClass().getSimpleName() + " " + e.getMessage());
             return;
         }
         BotLog.i(context, "keepalive.start_service", "已拉起 BotService reason=" + reason);
+    }
+
+    static void onBotServiceStarted() {
+        START_REQUESTED.set(false);
     }
 
     private static PendingIntent pendingIntent(Context context) {

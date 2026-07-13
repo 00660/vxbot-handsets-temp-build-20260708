@@ -33,6 +33,7 @@ public final class BotService extends Service {
     private static final String CHANNEL_ID = "bot_status";
     private static final long STARTUP_NOTIFICATION_GRACE_MS = 5000L;
     private static final Random RANDOM = new Random();
+    private static volatile boolean running;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService paymentWorker = Executors.newSingleThreadExecutor();
@@ -76,6 +77,8 @@ public final class BotService extends Service {
             stopSelf();
             return;
         }
+        running = true;
+        KeepAliveScheduler.onBotServiceStarted();
         KeepAliveScheduler.schedule(this);
         MorningGreetingScheduler.schedule(this);
         GarbageCleaner.runIfDue(this, "service-create");
@@ -198,6 +201,7 @@ public final class BotService extends Service {
 
     @Override
     public void onDestroy() {
+        running = false;
         if (controlOverlay != null) {
             controlOverlay.hide();
         }
@@ -210,6 +214,10 @@ public final class BotService extends Service {
         paymentWorker.shutdownNow();
         BotLog.w(this, "bot.service.destroy", "BotService onDestroy pid=" + Process.myPid());
         super.onDestroy();
+    }
+
+    static boolean isRunning() {
+        return running;
     }
 
     private boolean startStatusForegroundSafely() {
