@@ -80,6 +80,10 @@ public final class VoiceDemoService extends Service {
         String mode = stringExtra(intent, "mode", "tone");
         int delayMs = intExtra(intent, "delayMs", 800);
         BotLog.i(this, "voice.demo.start", "mode=" + mode + " delayMs=" + delayMs);
+        if (isPressTtsMode(mode) || "pressFile".equalsIgnoreCase(mode)
+                || "pressTone".equalsIgnoreCase(mode)) {
+            VmicInjector.resetMtkState(this, "voice-demo-start:" + mode);
+        }
         if (mode.startsWith("route")) {
             runRouteMode(mode);
             return;

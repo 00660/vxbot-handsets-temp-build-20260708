@@ -77,6 +77,20 @@ final class VmicInjector {
         return !findMtkProcHelper(context).path.isEmpty() || !findLegacyHelper(context).path.isEmpty();
     }
 
+    static void resetMtkState(Context context, String reason) {
+        synchronized (INJECT_LOCK) {
+            Helper helper = findMtkProcHelper(context);
+            if (helper.path.isEmpty()) {
+                return;
+            }
+            String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
+            ShellResult result = runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo clear > " + ctl + " 2>/dev/null || true", 4000);
+            BotLog.write(context, result.code == 0 ? "INFO" : "WARN", "vmic.reset",
+                    "reason=" + reason + " code=" + result.code + " out=" + trim(result.output));
+        }
+    }
+
     private static Helper findMtkProcHelper(Context context) {
         ShellResult proc = runRoot("[ -e " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " ] && [ -e "
                 + shellQuote(MTK_VIRTUAL_MIC_PCM) + " ] && [ -r " + shellQuote(MTK_VIRTUAL_MIC_STATUS)

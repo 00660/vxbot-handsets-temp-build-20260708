@@ -332,7 +332,10 @@ final class VoiceReply {
         } catch (RuntimeException ignored) {
             return 0;
         } finally {
-            retriever.release();
+            try {
+                retriever.release();
+            } catch (Exception ignored) {
+            }
         }
     }
 
