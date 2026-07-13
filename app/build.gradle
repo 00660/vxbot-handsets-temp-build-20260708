@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 179
-        versionName "0.1.179-runtime-memory-release"
+        versionCode 180
+        versionName "0.1.180-persistent-root-shell"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

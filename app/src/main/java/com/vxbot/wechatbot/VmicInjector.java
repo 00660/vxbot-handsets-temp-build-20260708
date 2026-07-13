@@ -7,16 +7,13 @@ import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.os.SystemClock;
 
-import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
 
 final class VmicInjector {
     private static final String VMIC_PLAY = "/vendor/bin/vmic_play";
@@ -598,45 +595,8 @@ final class VmicInjector {
     }
 
     private static ShellResult runRoot(String command, int timeoutMs) {
-        String[] candidates = {"/debug_ramdisk/su", "/sbin/su", "/system/bin/su", "/system/xbin/su", "su"};
-        Exception last = null;
-        for (String binary : candidates) {
-            if (!"su".equals(binary) && !new File(binary).exists()) {
-                continue;
-            }
-            Process process = null;
-            long start = SystemClock.uptimeMillis();
-            try {
-                process = new ProcessBuilder(binary, "-c", command).redirectErrorStream(true).start();
-                boolean finished = process.waitFor(Math.max(1, timeoutMs), TimeUnit.MILLISECONDS);
-                long elapsed = SystemClock.uptimeMillis() - start;
-                if (!finished) {
-                    process.destroy();
-                    process.waitFor(500, TimeUnit.MILLISECONDS);
-                }
-                StringBuilder out = new StringBuilder();
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (out.length() < 2200) {
-                            out.append(line).append('\n');
-                        }
-                    }
-                }
-                if (!finished) {
-                    return new ShellResult(124, out.toString(), elapsed);
-                }
-                return new ShellResult(process.exitValue(), out.toString(), elapsed);
-            } catch (Exception e) {
-                last = e;
-            } finally {
-                if (process != null) {
-                    process.destroy();
-                }
-            }
-        }
-        String message = last == null ? "su not found" : last.getClass().getSimpleName() + ": " + last.getMessage();
-        return new ShellResult(127, message, 0);
+        RootShellSession.Result result = RootShellSession.execute(command, timeoutMs);
+        return new ShellResult(result.code, result.output, result.elapsedMs);
     }
 
     private static String shellQuote(String value) {
