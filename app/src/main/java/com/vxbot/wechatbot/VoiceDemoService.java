@@ -44,7 +44,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class VoiceDemoService extends Service {
-    private static final int POST_PLAYBACK_SETTLE_MS = 500;
     private static final String CHANNEL_ID = "voice_demo";
     private static final int NOTIFICATION_ID = 41;
     private static final int SAMPLE_RATE = 16000;
@@ -561,9 +560,8 @@ public final class VoiceDemoService extends Service {
                     throw new IllegalStateException("WeChat voice press point not confirmed");
                 }
                 int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
-                int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 3000));
-                nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs
-                        + POST_PLAYBACK_SETTLE_MS + releaseAfterPlaybackMs);
+                int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
+                nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs + releaseAfterPlaybackMs);
                 nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
                 SystemClock.sleep(120);
                 if (!nativePress.isAlive()) {
@@ -587,9 +585,6 @@ public final class VoiceDemoService extends Service {
                 }
             }
             BotLog.i(this, "voice.demo.file.done", path);
-            BotLog.i(this, "voice.demo.file.settle", "reason=" + reason
-                    + " delayMs=" + POST_PLAYBACK_SETTLE_MS);
-            SystemClock.sleep(POST_PLAYBACK_SETTLE_MS);
         } finally {
             if (nativePress != null) {
                 waitForNativeLongPress(nativePress, nativeHoldMs, reason);
@@ -639,7 +634,7 @@ public final class VoiceDemoService extends Service {
     }
 
     private void delayBeforeRelease(Intent intent, String reason) {
-        long delayMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 3000));
+        long delayMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
         if (delayMs <= 0) {
             return;
         }
