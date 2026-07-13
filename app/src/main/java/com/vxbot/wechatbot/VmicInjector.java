@@ -163,7 +163,8 @@ final class VmicInjector {
                         + " waitMs=" + waitMs
                         + " out=" + trim(consumption.status));
             }
-            ShellResult stopped = runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; cat "
+            ShellResult stopped = runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo clear > " + ctl + " 2>/dev/null || true; cat "
                     + status + " 2>/dev/null || true", 4000);
             long elapsed = SystemClock.uptimeMillis() - start;
             BotLog.i(context, "vmic.inject.done", "reason=" + reason
@@ -181,6 +182,8 @@ final class VmicInjector {
                     + " out=" + trim(stopped.output));
             return true;
         } catch (Exception e) {
+            runRoot("echo enable 0 > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true; "
+                    + "echo clear > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true", 4000);
             BotLog.w(context, "vmic.inject.proc.error", "reason=" + reason + " "
                     + e.getClass().getSimpleName() + ": " + e.getMessage());
             return false;
