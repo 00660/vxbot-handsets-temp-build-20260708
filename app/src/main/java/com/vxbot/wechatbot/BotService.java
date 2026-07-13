@@ -93,6 +93,7 @@ public final class BotService extends Service {
         }
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
+        worker.execute(() -> VmicInjector.resetMtkState(this, "bot-service-create"));
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
     }
 

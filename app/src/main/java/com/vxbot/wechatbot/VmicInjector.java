@@ -258,7 +258,7 @@ final class VmicInjector {
         }
         int controlRate = mtkProcControlRate(source.sampleRate);
         byte[] pcm = source.channels == 1 ? source.bytes : toMonoPcm(source.bytes, source.channels);
-        pcm = limitPcmPeak(pcm, MTK_PROC_TARGET_PEAK);
+        limitPcmPeakInPlace(pcm, MTK_PROC_TARGET_PEAK);
         if (pcm.length < 2) {
             throw new IOException("empty pcm");
         }
@@ -413,9 +413,15 @@ final class VmicInjector {
                     codec.stop();
                 } catch (RuntimeException ignored) {
                 }
-                codec.release();
+                try {
+                    codec.release();
+                } catch (RuntimeException ignored) {
+                }
             }
-            extractor.release();
+            try {
+                extractor.release();
+            } catch (RuntimeException ignored) {
+            }
         }
     }
 
@@ -512,12 +518,11 @@ final class VmicInjector {
         return out;
     }
 
-    private static byte[] limitPcmPeak(byte[] pcm, int targetPeak) {
+    private static void limitPcmPeakInPlace(byte[] pcm, int targetPeak) {
         int peak = pcmPeak(pcm);
         if (peak <= targetPeak || peak <= 0) {
-            return pcm;
+            return;
         }
-        byte[] out = new byte[pcm.length];
         for (int i = 0; i + 1 < pcm.length; i += 2) {
             int sample = (short) le16(pcm, i);
             int scaled = Math.round(sample * targetPeak / (float) peak);
@@ -526,10 +531,9 @@ final class VmicInjector {
             } else if (scaled < Short.MIN_VALUE) {
                 scaled = Short.MIN_VALUE;
             }
-            out[i] = (byte) (scaled & 0xff);
-            out[i + 1] = (byte) ((scaled >>> 8) & 0xff);
+            pcm[i] = (byte) (scaled & 0xff);
+            pcm[i + 1] = (byte) ((scaled >>> 8) & 0xff);
         }
-        return out;
     }
 
     private static int pcmPeak(byte[] pcm) {
