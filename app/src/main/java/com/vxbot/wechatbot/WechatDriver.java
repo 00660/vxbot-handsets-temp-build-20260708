@@ -436,6 +436,11 @@ public final class WechatDriver {
     }
 
     private boolean openTargetChat(Context context, BotConfig config, WxMessage message) throws Exception {
+        if (message.notificationKey.startsWith("debug-adb-")) {
+            BotLog.i(context, "debug.message.open.list", "调试消息直接从会话列表打开 sessionName="
+                    + message.sessionName);
+            return openTargetChatFromConversationList(context, config, message, "debug-injected");
+        }
         boolean openedByShade = openNoticeFromShade(context, config, message);
         if (!openedByShade) {
             BotLog.w(context, "notice.open.list_fallback", "通知栏没有打开目标通知，改走微信会话列表 OCR sessionName="

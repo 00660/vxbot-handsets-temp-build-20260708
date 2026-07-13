@@ -32,7 +32,9 @@ final class RootShellSession {
             ensureStarted();
             long id = COMMAND_IDS.incrementAndGet();
             String marker = "__VXROOT_DONE_" + id + "__";
+            writer.write("(");
             writer.write(command);
+            writer.write(")");
             writer.newLine();
             writer.write("echo " + marker + "$?");
             writer.newLine();

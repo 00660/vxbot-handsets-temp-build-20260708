@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 182
-        versionName "0.1.182-debug-message-injector"
+        versionCode 183
+        versionName "0.1.183-debug-voice-chain"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
