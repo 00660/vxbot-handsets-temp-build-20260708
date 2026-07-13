@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 171
-        versionName "0.1.171-voice-release-delay"
+        versionCode 172
+        versionName "0.1.172-voice-settle-delay"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
