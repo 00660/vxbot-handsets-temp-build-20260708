@@ -4,6 +4,7 @@ import java.util.Locale;
 
 public final class MessageRouter {
     private static final String TARGET_SEPARATORS = "，,。！？!?；;：:、~～\"“”'‘’()[]{}<>《》";
+    private static final int MAX_TTS_COMMAND_CHARS = 2000;
 
     public enum Kind {
         TEXT,
@@ -634,8 +635,8 @@ public final class MessageRouter {
         while (!clean.isEmpty() && isTtsPayloadSeparator(clean.charAt(0))) {
             clean = clean.substring(1).trim();
         }
-        if (clean.length() > 180) {
-            return clean.substring(0, 180);
+        if (clean.length() > MAX_TTS_COMMAND_CHARS) {
+            return clean.substring(0, MAX_TTS_COMMAND_CHARS);
         }
         return clean;
     }
