@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 185
-        versionName "0.1.185-dynamic-voice-release"
+        versionCode 186
+        versionName "0.1.186-copy-only-vmic-release"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

@@ -138,6 +138,9 @@ final class VmicInjector {
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
             String raw = shellQuote(audio.file.getAbsolutePath());
             String startCommand = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo interp 1 > " + ctl + "; "
+                    + "echo copy 1 > " + ctl + "; "
+                    + "echo dma 0 > " + ctl + "; "
                     + "echo rate " + audio.controlRate + " > " + ctl + "; "
                     + "echo loop 0 > " + ctl + " 2>/dev/null || true; "
                     + "cat " + raw + " > " + pcm + "; rc=$?; "
