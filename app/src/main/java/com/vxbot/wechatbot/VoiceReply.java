@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.media.MediaMetadataRetriever;
 import android.os.Build;
 import android.os.SystemClock;
 
@@ -17,6 +18,8 @@ import java.util.concurrent.TimeUnit;
 
 final class VoiceReply {
     private static final int VOICE_SEGMENT_TARGET_MS = 54000;
+    private static final int VOICE_SEGMENT_MAX_MS = 55000;
+    private static final int VOICE_SEGMENT_RETRY_TARGET_MS = 50000;
     private static final int VOICE_SEGMENT_GAP_MS = 800;
     private static final int PRE_PLAYBACK_PRESS_MS = 500;
 
@@ -58,13 +61,13 @@ final class VoiceReply {
 
     static PreparedVoice prepare(Context context, BotConfig config, String text, String reason) {
         float speechRate = config == null ? BotConfig.DEFAULT_TTS_SPEED : config.ttsSpeed;
-        List<String> segments = splitVoiceText(text, speechRate);
+        List<String> segments = new ArrayList<>(splitVoiceText(text, speechRate));
         if (segments.isEmpty()) {
             BotLog.e(context, "tts.prepare.abort", "TTS 内容为空 reason=" + reason);
             return null;
         }
         List<File> files = new ArrayList<>();
-        for (int i = 0; i < segments.size(); i++) {
+        for (int i = 0; i < segments.size();) {
             File file = TtsCache.prepare(context, config, segments.get(i), partReason(reason, i, segments.size()), 45000, 1);
             if (file == null || !file.isFile() || file.length() <= 44) {
                 for (File used : files) {
@@ -72,7 +75,33 @@ final class VoiceReply {
                 }
                 return null;
             }
+            int durationMs = mediaDurationMs(file);
+            String segment = segments.get(i);
+            if (durationMs > VOICE_SEGMENT_MAX_MS && segment.length() >= 40) {
+                TtsCache.cleanup(context, file, reason + "-oversize");
+                int targetChars = Math.max(20, Math.min(segment.length() - 1,
+                        Math.round(segment.length() * VOICE_SEGMENT_RETRY_TARGET_MS / (float) durationMs)));
+                int cut = findSplitPoint(segment, 0, targetChars);
+                if (cut <= 0 || cut >= segment.length()) {
+                    cut = targetChars;
+                }
+                String first = segment.substring(0, cut).trim();
+                String second = segment.substring(cut).trim();
+                if (first.isEmpty() || second.isEmpty()) {
+                    for (File used : files) {
+                        TtsCache.cleanup(context, used, reason + "-oversize-split-fail");
+                    }
+                    return null;
+                }
+                segments.set(i, first);
+                segments.add(i + 1, second);
+                BotLog.i(context, "tts.prepare.resplit", "reason=" + reason
+                        + " durationMs=" + durationMs + " chars=" + segment.length()
+                        + " split=" + first.length() + "+" + second.length());
+                continue;
+            }
             files.add(file);
+            i++;
         }
         return new PreparedVoice(files, segments);
     }
@@ -292,6 +321,19 @@ final class VoiceReply {
             }
         }
         return end;
+    }
+
+    private static int mediaDurationMs(File file) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(file.getAbsolutePath());
+            String value = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            return value == null ? 0 : Math.max(0, Integer.parseInt(value));
+        } catch (RuntimeException ignored) {
+            return 0;
+        } finally {
+            retriever.release();
+        }
     }
 
     private static String partReason(String reason, int index, int total) {
