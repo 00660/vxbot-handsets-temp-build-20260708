@@ -560,7 +560,7 @@ public final class VoiceDemoService extends Service {
                     throw new IllegalStateException("WeChat voice press point not confirmed");
                 }
                 int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
-                int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
+                int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 3000));
                 nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs + releaseAfterPlaybackMs);
                 nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
                 SystemClock.sleep(120);
@@ -634,7 +634,7 @@ public final class VoiceDemoService extends Service {
     }
 
     private void delayBeforeRelease(Intent intent, String reason) {
-        long delayMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
+        long delayMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 3000));
         if (delayMs <= 0) {
             return;
         }
