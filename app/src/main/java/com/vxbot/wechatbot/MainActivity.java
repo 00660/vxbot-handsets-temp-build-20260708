@@ -259,10 +259,10 @@ public final class MainActivity extends Activity {
         topBar.setGravity(Gravity.CENTER_VERTICAL);
         topBar.setPadding(dp(20), 0, dp(18), 0);
         topBar.setBackgroundColor(NAV);
-        TextView brand = text("HS Bot", 22, Color.WHITE, Typeface.BOLD);
+        TextView brand = text("HS Bot", 20, Color.WHITE, Typeface.BOLD);
         topBar.addView(brand, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         shell.addView(topBar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
 
         contentScroll = new ScrollView(this);
         contentScroll.setFillViewport(true);
@@ -275,13 +275,13 @@ public final class MainActivity extends Activity {
         contentScroll.setOnTouchListener((v, event) -> handleFullScreenTouch(event));
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(18), dp(16), dp(26));
+        content.setPadding(dp(16), dp(12), dp(16), dp(18));
         contentScroll.addView(content, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
         shell.addView(contentScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        mainTitle = text("微信机器人", 24, INK, Typeface.BOLD);
-        mainTitle.setPadding(dp(4), 0, 0, dp(16));
+        mainTitle = text("微信机器人", 20, INK, Typeface.BOLD);
+        mainTitle.setPadding(dp(4), 0, 0, dp(12));
         content.addView(mainTitle);
 
         LinearLayout statusPage = pageContainer(content);
@@ -295,18 +295,18 @@ public final class MainActivity extends Activity {
         statusCard.addView(statusDivider, dividerLp);
         LinearLayout statusColumns = new LinearLayout(this);
         statusColumns.setOrientation(LinearLayout.HORIZONTAL);
-        statusView = text("", 14, INK, Typeface.NORMAL);
-        statusView.setLineSpacing(dp(5), 1.0f);
-        statusViewRight = text("", 14, INK, Typeface.NORMAL);
-        statusViewRight.setLineSpacing(dp(5), 1.0f);
+        statusView = text("", 12, INK, Typeface.NORMAL);
+        statusView.setLineSpacing(dp(2), 1.0f);
+        statusViewRight = text("", 12, INK, Typeface.NORMAL);
+        statusViewRight.setLineSpacing(dp(2), 1.0f);
         statusColumns.addView(statusView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         LinearLayout.LayoutParams rightStatusLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        rightStatusLp.setMargins(dp(12), 0, 0, 0);
+        rightStatusLp.setMargins(dp(8), 0, 0, 0);
         statusColumns.addView(statusViewRight, rightStatusLp);
         statusCard.addView(statusColumns);
 
         LinearLayout actionCard = card("");
-        actionCard.setPadding(dp(8), dp(12), dp(8), dp(10));
+        actionCard.setPadding(dp(8), dp(8), dp(8), dp(6));
         statusPage.addView(actionCard, cardLayoutParams());
         actionCard.addView(actionRow(
                 actionButton(R.drawable.ic_ui_save, "保存配置", BLUE, v -> saveConfig()),
@@ -549,7 +549,7 @@ public final class MainActivity extends Activity {
                 HorizontalScrollView.LayoutParams.WRAP_CONTENT,
                 HorizontalScrollView.LayoutParams.MATCH_PARENT));
         shell.addView(railScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(76)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(66)));
 
         root.addView(shell, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -563,7 +563,7 @@ public final class MainActivity extends Activity {
         tab.setCompoundDrawablesRelativeWithIntrinsicBounds(0, tabIcon(index), 0, 0);
         tab.setCompoundDrawableTintList(ColorStateList.valueOf(Color.WHITE));
         tab.setCompoundDrawablePadding(dp(4));
-        tab.setPadding(dp(6), dp(8), dp(6), dp(6));
+        tab.setPadding(dp(6), dp(5), dp(6), dp(4));
         tab.setOnClickListener(v -> selectTab(index));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.MATCH_PARENT);
         lp.setMargins(dp(2), 0, dp(2), 0);
@@ -631,12 +631,12 @@ public final class MainActivity extends Activity {
     private LinearLayout card(String title) {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(14), dp(16), dp(14), dp(16));
+        page.setPadding(dp(12), dp(12), dp(12), dp(12));
         page.setBackground(round(Color.WHITE, dp(16), 1, Color.rgb(226, 232, 240)));
         page.setElevation(dp(1));
         if (title != null && !title.isEmpty()) {
-            TextView pageTitle = text(title, 19, INK, Typeface.BOLD);
-            pageTitle.setPadding(0, 0, 0, dp(12));
+            TextView pageTitle = text(title, 16, INK, Typeface.BOLD);
+            pageTitle.setPadding(0, 0, 0, dp(9));
             page.addView(pageTitle);
         }
         return page;
@@ -644,7 +644,7 @@ public final class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams cardLayoutParams() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(16));
+        lp.setMargins(0, 0, 0, dp(12));
         return lp;
     }
 
@@ -792,11 +792,11 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.TOP);
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowLp.setMargins(0, 0, 0, dp(8));
+        rowLp.setMargins(0, 0, 0, dp(4));
         row.setLayoutParams(rowLp);
         for (int i = 0; i < 4; i++) {
             View action = i < actions.length ? actions[i] : new View(this);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(82), 1);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(70), 1);
             lp.setMargins(i == 0 ? 0 : dp(3), 0, i == 3 ? 0 : dp(3), 0);
             row.addView(action, lp);
         }
@@ -807,17 +807,17 @@ public final class MainActivity extends Activity {
         LinearLayout action = new LinearLayout(this);
         action.setOrientation(LinearLayout.VERTICAL);
         action.setGravity(Gravity.CENTER);
-        action.setPadding(dp(2), dp(5), dp(2), dp(4));
+        action.setPadding(dp(2), dp(3), dp(2), dp(2));
         action.setBackgroundColor(Color.TRANSPARENT);
         action.setOnClickListener(listener);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(iconRes);
         icon.setImageTintList(ColorStateList.valueOf(color));
-        icon.setPadding(dp(7), dp(7), dp(7), dp(7));
+        icon.setPadding(dp(7), dp(6), dp(7), dp(6));
         action.addView(icon, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
-        TextView caption = text(label, 11, INK, Typeface.NORMAL);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+        TextView caption = text(label, 10, INK, Typeface.NORMAL);
         caption.setGravity(Gravity.CENTER);
         caption.setSingleLine(false);
         caption.setMaxLines(2);
@@ -1575,8 +1575,10 @@ public final class MainActivity extends Activity {
         }
         BotConfig config = BotConfig.load(this);
         boolean paused = BotRuntimeControls.isPaused(this);
+        String runtime = HsDaemonManager.runtimeStatus(this);
         statusView.setText("模式：" + config.activeMode
-                + "\nAPK记录：" + HsDaemonManager.runtimeStatus(this)
+                + "\nAPK记录：" + runtimeState(runtime)
+                + "\n端口：" + config.hsPort + runtimeAge(runtime)
                 + "\nhs端口：检测中"
                 + "\nRoot：检测中"
                 + "\nShizuku：检测中"
@@ -1604,7 +1606,8 @@ public final class MainActivity extends Activity {
                     vmicRecordTestRow.setVisibility(vmicSupported ? View.VISIBLE : View.GONE);
                 }
                 statusView.setText("模式：" + config.activeMode
-                        + "\nAPK记录：" + hsRuntime
+                        + "\nAPK记录：" + runtimeState(hsRuntime)
+                        + "\n端口：" + config.hsPort + runtimeAge(hsRuntime)
                         + "\nhs端口：" + hs
                         + "\nRoot：" + (rootPerm ? "已授权" : "未授权")
                         + "\nShizuku：" + (shizuku ? "在线" : "离线")
@@ -1619,6 +1622,20 @@ public final class MainActivity extends Activity {
                         + "\n支付回调：\n" + config.paymentCallbackUrl);
             });
         });
+    }
+
+    private String runtimeState(String runtime) {
+        String value = runtime == null ? "未启动" : runtime;
+        int port = value.indexOf(" port=");
+        int age = value.indexOf(" / ");
+        int end = port >= 0 ? port : age >= 0 ? age : value.length();
+        return value.substring(0, end).trim();
+    }
+
+    private String runtimeAge(String runtime) {
+        String value = runtime == null ? "" : runtime;
+        int age = value.indexOf(" / ");
+        return age < 0 ? "" : value.substring(age);
     }
 
     private boolean notificationListenerEnabled() {
