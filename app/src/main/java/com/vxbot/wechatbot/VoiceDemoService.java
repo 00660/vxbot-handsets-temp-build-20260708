@@ -565,8 +565,7 @@ public final class VoiceDemoService extends Service {
                 }
                 int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
                 int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
-                nativeHoldMs = Math.max(1000,
-                        prePlaybackMs + estimatedVmicPlaybackMs(durationMs) + releaseAfterPlaybackMs);
+                nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs + releaseAfterPlaybackMs);
                 nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
                 SystemClock.sleep(120);
                 if (!nativePress.isAlive()) {
@@ -580,7 +579,7 @@ public final class VoiceDemoService extends Service {
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            if (VmicInjector.injectFileForPress(this, file, vmicPlaybackTimeoutMs(durationMs), reason)) {
+            if (VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), reason)) {
                 BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             } else {
                 BotLog.w(this, "voice.demo.file.vmic.fallback", path + " durationMs=" + durationMs);
@@ -591,15 +590,11 @@ public final class VoiceDemoService extends Service {
             }
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
-            try {
-                if (nativePress != null) {
-                    waitForNativeLongPress(nativePress, nativeHoldMs, reason);
-                } else {
-                    delayBeforeRelease(intent, reason);
-                    releasePress(press, reason);
-                }
-            } finally {
-                VmicInjector.resetMtkState(this, "voice-release-finished:" + reason);
+            if (nativePress != null) {
+                waitForNativeLongPress(nativePress, nativeHoldMs, reason);
+            } else {
+                delayBeforeRelease(intent, reason);
+                releasePress(press, reason);
             }
             player.release();
             if (audioManager != null && oldVolume >= 0 && boolExtra(intent, "restoreVolume", true)) {
@@ -631,14 +626,6 @@ public final class VoiceDemoService extends Service {
             Thread.currentThread().interrupt();
             BotLog.w(this, "voice.demo.press.native.interrupted", "reason=" + reason);
         }
-    }
-
-    private static int vmicPlaybackTimeoutMs(int durationMs) {
-        return Math.max(8000, Math.min(58000, estimatedVmicPlaybackMs(durationMs) + 5000));
-    }
-
-    private static int estimatedVmicPlaybackMs(int durationMs) {
-        return Math.max(0, Math.round(durationMs * 1.45f));
     }
 
     private void delayAfterPressBeforePlayback(Intent intent, String reason) {

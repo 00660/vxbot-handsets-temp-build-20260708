@@ -34,23 +34,13 @@ final class VmicInjector {
     }
 
     static boolean injectFile(Context context, File file, int timeoutMs, String reason) {
-        return injectFile(context, file, timeoutMs, reason, false);
-    }
-
-    static boolean injectFileForPress(Context context, File file, int timeoutMs, String reason) {
-        return injectFile(context, file, timeoutMs, reason, true);
-    }
-
-    private static boolean injectFile(Context context, File file, int timeoutMs, String reason,
-                                      boolean deferMtkStop) {
         synchronized (INJECT_LOCK) {
             if (file == null || !file.isFile() || file.length() <= 44) {
                 BotLog.w(context, "vmic.inject.skip", "reason=" + reason + " invalid file");
                 return false;
             }
             Helper procHelper = findMtkProcHelper(context);
-            if (!procHelper.path.isEmpty()
-                    && injectMtkProc(context, file, timeoutMs, reason, deferMtkStop)) {
+            if (!procHelper.path.isEmpty() && injectMtkProc(context, file, timeoutMs, reason)) {
                 return true;
             }
             Helper helper = findLegacyHelper(context);
@@ -139,8 +129,7 @@ final class VmicInjector {
         return new Helper("", "");
     }
 
-    private static boolean injectMtkProc(Context context, File file, int timeoutMs, String reason,
-                                         boolean deferStop) {
+    private static boolean injectMtkProc(Context context, File file, int timeoutMs, String reason) {
         ProcAudio audio = null;
         try {
             audio = prepareMtkProcAudio(context, file);
@@ -188,11 +177,9 @@ final class VmicInjector {
                         + " waitMs=" + waitMs
                         + " out=" + trim(consumption.status));
             }
-            ShellResult stopped = deferStop
-                    ? runRoot("cat " + status + " 2>/dev/null || true", 4000)
-                    : runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; "
-                            + "echo clear > " + ctl + " 2>/dev/null || true; cat "
-                            + status + " 2>/dev/null || true", 4000);
+            ShellResult stopped = runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo clear > " + ctl + " 2>/dev/null || true; cat "
+                    + status + " 2>/dev/null || true", 4000);
             long elapsed = SystemClock.uptimeMillis() - start;
             BotLog.i(context, "vmic.inject.done", "reason=" + reason
                     + " helper=mtk_virtual_mic_proc"
@@ -204,7 +191,6 @@ final class VmicInjector {
                     + " completed=" + consumption.completed
                     + " sourceFrames=" + consumption.sourceFrames
                     + " sourceReadFrame=" + consumption.sourceReadFrame
-                    + " deferredStop=" + deferStop
                     + " elapsedMs=" + elapsed
                     + " stopCode=" + stopped.code
                     + " out=" + trim(stopped.output));
