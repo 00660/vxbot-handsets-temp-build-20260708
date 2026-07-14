@@ -3,6 +3,7 @@ package com.vxbot.wechatbot;
 import android.Manifest;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.res.ColorStateList;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -283,13 +284,15 @@ public final class MainActivity extends Activity {
         mainTitle.setPadding(dp(4), 0, 0, dp(16));
         content.addView(mainTitle);
 
-        LinearLayout statusPage = page(content, "●  运行状态");
+        LinearLayout statusPage = pageContainer(content);
+        LinearLayout statusCard = card("●  运行状态");
+        statusPage.addView(statusCard, cardLayoutParams());
         View statusDivider = new View(this);
         statusDivider.setBackgroundColor(0xFFE5EAF2);
         LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
         dividerLp.setMargins(0, 0, 0, dp(14));
-        statusPage.addView(statusDivider, dividerLp);
+        statusCard.addView(statusDivider, dividerLp);
         LinearLayout statusColumns = new LinearLayout(this);
         statusColumns.setOrientation(LinearLayout.HORIZONTAL);
         statusView = text("", 14, INK, Typeface.NORMAL);
@@ -300,40 +303,30 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams rightStatusLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
         rightStatusLp.setMargins(dp(12), 0, 0, 0);
         statusColumns.addView(statusViewRight, rightStatusLp);
-        statusPage.addView(statusColumns);
+        statusCard.addView(statusColumns);
 
-        View actionDivider = new View(this);
-        actionDivider.setBackgroundColor(0xFFE5EAF2);
-        LinearLayout.LayoutParams actionDividerLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
-        actionDividerLp.setMargins(0, dp(18), 0, dp(12));
-        statusPage.addView(actionDivider, actionDividerLp);
-        statusPage.addView(actionRow(
-                actionButton("▣", "保存配置", BLUE, v -> saveConfig()),
-                actionButton("▶", "启动机器人", 0xFF00B578, v -> startBotFromUi()),
-                actionButton("■", "停止", 0xFFF04444, v -> {
+        LinearLayout actionCard = card("");
+        actionCard.setPadding(dp(8), dp(12), dp(8), dp(10));
+        statusPage.addView(actionCard, cardLayoutParams());
+        actionCard.addView(actionRow(
+                actionButton(R.drawable.ic_ui_save, "保存配置", BLUE, v -> saveConfig()),
+                actionButton(R.drawable.ic_ui_play, "启动机器人", 0xFF00B578, v -> startBotFromUi()),
+                actionButton(R.drawable.ic_ui_stop, "停止", 0xFFF04444, v -> {
                     Intent intent = new Intent(this, BotService.class);
                     intent.setAction(BotService.ACTION_STOP);
                     startService(intent);
                 }),
-                actionButton("△", "测试 hs", 0xFF845EC2, v -> testHs())));
-        statusPage.addView(actionRow(
-                actionButton("↻", "刷新状态", BLUE, v -> refreshStatus()),
-                actionButton("♢", "通知监听", 0xFFFF8A00,
+                actionButton(R.drawable.ic_ui_flask, "测试 hs", 0xFF845EC2, v -> testHs())));
+        actionCard.addView(actionRow(
+                actionButton(R.drawable.ic_ui_refresh, "刷新状态", BLUE, v -> refreshStatus()),
+                actionButton(R.drawable.ic_ui_bell, "通知监听", 0xFFFF8A00,
                         v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))),
-                actionButton("✓", "通知权限", 0xFF00B578, v -> requestPostNotificationIfNeeded()),
-                actionButton("▢", "悬浮窗权限", BLUE, v -> openOverlaySettings())));
-        statusPage.addView(actionRow(
-                actionButton("S", "Shizuku 授权", 0xFF845EC2, v -> toast(ShizukuBridge.requestPermission())),
-                actionButton("✋", "辅助功能", 0xFFFF8A00, v -> openAccessibilitySettings()),
-                actionButton("▤", "电池白名单", 0xFF00B578, v -> openBatteryWhitelistSettings()),
-                actionButton("☀", "亮度权限", 0xFFFF8A00, v -> openWriteSettingsPermission())));
-        statusPage.addView(actionRow(
-                actionButton("☼", "屏幕最亮", BLUE, v -> restoreScreenBrightnessFromUi())));
-        vmicRecordTestRow = actionRow(
-                actionButton("●", "虚拟麦录音测试", 0xFFF04444, v -> startVmicRecordTest()));
-        vmicRecordTestRow.setVisibility(View.GONE);
-        statusPage.addView(vmicRecordTestRow);
+                actionButton(R.drawable.ic_ui_shield, "通知权限", 0xFF00B578, v -> requestPostNotificationIfNeeded()),
+                actionButton(R.drawable.ic_ui_window, "悬浮窗权限", BLUE, v -> openOverlaySettings())));
+        actionCard.addView(actionRow(
+                actionButton(R.drawable.ic_ui_file_key, "Shizuku 授权", 0xFF845EC2,
+                        v -> toast(ShizukuBridge.requestPermission())),
+                actionButton(R.drawable.ic_ui_hand, "辅助功能", 0xFFFF8A00, v -> openAccessibilitySettings())));
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
@@ -341,6 +334,14 @@ public final class MainActivity extends Activity {
         followUpSenderWhitelist = edit(basicPage, "续聊控制人白名单，一行一个微信名", "", true);
         activeMode = spinner(basicPage, "hs 启动方式", new String[]{"root", "shizuku"});
         hsPort = edit(basicPage, "hs 端口", "9010", false);
+        basicPage.addView(buttonRow(
+                button("电池白名单", v -> openBatteryWhitelistSettings()),
+                button("亮度权限", v -> openWriteSettingsPermission())));
+        basicPage.addView(buttonRow(
+                button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
+        vmicRecordTestRow = buttonRow(button("虚拟麦录音测试", v -> startVmicRecordTest()));
+        vmicRecordTestRow.setVisibility(View.GONE);
+        basicPage.addView(vmicRecordTestRow);
 
         LinearLayout upstreamPage = page(content, "上游模型");
         chatEndpoint = edit(upstreamPage, "OpenAI 兼容接口", BotConfig.DEFAULT_CHAT_ENDPOINT, false);
@@ -557,9 +558,11 @@ public final class MainActivity extends Activity {
     }
 
     private void addTab(LinearLayout rail, String label, int index) {
-        TextView tab = text(tabGlyph(index) + "\n" + label, 12, Color.WHITE, Typeface.NORMAL);
+        TextView tab = text(label, 12, Color.WHITE, Typeface.NORMAL);
         tab.setGravity(Gravity.CENTER);
-        tab.setLineSpacing(dp(2), 1.0f);
+        tab.setCompoundDrawablesRelativeWithIntrinsicBounds(0, tabIcon(index), 0, 0);
+        tab.setCompoundDrawableTintList(ColorStateList.valueOf(Color.WHITE));
+        tab.setCompoundDrawablePadding(dp(4));
         tab.setPadding(dp(6), dp(8), dp(6), dp(6));
         tab.setOnClickListener(v -> selectTab(index));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.MATCH_PARENT);
@@ -568,9 +571,21 @@ public final class MainActivity extends Activity {
         tabs.add(tab);
     }
 
-    private String tabGlyph(int index) {
-        String[] glyphs = {"▣", "◇", "↑", "人", "▧", "◈", "⚙", "发", "¥", "时", "≡"};
-        return index >= 0 && index < glyphs.length ? glyphs[index] : "•";
+    private int tabIcon(int index) {
+        int[] icons = {
+                R.drawable.ic_nav_status,
+                R.drawable.ic_nav_layers,
+                R.drawable.ic_nav_cloud,
+                R.drawable.ic_nav_person,
+                R.drawable.ic_nav_image,
+                R.drawable.ic_ui_flask,
+                R.drawable.ic_nav_settings,
+                R.drawable.ic_nav_send,
+                R.drawable.ic_nav_wallet,
+                R.drawable.ic_nav_clock,
+                R.drawable.ic_nav_logs
+        };
+        return index >= 0 && index < icons.length ? icons[index] : R.drawable.ic_nav_status;
     }
 
     private void selectTab(int index) {
@@ -579,6 +594,7 @@ public final class MainActivity extends Activity {
         for (int i = 0; i < pages.size(); i++) {
             pages.get(i).setVisibility(i == index ? View.VISIBLE : View.GONE);
             tabs.get(i).setTextColor(i == index ? BLUE : Color.WHITE);
+            tabs.get(i).setCompoundDrawableTintList(ColorStateList.valueOf(i == index ? BLUE : Color.WHITE));
             tabs.get(i).setTypeface(Typeface.DEFAULT, i == index ? Typeface.BOLD : Typeface.NORMAL);
             tabs.get(i).setBackground(i == index
                     ? round(0xFF17233A, 0, 0, 0)
@@ -594,19 +610,42 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout page(LinearLayout content, String title) {
+        LinearLayout page = card(title);
+        content.addView(page, cardLayoutParams());
+        pages.add(page);
+        return page;
+    }
+
+    private LinearLayout pageContainer(LinearLayout content) {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setTag("page-container");
+        page.setBackgroundColor(Color.TRANSPARENT);
+        content.addView(page, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        pages.add(page);
+        return page;
+    }
+
+    private LinearLayout card(String title) {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(14), dp(16), dp(14), dp(16));
-        page.setBackground(round(Color.WHITE, dp(18), 1, Color.rgb(226, 232, 240)));
+        page.setBackground(round(Color.WHITE, dp(16), 1, Color.rgb(226, 232, 240)));
         page.setElevation(dp(1));
-        TextView pageTitle = text(title, 19, INK, Typeface.BOLD);
-        pageTitle.setPadding(0, 0, 0, dp(12));
-        page.addView(pageTitle);
+        if (title != null && !title.isEmpty()) {
+            TextView pageTitle = text(title, 19, INK, Typeface.BOLD);
+            pageTitle.setPadding(0, 0, 0, dp(12));
+            page.addView(pageTitle);
+        }
+        return page;
+    }
+
+    private LinearLayout.LayoutParams cardLayoutParams() {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 0, dp(16));
-        content.addView(page, lp);
-        pages.add(page);
-        return page;
+        return lp;
     }
 
     private void updateFullScreenBackground() {
@@ -639,6 +678,10 @@ public final class MainActivity extends Activity {
         }
         applyFullScreenChrome(show);
         for (int i = 0; i < pages.size(); i++) {
+            if ("page-container".equals(pages.get(i).getTag())) {
+                pages.get(i).setBackgroundColor(Color.TRANSPARENT);
+                continue;
+            }
             int color = show && i == selectedTabIndex
                     ? colorWithAlpha(Color.WHITE, fullScreenPanelAlpha) : Color.WHITE;
             pages.get(i).setBackground(round(color, dp(18), 1, Color.rgb(226, 232, 240)));
@@ -760,16 +803,18 @@ public final class MainActivity extends Activity {
         return row;
     }
 
-    private LinearLayout actionButton(String glyph, String label, int color, View.OnClickListener listener) {
+    private LinearLayout actionButton(int iconRes, String label, int color, View.OnClickListener listener) {
         LinearLayout action = new LinearLayout(this);
         action.setOrientation(LinearLayout.VERTICAL);
         action.setGravity(Gravity.CENTER);
         action.setPadding(dp(2), dp(5), dp(2), dp(4));
-        action.setBackground(round(Color.WHITE, dp(12), 1, 0xFFF0F2F6));
+        action.setBackgroundColor(Color.TRANSPARENT);
         action.setOnClickListener(listener);
 
-        TextView icon = text(glyph, 23, color, Typeface.NORMAL);
-        icon.setGravity(Gravity.CENTER);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconRes);
+        icon.setImageTintList(ColorStateList.valueOf(color));
+        icon.setPadding(dp(7), dp(7), dp(7), dp(7));
         action.addView(icon, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
         TextView caption = text(label, 11, INK, Typeface.NORMAL);
