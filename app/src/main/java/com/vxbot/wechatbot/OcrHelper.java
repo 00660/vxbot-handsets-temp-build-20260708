@@ -1122,11 +1122,12 @@ public final class OcrHelper {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
         boolean reliableInput = input != null && input.width() >= Math.round(width * 0.22f);
-        Rect detected = findInputModeToggleBlock(bitmap, reliableInput ? input : null, !reliableInput);
-        int centerY = reliableInput ? input.centerY() : Math.round(height * 0.62f);
-        int right = reliableInput
-                ? Math.max(Math.round(width * 0.07f), input.left - Math.round(width * 0.012f))
-                : Math.round(width * 0.18f);
+        if (!reliableInput) {
+            return new IconShapeFeature(null, 0, 0, false, false);
+        }
+        Rect detected = findInputModeToggleBlock(bitmap, input, false);
+        int centerY = input.centerY();
+        int right = Math.max(Math.round(width * 0.07f), input.left - Math.round(width * 0.012f));
         int left = Math.max(0, Math.round(width * 0.004f));
         right = clamp(right, left + 24, Math.round(width * 0.22f));
         int halfHeight = Math.max(34, Math.round(height * 0.035f));
@@ -1179,8 +1180,9 @@ public final class OcrHelper {
         int preferredY;
         if (input != null) {
             preferredY = input.centerY();
-            minY = input.top - Math.round(height * 0.16f);
-            maxY = input.bottom + Math.round(height * 0.16f);
+            int verticalMargin = Math.max(input.height(), Math.round(height * 0.035f));
+            minY = input.top - verticalMargin;
+            maxY = input.bottom + verticalMargin;
         } else {
             preferredY = Math.round(height * (preferRaised ? 0.64f : 0.88f));
             minY = Math.round(height * 0.48f);

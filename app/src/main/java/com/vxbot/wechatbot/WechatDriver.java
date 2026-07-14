@@ -88,25 +88,37 @@ public final class WechatDriver {
     }
 
     public OcrHelper.Screen inspectCurrentCodexScreen(Context context, String label, String sessionName) {
-        PageInfo page = inspectWechatScreenByOcr(context, label);
-        if ("chat".equals(page.page)) {
-            return page.screen;
-        }
-        if (page.screen != null && looksLikeCurrentSessionScreen(page.screen, sessionName)) {
-            BotLog.i(context, "codex.foreground.ocr.session_fallback", "按顶部会话名确认当前 Codex 会话 sessionName="
-                    + sessionName + " page=" + page.page + " reason=" + page.reason);
-            return page.screen;
-        }
-        if (page.screen == null && !isWechatForeground()) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (looksLikeCurrentSessionScreen(screen, sessionName)) {
-                BotLog.i(context, "codex.foreground.ocr.session_fallback", "前台包名未命中微信，但截图顶部会话名匹配 sessionName="
-                        + sessionName + " reason=" + page.reason);
-                return screen;
+        PageInfo page = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            String attemptLabel = attempt == 1 ? label : label + "_retry_" + attempt;
+            page = inspectWechatScreenByOcr(context, attemptLabel);
+            if ("chat".equals(page.page)) {
+                return page.screen;
             }
+            if (page.screen != null && looksLikeCurrentSessionScreen(page.screen, sessionName)) {
+                BotLog.i(context, "codex.foreground.ocr.session_fallback", "按顶部会话名确认当前 Codex 会话 sessionName="
+                        + sessionName + " page=" + page.page + " reason=" + page.reason + " attempt=" + attempt);
+                return page.screen;
+            }
+            if (page.screen == null && !isWechatForeground()) {
+                OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+                if (looksLikeCurrentSessionScreen(screen, sessionName)) {
+                    BotLog.i(context, "codex.foreground.ocr.session_fallback", "前台包名未命中微信，但截图顶部会话名匹配 sessionName="
+                            + sessionName + " reason=" + page.reason + " attempt=" + attempt);
+                    return screen;
+                }
+            }
+            if (!"unknown".equals(page.page) || attempt == 3) {
+                break;
+            }
+            BotLog.i(context, "codex.foreground.ocr.retry", "会话页 OCR 暂未稳定，原地重试 sessionName="
+                    + sessionName + " attempt=" + attempt);
+            SystemClock.sleep(450L);
         }
         BotLog.w(context, "codex.foreground.ocr.not_chat", "前台 OCR 跳过，当前不是微信会话页 page="
-                + page.page + " reason=" + page.reason + " sessionName=" + sessionName);
+                + (page == null ? "unknown" : page.page)
+                + " reason=" + (page == null ? "not_inspected" : page.reason)
+                + " sessionName=" + sessionName);
         return null;
     }
 
