@@ -580,7 +580,7 @@ public final class VoiceDemoService extends Service {
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            if (VmicInjector.injectFile(this, file, vmicPlaybackTimeoutMs(durationMs), reason)) {
+            if (VmicInjector.injectFileForPress(this, file, vmicPlaybackTimeoutMs(durationMs), reason)) {
                 BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             } else {
                 BotLog.w(this, "voice.demo.file.vmic.fallback", path + " durationMs=" + durationMs);
@@ -591,11 +591,15 @@ public final class VoiceDemoService extends Service {
             }
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
-            if (nativePress != null) {
-                waitForNativeLongPress(nativePress, nativeHoldMs, reason);
-            } else {
-                delayBeforeRelease(intent, reason);
-                releasePress(press, reason);
+            try {
+                if (nativePress != null) {
+                    waitForNativeLongPress(nativePress, nativeHoldMs, reason);
+                } else {
+                    delayBeforeRelease(intent, reason);
+                    releasePress(press, reason);
+                }
+            } finally {
+                VmicInjector.resetMtkState(this, "voice-release-finished:" + reason);
             }
             player.release();
             if (audioManager != null && oldVolume >= 0 && boolExtra(intent, "restoreVolume", true)) {
