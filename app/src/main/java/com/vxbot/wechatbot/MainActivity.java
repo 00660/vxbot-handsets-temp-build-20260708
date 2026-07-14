@@ -27,6 +27,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -56,6 +57,7 @@ public final class MainActivity extends Activity {
     private static final int INK = 0xFF182033;
     private static final int MUTED = 0xFF5E6B82;
     private static final int NAV = 0xFF0F172A;
+    private static final int BLUE = 0xFF1677FF;
     private static final int TEAL = 0xFF0EA5A3;
     private static final int TAB_PERSONA = 3;
     private static final int TAB_IMAGE = 4;
@@ -67,7 +69,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService uiWorker = Executors.newSingleThreadExecutor();
 
     private ImageView pageBackgroundImage;
-    private ScrollView railScroll;
+    private HorizontalScrollView railScroll;
     private ScrollView contentScroll;
     private TextView mainTitle;
     private EditText botNames;
@@ -177,6 +179,7 @@ public final class MainActivity extends Activity {
     private Switch stayInCodexSession;
     private TextView logView;
     private TextView statusView;
+    private TextView statusViewRight;
     private View vmicRecordTestRow;
     private boolean loadingConfig;
     private int selectedTabIndex = -1;
@@ -247,36 +250,26 @@ public final class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
         LinearLayout shell = new LinearLayout(this);
-        shell.setOrientation(LinearLayout.HORIZONTAL);
+        shell.setOrientation(LinearLayout.VERTICAL);
         shell.setBackgroundColor(Color.TRANSPARENT);
 
-        railScroll = new ScrollView(this);
-        railScroll.setFillViewport(true);
-        railScroll.setBackgroundColor(NAV);
-        LinearLayout rail = new LinearLayout(this);
-        rail.setOrientation(LinearLayout.VERTICAL);
-        rail.setPadding(dp(10), dp(18), dp(10), dp(18));
-        railScroll.addView(rail, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
-        shell.addView(railScroll, new LinearLayout.LayoutParams(dp(124), LinearLayout.LayoutParams.MATCH_PARENT));
-
-        TextView brand = text("HS Bot", 20, Color.WHITE, Typeface.BOLD);
-        brand.setGravity(Gravity.CENTER);
-        brand.setPadding(0, 0, 0, dp(14));
-        rail.addView(brand, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        addTab(rail, "状态", 0);
-        addTab(rail, "基础", 1);
-        addTab(rail, "上游", 2);
-        addTab(rail, "人物", 3);
-        addTab(rail, "图片", 4);
-        addTab(rail, "蒸馏", 5);
-        addTab(rail, "功能", 6);
-        addTab(rail, "群发", 7);
-        addTab(rail, "支付", 8);
-        addTab(rail, "延时", 9);
-        addTab(rail, "日志", 10);
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(20), 0, dp(18), 0);
+        topBar.setBackgroundColor(NAV);
+        TextView brand = text("HS Bot", 22, Color.WHITE, Typeface.BOLD);
+        topBar.addView(brand, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        TextView topAction = text("▣", 26, Color.WHITE, Typeface.NORMAL);
+        topAction.setGravity(Gravity.CENTER);
+        topAction.setOnClickListener(v -> refreshStatus());
+        topBar.addView(topAction, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        shell.addView(topBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
 
         contentScroll = new ScrollView(this);
         contentScroll.setFillViewport(true);
+        contentScroll.setClipToPadding(false);
         contentScroll.setOnClickListener(v -> toggleFullScreenChrome());
         contentScroll.setOnLongClickListener(v -> {
             showFullScreenChrome();
@@ -285,43 +278,64 @@ public final class MainActivity extends Activity {
         contentScroll.setOnTouchListener((v, event) -> handleFullScreenTouch(event));
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(14), dp(16), dp(14), dp(24));
+        content.setPadding(dp(16), dp(18), dp(16), dp(26));
         contentScroll.addView(content, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
-        shell.addView(contentScroll, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        shell.addView(contentScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        mainTitle = text("微信机器人", 26, INK, Typeface.BOLD);
-        mainTitle.setPadding(0, 0, 0, dp(12));
+        mainTitle = text("微信机器人", 24, INK, Typeface.BOLD);
+        mainTitle.setPadding(dp(4), 0, 0, dp(16));
         content.addView(mainTitle);
 
-        LinearLayout statusPage = page(content, "运行状态");
-        statusView = text("", 15, INK, Typeface.BOLD);
-        statusView.setPadding(0, 0, 0, dp(12));
-        statusPage.addView(statusView);
-        statusPage.addView(buttonRow(
-                button("保存配置", v -> saveConfig()),
-                button("启动机器人", v -> startBotFromUi())));
-        statusPage.addView(buttonRow(
-                button("停止", v -> {
+        LinearLayout statusPage = page(content, "●  运行状态");
+        View statusDivider = new View(this);
+        statusDivider.setBackgroundColor(0xFFE5EAF2);
+        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        dividerLp.setMargins(0, 0, 0, dp(14));
+        statusPage.addView(statusDivider, dividerLp);
+        LinearLayout statusColumns = new LinearLayout(this);
+        statusColumns.setOrientation(LinearLayout.HORIZONTAL);
+        statusView = text("", 14, INK, Typeface.NORMAL);
+        statusView.setLineSpacing(dp(5), 1.0f);
+        statusViewRight = text("", 14, INK, Typeface.NORMAL);
+        statusViewRight.setLineSpacing(dp(5), 1.0f);
+        statusColumns.addView(statusView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        LinearLayout.LayoutParams rightStatusLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        rightStatusLp.setMargins(dp(12), 0, 0, 0);
+        statusColumns.addView(statusViewRight, rightStatusLp);
+        statusPage.addView(statusColumns);
+
+        View actionDivider = new View(this);
+        actionDivider.setBackgroundColor(0xFFE5EAF2);
+        LinearLayout.LayoutParams actionDividerLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(1));
+        actionDividerLp.setMargins(0, dp(18), 0, dp(12));
+        statusPage.addView(actionDivider, actionDividerLp);
+        statusPage.addView(actionRow(
+                actionButton("▣", "保存配置", BLUE, v -> saveConfig()),
+                actionButton("▶", "启动机器人", 0xFF00B578, v -> startBotFromUi()),
+                actionButton("■", "停止", 0xFFF04444, v -> {
                     Intent intent = new Intent(this, BotService.class);
                     intent.setAction(BotService.ACTION_STOP);
                     startService(intent);
                 }),
-                button("测试 hs", v -> testHs())));
-        statusPage.addView(buttonRow(
-                button("通知监听设置", v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))),
-                button("通知权限", v -> requestPostNotificationIfNeeded())));
-        statusPage.addView(buttonRow(
-                button("悬浮窗权限", v -> openOverlaySettings()),
-                button("Shizuku 授权", v -> toast(ShizukuBridge.requestPermission()))));
-        statusPage.addView(buttonRow(
-                button("辅助功能", v -> openAccessibilitySettings()),
-                button("刷新状态", v -> refreshStatus())));
-        statusPage.addView(buttonRow(
-                button("电池白名单", v -> openBatteryWhitelistSettings())));
-        statusPage.addView(buttonRow(
-                button("亮度权限", v -> openWriteSettingsPermission()),
-                button("屏幕最亮", v -> restoreScreenBrightnessFromUi())));
-        vmicRecordTestRow = buttonRow(button("虚拟麦录音测试", v -> startVmicRecordTest()));
+                actionButton("△", "测试 hs", 0xFF845EC2, v -> testHs())));
+        statusPage.addView(actionRow(
+                actionButton("↻", "刷新状态", BLUE, v -> refreshStatus()),
+                actionButton("♢", "通知监听", 0xFFFF8A00,
+                        v -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))),
+                actionButton("✓", "通知权限", 0xFF00B578, v -> requestPostNotificationIfNeeded()),
+                actionButton("▢", "悬浮窗权限", BLUE, v -> openOverlaySettings())));
+        statusPage.addView(actionRow(
+                actionButton("S", "Shizuku 授权", 0xFF845EC2, v -> toast(ShizukuBridge.requestPermission())),
+                actionButton("✋", "辅助功能", 0xFFFF8A00, v -> openAccessibilitySettings()),
+                actionButton("▤", "电池白名单", 0xFF00B578, v -> openBatteryWhitelistSettings()),
+                actionButton("☀", "亮度权限", 0xFFFF8A00, v -> openWriteSettingsPermission())));
+        statusPage.addView(actionRow(
+                actionButton("☼", "屏幕最亮", BLUE, v -> restoreScreenBrightnessFromUi())));
+        vmicRecordTestRow = actionRow(
+                actionButton("●", "虚拟麦录音测试", 0xFFF04444, v -> startVmicRecordTest()));
         vmicRecordTestRow.setVisibility(View.GONE);
         statusPage.addView(vmicRecordTestRow);
 
@@ -516,6 +530,30 @@ public final class MainActivity extends Activity {
         logView.setPadding(dp(12), dp(12), dp(12), dp(12));
         logsPage.addView(logView, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(520)));
 
+        railScroll = new HorizontalScrollView(this);
+        railScroll.setHorizontalScrollBarEnabled(false);
+        railScroll.setFillViewport(false);
+        railScroll.setBackgroundColor(NAV);
+        LinearLayout rail = new LinearLayout(this);
+        rail.setOrientation(LinearLayout.HORIZONTAL);
+        rail.setPadding(dp(6), 0, dp(6), 0);
+        addTab(rail, "状态", 0);
+        addTab(rail, "基础", 1);
+        addTab(rail, "上游", 2);
+        addTab(rail, "人物", 3);
+        addTab(rail, "图片", 4);
+        addTab(rail, "蒸馏", 5);
+        addTab(rail, "功能", 6);
+        addTab(rail, "群发", 7);
+        addTab(rail, "支付", 8);
+        addTab(rail, "延时", 9);
+        addTab(rail, "日志", 10);
+        railScroll.addView(rail, new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
+                HorizontalScrollView.LayoutParams.MATCH_PARENT));
+        shell.addView(railScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(76)));
+
         root.addView(shell, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
@@ -523,14 +561,20 @@ public final class MainActivity extends Activity {
     }
 
     private void addTab(LinearLayout rail, String label, int index) {
-        TextView tab = text(label, 15, Color.WHITE, Typeface.BOLD);
+        TextView tab = text(tabGlyph(index) + "\n" + label, 12, Color.WHITE, Typeface.NORMAL);
         tab.setGravity(Gravity.CENTER);
-        tab.setPadding(dp(6), dp(12), dp(6), dp(12));
+        tab.setLineSpacing(dp(2), 1.0f);
+        tab.setPadding(dp(6), dp(8), dp(6), dp(6));
         tab.setOnClickListener(v -> selectTab(index));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(76), LinearLayout.LayoutParams.MATCH_PARENT);
+        lp.setMargins(dp(2), 0, dp(2), 0);
         rail.addView(tab, lp);
         tabs.add(tab);
+    }
+
+    private String tabGlyph(int index) {
+        String[] glyphs = {"▣", "◇", "↑", "人", "▧", "◈", "⚙", "发", "¥", "时", "≡"};
+        return index >= 0 && index < glyphs.length ? glyphs[index] : "•";
     }
 
     private void selectTab(int index) {
@@ -538,9 +582,16 @@ public final class MainActivity extends Activity {
         fullScreenChromeVisible = false;
         for (int i = 0; i < pages.size(); i++) {
             pages.get(i).setVisibility(i == index ? View.VISIBLE : View.GONE);
-            tabs.get(i).setTextColor(i == index ? NAV : Color.WHITE);
-            tabs.get(i).setBackground(i == index ? round(Color.WHITE, dp(18), 0, 0) : round(0x223B475C, dp(18), 0, 0));
+            tabs.get(i).setTextColor(i == index ? BLUE : Color.WHITE);
+            tabs.get(i).setTypeface(Typeface.DEFAULT, i == index ? Typeface.BOLD : Typeface.NORMAL);
+            tabs.get(i).setBackground(i == index
+                    ? round(0xFF17233A, 0, 0, 0)
+                    : round(Color.TRANSPARENT, 0, 0, 0));
         }
+        TextView selected = tabs.get(index);
+        railScroll.post(() -> railScroll.smoothScrollTo(
+                Math.max(0, selected.getLeft() - (railScroll.getWidth() - selected.getWidth()) / 2), 0));
+        contentScroll.post(() -> contentScroll.scrollTo(0, 0));
         updateFullScreenBackground();
         refreshLogs();
         refreshStatus();
@@ -551,7 +602,8 @@ public final class MainActivity extends Activity {
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(14), dp(16), dp(14), dp(16));
         page.setBackground(round(Color.WHITE, dp(18), 1, Color.rgb(226, 232, 240)));
-        TextView pageTitle = text(title, 21, INK, Typeface.BOLD);
+        page.setElevation(dp(1));
+        TextView pageTitle = text(title, 19, INK, Typeface.BOLD);
         pageTitle.setPadding(0, 0, 0, dp(12));
         page.addView(pageTitle);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -693,6 +745,44 @@ public final class MainActivity extends Activity {
             row.addView(buttons[i], lp);
         }
         return row;
+    }
+
+    private LinearLayout actionRow(View... actions) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.TOP);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.setMargins(0, 0, 0, dp(8));
+        row.setLayoutParams(rowLp);
+        for (int i = 0; i < 4; i++) {
+            View action = i < actions.length ? actions[i] : new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(82), 1);
+            lp.setMargins(i == 0 ? 0 : dp(3), 0, i == 3 ? 0 : dp(3), 0);
+            row.addView(action, lp);
+        }
+        return row;
+    }
+
+    private LinearLayout actionButton(String glyph, String label, int color, View.OnClickListener listener) {
+        LinearLayout action = new LinearLayout(this);
+        action.setOrientation(LinearLayout.VERTICAL);
+        action.setGravity(Gravity.CENTER);
+        action.setPadding(dp(2), dp(5), dp(2), dp(4));
+        action.setBackground(round(Color.WHITE, dp(12), 1, 0xFFF0F2F6));
+        action.setOnClickListener(listener);
+
+        TextView icon = text(glyph, 23, color, Typeface.NORMAL);
+        icon.setGravity(Gravity.CENTER);
+        action.addView(icon, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
+        TextView caption = text(label, 11, INK, Typeface.NORMAL);
+        caption.setGravity(Gravity.CENTER);
+        caption.setSingleLine(false);
+        caption.setMaxLines(2);
+        action.addView(caption, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return action;
     }
 
     private void loadConfigIntoUi() {
@@ -1439,24 +1529,25 @@ public final class MainActivity extends Activity {
     }
 
     private void refreshStatus() {
-        if (statusView == null) {
+        if (statusView == null || statusViewRight == null) {
             return;
         }
         BotConfig config = BotConfig.load(this);
         boolean paused = BotRuntimeControls.isPaused(this);
-        String base = "模式=" + config.activeMode
-                + "\nAPK记录=" + HsDaemonManager.runtimeStatus(this)
-                + "\n小圆点暂停=" + (paused ? "已启用（机器人启动被阻止）" : "已关闭")
-                + "\nhs端口=检测中"
-                + "\nShizuku=检测中"
-                + "\n授权=检测中"
-                + "\n辅助功能=" + (accessibilityServiceEnabled() ? "已开" : "未开")
-                + "\n悬浮窗=" + (overlayEnabled() ? "已开" : "未开")
-                + "\n录音权限=" + (recordAudioPermissionGranted() ? "已开" : "未开")
-                + "\n通知监听=" + (notificationListenerEnabled() ? "已开" : "未开")
-                + "\n上游=" + config.chatEndpoint
-                + "\n支付回调=" + config.paymentCallbackUrl;
-        statusView.setText(base);
+        statusView.setText("模式：" + config.activeMode
+                + "\nAPK记录：" + HsDaemonManager.runtimeStatus(this)
+                + "\nhs端口：检测中"
+                + "\nRoot：检测中"
+                + "\nShizuku：检测中"
+                + "\n授权：检测中"
+                + "\n辅助功能：" + (accessibilityServiceEnabled() ? "已开" : "未开"));
+        statusViewRight.setText("暂停：" + (paused ? "已启用" : "已关闭")
+                + "\n悬浮窗：" + (overlayEnabled() ? "已开" : "未开")
+                + "\n录音权限：" + (recordAudioPermissionGranted() ? "已开" : "未开")
+                + "\n通知监听：" + (notificationListenerEnabled() ? "已开" : "未开")
+                + "\n虚拟麦：检测中"
+                + "\n上游：\n" + config.chatEndpoint
+                + "\n支付回调：\n" + config.paymentCallbackUrl);
         uiWorker.execute(() -> {
             boolean shizuku = ShizukuBridge.available();
             boolean shizukuPerm = ShizukuBridge.hasPermission();
@@ -1465,27 +1556,26 @@ public final class MainActivity extends Activity {
             String hs = new HsClient(config.hsPort).healthLabel();
             String hsRuntime = HsDaemonManager.runtimeStatus(this);
             runOnUiThread(() -> {
-                if (statusView == null) {
+                if (statusView == null || statusViewRight == null) {
                     return;
                 }
                 if (vmicRecordTestRow != null) {
                     vmicRecordTestRow.setVisibility(vmicSupported ? View.VISIBLE : View.GONE);
                 }
-                statusView.setText("模式=" + config.activeMode
-                        + "\nAPK记录=" + hsRuntime
-                        + "\n小圆点暂停=" + (BotRuntimeControls.isPaused(this)
-                                ? "已启用（机器人启动被阻止）" : "已关闭")
-                        + "\nhs端口=" + hs
-                        + "\nRoot=" + (rootPerm ? "已授权" : "未授权")
-                        + "\nShizuku=" + (shizuku ? "在线" : "离线")
-                        + "\n授权=" + ((rootPerm || shizukuPerm) ? "已授权" : "未授权")
-                        + "\n虚拟麦=" + (vmicSupported ? "已支持" : "不支持")
-                        + "\n辅助功能=" + (accessibilityServiceEnabled() ? "已开" : "未开")
-                        + "\n悬浮窗=" + (overlayEnabled() ? "已开" : "未开")
-                        + "\n录音权限=" + (recordAudioPermissionGranted() ? "已开" : "未开")
-                        + "\n通知监听=" + (notificationListenerEnabled() ? "已开" : "未开")
-                        + "\n上游=" + config.chatEndpoint
-                        + "\n支付回调=" + config.paymentCallbackUrl);
+                statusView.setText("模式：" + config.activeMode
+                        + "\nAPK记录：" + hsRuntime
+                        + "\nhs端口：" + hs
+                        + "\nRoot：" + (rootPerm ? "已授权" : "未授权")
+                        + "\nShizuku：" + (shizuku ? "在线" : "离线")
+                        + "\n授权：" + ((rootPerm || shizukuPerm) ? "已授权" : "未授权")
+                        + "\n辅助功能：" + (accessibilityServiceEnabled() ? "已开" : "未开"));
+                statusViewRight.setText("暂停：" + (BotRuntimeControls.isPaused(this) ? "已启用" : "已关闭")
+                        + "\n悬浮窗：" + (overlayEnabled() ? "已开" : "未开")
+                        + "\n录音权限：" + (recordAudioPermissionGranted() ? "已开" : "未开")
+                        + "\n通知监听：" + (notificationListenerEnabled() ? "已开" : "未开")
+                        + "\n虚拟麦：" + (vmicSupported ? "已支持" : "不支持")
+                        + "\n上游：\n" + config.chatEndpoint
+                        + "\n支付回调：\n" + config.paymentCallbackUrl);
             });
         });
     }
@@ -1878,7 +1968,7 @@ public final class MainActivity extends Activity {
         button.setSingleLine(false);
         button.setMaxLines(2);
         button.setOnClickListener(listener);
-        button.setBackground(round(NAV, dp(18), 0, 0));
+        button.setBackground(round(BLUE, dp(12), 0, 0));
         return button;
     }
 
