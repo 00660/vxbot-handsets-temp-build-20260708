@@ -260,10 +260,6 @@ public final class MainActivity extends Activity {
         topBar.setBackgroundColor(NAV);
         TextView brand = text("HS Bot", 22, Color.WHITE, Typeface.BOLD);
         topBar.addView(brand, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        TextView topAction = text("▣", 26, Color.WHITE, Typeface.NORMAL);
-        topAction.setGravity(Gravity.CENTER);
-        topAction.setOnClickListener(v -> refreshStatus());
-        topBar.addView(topAction, new LinearLayout.LayoutParams(dp(48), dp(48)));
         shell.addView(topBar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
 
