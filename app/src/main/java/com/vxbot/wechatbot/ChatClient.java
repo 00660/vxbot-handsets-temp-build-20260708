@@ -330,9 +330,11 @@ public final class ChatClient {
         BotLog.i(context, "chat.request", "发送文字请求 mode=" + route.kind
                 + " bytes=" + payload.toString().getBytes(StandardCharsets.UTF_8).length
                 + " tool=" + (!isBlank(effectiveToolContext)));
-        String reply = postChat(config, payload);
+        String reply = stripWebSearchPreamble(postChat(config, payload));
         if (route.kind != MessageRouter.Kind.TEXT || !isBlank(effectiveToolContext)) {
-            return reply;
+            return isWebSearchContext(effectiveToolContext)
+                    ? compressSearchReply(context, config, payload, messages, reply)
+                    : reply;
         }
         String searchQuery = extractWebSearchQuery(reply);
         if (searchQuery.isEmpty()) {
@@ -344,7 +346,59 @@ public final class ChatClient {
         messages.put(0, new JSONObject().put("role", "system")
                 .put("content", buildSystemPrompt(config, route, searchedContext)));
         payload.put("messages", messages);
-        return postChat(config, payload);
+        reply = stripWebSearchPreamble(postChat(config, payload));
+        return isWebSearchContext(searchedContext)
+                ? compressSearchReply(context, config, payload, messages, reply)
+                : reply;
+    }
+
+    private String compressSearchReply(Context context, BotConfig config, JSONObject payload,
+                                       JSONArray messages, String reply) {
+        String clean = stripWebSearchPreamble(reply);
+        if (clean.length() <= 420) {
+            return clean;
+        }
+        try {
+            messages.put(new JSONObject().put("role", "assistant").put("content", clean));
+            messages.put(new JSONObject().put("role", "user").put("content",
+                    "把上面的回答压缩成可直接发微信群的120至360个汉字：先给结论，再保留最关键的已核实事实；"
+                            + "不要标题、列表、Markdown、搜索调用、免责声明和延伸建议。"));
+            payload.put("messages", messages);
+            String compressed = stripWebSearchPreamble(postChat(config, payload));
+            BotLog.i(context, "chat.web_search.compress", "搜索回答压缩 before=" + clean.length()
+                    + " after=" + compressed.length());
+            return limitAtSentence(compressed, 420);
+        } catch (Exception e) {
+            BotLog.w(context, "chat.web_search.compress.fail", "搜索回答压缩失败: " + e.getMessage());
+            return limitAtSentence(clean, 420);
+        }
+    }
+
+    private static boolean isWebSearchContext(String toolContext) {
+        return toolContext != null && toolContext.startsWith("网页搜索工具：");
+    }
+
+    private static String stripWebSearchPreamble(String reply) {
+        String text = reply == null ? "" : reply.trim();
+        return text.replaceFirst(
+                "(?is)^\\s*(?:web_)?search\\(\\s*(?:\"(?:\\\\.|[^\"])*\"|'(?:\\\\.|[^'])*')\\s*\\)\\s*",
+                "").trim();
+    }
+
+    private static String limitAtSentence(String reply, int maxChars) {
+        String text = stripWebSearchPreamble(reply);
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        int end = -1;
+        for (int i = Math.min(maxChars, text.length() - 1); i >= Math.min(220, maxChars / 2); i--) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '！' || c == '？' || c == '；') {
+                end = i + 1;
+                break;
+            }
+        }
+        return (end > 0 ? text.substring(0, end) : text.substring(0, maxChars)).trim();
     }
 
     private static boolean shouldAutoWebSearch(String text) {
@@ -483,7 +537,8 @@ public final class ChatClient {
         prompt.append(route.instruction).append('\n');
         if (!isBlank(toolContext)) {
             prompt.append("实时工具结果：\n").append(toolContext).append('\n');
-            prompt.append("回答必须基于实时工具结果，给出具体事实；多条结果冲突时明确说法差异，不要编造没有查到的数据，也不要输出搜索工具调用格式。\n");
+            prompt.append("回答必须基于实时工具结果，先给结论再给关键事实；多条结果冲突时明确说法差异，不要编造没有查到的数据。"
+                    + "控制在120至360个汉字，不要标题、列表、Markdown、免责声明、延伸建议或搜索工具调用格式。\n");
         }
         prompt.append("只回复将要发到微信群里的内容。");
         return prompt.toString();
@@ -496,6 +551,8 @@ public final class ChatClient {
         }
         text = text.replaceAll("[\\p{So}\\p{Sk}\\uFE0F\\u200D]+", "")
                 .replaceAll("(?m)^\\s*[-*#]+\\s*", "")
+                .replace("**", "")
+                .replace("__", "")
                 .trim();
         if (kind == MessageRouter.Kind.TROLL && !text.contains("我")) {
             text = "我看，" + text;

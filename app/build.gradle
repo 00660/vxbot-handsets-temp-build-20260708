@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 205
-        versionName "0.1.205-text-web-search"
+        versionCode 206
+        versionName "0.1.206-text-web-search-output"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
