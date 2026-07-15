@@ -39,14 +39,17 @@ public final class WechatProfileFlow {
                 }
             }
         }
-        if (capture == null || capture.bytes.length < 8192) {
+        if (capture == null || capture.profileBytes.length < 8192 || capture.avatarBytes.length < 4096) {
             return "“" + targetName + "”的资料页截图无效，暂时没法生成画像。";
         }
         try {
-            String dataUrl = "data:image/png;base64," + Base64.encodeToString(capture.bytes, Base64.NO_WRAP);
+            String avatarDataUrl = "data:image/png;base64,"
+                    + Base64.encodeToString(capture.avatarBytes, Base64.NO_WRAP);
+            String profileDataUrl = "data:image/png;base64,"
+                    + Base64.encodeToString(capture.profileBytes, Base64.NO_WRAP);
             String reply = new ChatClient().requestProfilePersona(
-                    context, config, message, targetName, capture.profileText, dataUrl);
-            return "【" + targetName + "·人物画像】\n" + reply;
+                    context, config, message, targetName, capture.profileText, avatarDataUrl, profileDataUrl);
+            return "【" + targetName + "·人物画像】\n" + plainReply(reply);
         } catch (Exception e) {
             BotLog.e(context, "profile.persona.request.fail", "人物画像视觉请求失败 target="
                     + targetName + " error=" + e.getMessage());
@@ -156,17 +159,34 @@ public final class WechatProfileFlow {
         try {
             int top = Math.max(0, Math.round(bitmap.getHeight() * 0.07f));
             int bottom = Math.min(bitmap.getHeight(), Math.round(bitmap.getHeight() * 0.48f));
-            Bitmap cropped = Bitmap.createBitmap(bitmap, 0, top, bitmap.getWidth(), bottom - top);
+            Bitmap profileCrop = Bitmap.createBitmap(bitmap, 0, top, bitmap.getWidth(), bottom - top);
             try {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                cropped.compress(Bitmap.CompressFormat.PNG, 100, out);
-                byte[] bytes = out.toByteArray();
+                byte[] profileBytes = pngBytes(profileCrop);
+                int avatarLeft = Math.max(0, Math.round(bitmap.getWidth() * 0.025f));
+                int avatarTop = Math.max(0, Math.round(bitmap.getHeight() * 0.085f));
+                int avatarRight = Math.min(bitmap.getWidth(), Math.round(bitmap.getWidth() * 0.24f));
+                int avatarBottom = Math.min(bitmap.getHeight(), Math.round(bitmap.getHeight() * 0.21f));
+                Bitmap avatarCrop = Bitmap.createBitmap(bitmap, avatarLeft, avatarTop,
+                        avatarRight - avatarLeft, avatarBottom - avatarTop);
+                byte[] avatarBytes;
+                try {
+                    Bitmap enlarged = Bitmap.createScaledBitmap(avatarCrop,
+                            avatarCrop.getWidth() * 4, avatarCrop.getHeight() * 4, true);
+                    try {
+                        avatarBytes = pngBytes(enlarged);
+                    } finally {
+                        enlarged.recycle();
+                    }
+                } finally {
+                    avatarCrop.recycle();
+                }
                 String profileText = profileText(screen);
-                BotLog.i(context, "profile.persona.capture", "成员资料页截图完成 bytes=" + bytes.length
+                BotLog.i(context, "profile.persona.capture", "成员资料页截图完成 profileBytes="
+                        + profileBytes.length + " avatarBytes=" + avatarBytes.length
                         + " ocr=" + profileText);
-                return new ProfileCapture(bytes, profileText);
+                return new ProfileCapture(profileBytes, avatarBytes, profileText);
             } finally {
-                cropped.recycle();
+                profileCrop.recycle();
             }
         } catch (Exception e) {
             BotLog.w(context, "profile.persona.capture.fail", e.getMessage());
@@ -200,12 +220,37 @@ public final class WechatProfileFlow {
         return out.toString();
     }
 
+    private String plainReply(String reply) {
+        String value = reply == null ? "" : reply
+                .replace("**", "")
+                .replace("__", "")
+                .replace("```", "")
+                .replaceAll("(?m)^\\s*#{1,6}\\s*", "")
+                .replaceAll("(?m)^\\s*-\\s*", "• ")
+                .trim();
+        if (value.startsWith("人物画像：") || value.startsWith("人物画像:")) {
+            int line = value.indexOf('\n');
+            if (line >= 0 && line + 1 < value.length()) {
+                value = value.substring(line + 1).trim();
+            }
+        }
+        return value;
+    }
+
+    private byte[] pngBytes(Bitmap bitmap) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+        return out.toByteArray();
+    }
+
     private static final class ProfileCapture {
-        final byte[] bytes;
+        final byte[] profileBytes;
+        final byte[] avatarBytes;
         final String profileText;
 
-        ProfileCapture(byte[] bytes, String profileText) {
-            this.bytes = bytes;
+        ProfileCapture(byte[] profileBytes, byte[] avatarBytes, String profileText) {
+            this.profileBytes = profileBytes;
+            this.avatarBytes = avatarBytes;
             this.profileText = profileText == null ? "" : profileText;
         }
     }

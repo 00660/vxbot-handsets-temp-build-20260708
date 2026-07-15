@@ -223,7 +223,8 @@ public final class ChatClient {
     }
 
     public String requestProfilePersona(Context context, BotConfig config, WxMessage message,
-                                        String targetName, String profileText, String imageDataUrl) throws Exception {
+                                        String targetName, String profileText,
+                                        String avatarDataUrl, String profileDataUrl) throws Exception {
         if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
             throw new IllegalStateException("chatEndpoint 未配置");
         }
@@ -232,18 +233,26 @@ public final class ChatClient {
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject().put("role", "system").put("content",
                 "你是微信人物画像分析助手。根据用户公开展示的头像、昵称、地区和个性签名，"
-                        + "输出可直接发到微信群里的中文人物画像。必须包含：视觉风格、签名表达、"
-                        + "可能的性格特征、社交表达倾向、兴趣线索、情绪基调和判断置信度。"
+                        + "输出可直接发到微信群里的中文人物画像。第一张图是放大后的头像，第二张图是完整资料页。"
+                        + "必须真正观察头像主体、姿态、配色、画风和选择偏好，并结合昵称、签名之间的呼应或反差。"
+                        + "报告包含：第一眼气质、性格底色、社交模式与边界感、反差点或潜台词、相处建议、判断置信度。"
+                        + "每个判断都必须紧跟具体依据，禁止只写随和、低调、轻松、温和之类任何头像都能套用的空话。"
+                        + "语气可以犀利、有趣、有记忆点，但不能辱骂。控制在 350 至 600 个汉字。"
                         + "只做有依据的倾向性描述，不推断疾病、政治、宗教、性取向、收入等敏感属性，"
-                        + "资料不足就明确说明。不要输出内部推理，不要输出 JSON。"));
+                        + "资料不足就明确说明。不要输出内部推理，不要输出 JSON。"
+                        + "不要重复输出人物画像标题，不要使用 Markdown 星号、井号或代码块；"
+                        + "每项直接用中文标签加冒号。"));
         JSONArray content = new JSONArray();
         content.put(new JSONObject().put("type", "text").put("text",
                 "目标人物:" + targetName
                         + "\n资料页 OCR:" + profileText
-                        + "\n请结合截图中的头像和上述公开文字生成简洁人物画像。"));
+                        + "\n请拒绝模板化套话，写出这个头像与签名组合独有的细节和反差。"));
         content.put(new JSONObject()
                 .put("type", "image_url")
-                .put("image_url", new JSONObject().put("url", imageDataUrl)));
+                .put("image_url", new JSONObject().put("url", avatarDataUrl).put("detail", "high")));
+        content.put(new JSONObject()
+                .put("type", "image_url")
+                .put("image_url", new JSONObject().put("url", profileDataUrl).put("detail", "high")));
         messages.put(new JSONObject().put("role", "user").put("content", content));
         payload.put("messages", messages);
         payload.put("temperature", 0.45);

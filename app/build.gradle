@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 196
-        versionName "0.1.196-profile-persona-debug-current"
+        versionCode 197
+        versionName "0.1.197-profile-persona-final"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
