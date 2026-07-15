@@ -17,9 +17,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 final class VoiceReply {
-    private static final int VOICE_SEGMENT_TARGET_MS = 54000;
-    private static final int VOICE_SEGMENT_MAX_MS = 55000;
-    private static final int VOICE_SEGMENT_RETRY_TARGET_MS = 50000;
+    private static final int VOICE_SEGMENT_TARGET_MS = 40000;
+    private static final int VOICE_SEGMENT_MAX_MS = 42000;
+    private static final int VOICE_SEGMENT_RETRY_TARGET_MS = 38000;
     private static final int VOICE_SEGMENT_GAP_MS = 800;
     private static final int PRE_PLAYBACK_PRESS_MS = 500;
 

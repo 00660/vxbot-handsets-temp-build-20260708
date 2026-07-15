@@ -558,14 +558,21 @@ public final class VoiceDemoService extends Service {
             BotLog.i(this, "voice.demo.file.ready", path + " size=" + file.length()
                     + " durationMs=" + Math.max(0, player.getDuration()));
             int durationMs = Math.max(0, player.getDuration());
+            int vmicTimeoutMs = vmicPlaybackTimeoutMs(intent, durationMs);
             if (RootAccessChecker.hasRootPermission()) {
                 int[] point = resolvePressPoint(intent);
                 if (point == null) {
                     throw new IllegalStateException("WeChat voice press point not confirmed");
                 }
                 int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
-                int releaseAfterPlaybackMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
+                int releaseAfterPlaybackMs = adaptiveReleaseAfterPlaybackMs(intent, durationMs);
                 nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs + releaseAfterPlaybackMs);
+                BotLog.i(this, "voice.demo.press.timing", "reason=" + reason
+                        + " durationMs=" + durationMs
+                        + " prePlaybackMs=" + prePlaybackMs
+                        + " releaseAfterPlaybackMs=" + releaseAfterPlaybackMs
+                        + " holdMs=" + nativeHoldMs
+                        + " vmicTimeoutMs=" + vmicTimeoutMs);
                 nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
                 SystemClock.sleep(120);
                 if (!nativePress.isAlive()) {
@@ -579,7 +586,7 @@ public final class VoiceDemoService extends Service {
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            if (VmicInjector.injectFile(this, file, Math.max(8000, durationMs + 5000), reason)) {
+            if (VmicInjector.injectFile(this, file, vmicTimeoutMs, reason)) {
                 BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             } else {
                 BotLog.w(this, "voice.demo.file.vmic.fallback", path + " durationMs=" + durationMs);
@@ -644,6 +651,20 @@ public final class VoiceDemoService extends Service {
         }
         BotLog.i(this, "voice.demo.release.delay", "reason=" + reason + " delayMs=" + delayMs);
         SystemClock.sleep(delayMs);
+    }
+
+    private static int adaptiveReleaseAfterPlaybackMs(Intent intent, int durationMs) {
+        int baseMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
+        if (durationMs <= 5000) {
+            return baseMs;
+        }
+        int consumeLagMs = Math.round((durationMs - 5000) * 0.30f);
+        return Math.min(14000, baseMs + 1000 + consumeLagMs);
+    }
+
+    private static int vmicPlaybackTimeoutMs(Intent intent, int durationMs) {
+        int releaseMs = adaptiveReleaseAfterPlaybackMs(intent, durationMs);
+        return Math.max(8000, durationMs + releaseMs + 2000);
     }
 
     private static final class PressHandle {
