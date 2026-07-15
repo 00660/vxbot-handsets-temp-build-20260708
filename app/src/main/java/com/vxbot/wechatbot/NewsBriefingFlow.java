@@ -227,7 +227,7 @@ public final class NewsBriefingFlow {
                 continue;
             }
             String summary = cleanModelText(item.optString("summary"));
-            if (summary.length() < 12 || similarTitle(story.title, summary) || isGenericSummary(summary)) {
+            if (summary.length() < 12 || isGenericSummary(summary)) {
                 summary = fallbackSummary(story);
             }
             Card card = new Card();
@@ -295,7 +295,7 @@ public final class NewsBriefingFlow {
         if (!best.isEmpty()) {
             return trimTo(best, 68);
         }
-        return "事件仍在更新，先看事实进展，不拿热搜词硬凑结论。";
+        return "据" + story.source + "报道，核心进展为：" + compactTitle(story.title);
     }
 
     private static File renderImage(Context context, List<Card> cards) throws Exception {
@@ -638,12 +638,14 @@ public final class NewsBriefingFlow {
     }
 
     private static boolean isGenericSummary(String value) {
-        return containsAny(value, "值得关注", "引发热议", "持续关注", "备受关注", "成为焦点", "意义重大", "释放信号");
+        return containsAny(value, "值得关注", "引发热议", "持续关注", "备受关注", "成为焦点", "意义重大", "释放信号",
+                "引关注", "受关注");
     }
 
     private static String modelHeadline(String value, String original) {
         String headline = cleanModelText(value);
-        if (headline.length() >= 10 && headline.length() <= 36 && relatedEnough(headline, original)) {
+        if (headline.length() >= 10 && headline.length() <= 36
+                && !isGenericSummary(headline) && relatedEnough(headline, original)) {
             return headline;
         }
         return compactTitle(original);
