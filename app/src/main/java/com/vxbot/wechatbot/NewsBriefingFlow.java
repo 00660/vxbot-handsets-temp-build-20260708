@@ -90,7 +90,13 @@ public final class NewsBriefingFlow {
     }
 
     private static List<Story> fetchCandidates() throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(5);
+        List<String> hotWords;
+        try {
+            hotWords = fetchBaiduHotWords(8);
+        } catch (Exception ignored) {
+            hotWords = new ArrayList<>();
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(8, 5 + hotWords.size()));
         try {
             List<Future<List<Story>>> futures = new ArrayList<>();
             futures.add(pool.submit(() -> fetchFeed("焦点", GOOGLE_RSS, 18)));
@@ -98,6 +104,16 @@ public final class NewsBriefingFlow {
             futures.add(pool.submit(() -> fetchFeed("财经", searchRss("财经 市场 公司"), 10)));
             futures.add(pool.submit(() -> fetchFeed("科技", searchRss("科技 AI 人工智能"), 10)));
             futures.add(pool.submit(() -> fetchFeed("体育", searchRss("体育 世界杯 比赛"), 8)));
+            for (String hotWord : hotWords) {
+                String category = classifyCategory(hotWord);
+                futures.add(pool.submit(() -> {
+                    List<Story> stories = fetchFeed(category, searchRss(hotWord), 1);
+                    for (Story story : stories) {
+                        story.hot = true;
+                    }
+                    return stories;
+                }));
+            }
 
             List<List<Story>> feeds = new ArrayList<>();
             Exception last = null;
@@ -173,6 +189,7 @@ public final class NewsBriefingFlow {
         StringBuilder out = new StringBuilder(8000);
         for (Story story : stories) {
             out.append('[').append(story.id).append(']')
+                    .append(story.hot ? "[百度热榜]" : "")
                     .append('[').append(story.category).append(']')
                     .append('[').append(story.source).append(']')
                     .append('[').append(story.time).append("] ")
@@ -210,12 +227,12 @@ public final class NewsBriefingFlow {
                 continue;
             }
             String summary = cleanModelText(item.optString("summary"));
-            if (summary.length() < 12) {
+            if (summary.length() < 12 || similarTitle(story.title, summary) || isGenericSummary(summary)) {
                 summary = fallbackSummary(story);
             }
             Card card = new Card();
             card.category = safeCategory(item.optString("category"), story.category);
-            card.title = story.title;
+            card.title = modelHeadline(item.optString("headline"), story.title);
             card.summary = trimTo(summary, 72);
             card.source = story.source;
             card.time = story.time;
@@ -261,7 +278,7 @@ public final class NewsBriefingFlow {
     private static Card toCard(Story story) {
         Card card = new Card();
         card.category = safeCategory(story.category, "焦点");
-        card.title = story.title;
+        card.title = compactTitle(story.title);
         card.summary = fallbackSummary(story);
         card.source = story.source;
         card.time = story.time;
@@ -269,10 +286,14 @@ public final class NewsBriefingFlow {
     }
 
     private static String fallbackSummary(Story story) {
+        String best = "";
         for (String related : story.related) {
-            if (!similarTitle(story.title, related)) {
-                return trimTo(related, 68);
+            if (!similarTitle(story.title, related) && related.length() > best.length()) {
+                best = related;
             }
+        }
+        if (!best.isEmpty()) {
+            return trimTo(best, 68);
         }
         return "事件仍在更新，先看事实进展，不拿热搜词硬凑结论。";
     }
@@ -322,7 +343,7 @@ public final class NewsBriefingFlow {
         paint.setColor(Color.rgb(92, 91, 86));
         paint.setTextSize(24f);
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
-        String footer = "数据源：Google News RSS · AI 仅做去重与事实压缩";
+        String footer = "数据源：百度热榜 + Google News RSS · AI 仅做去重与事实压缩";
         canvas.drawText(footer, 54, 1742, paint);
         String stamp = "更新 " + ZonedDateTime.now(CHINA_ZONE).format(DateTimeFormatter.ofPattern("HH:mm"));
         canvas.drawText(stamp, width - 54 - paint.measureText(stamp), 1742, paint);
@@ -417,6 +438,39 @@ public final class NewsBriefingFlow {
                 + URLEncoder.encode(query, "UTF-8");
     }
 
+    private static List<String> fetchBaiduHotWords(int limit) throws Exception {
+        JSONObject root = new JSONObject(get("https://top.baidu.com/api/board?platform=wise&tab=realtime", 10000));
+        JSONArray cards = root.optJSONObject("data") == null ? null : root.optJSONObject("data").optJSONArray("cards");
+        List<String> out = new ArrayList<>();
+        collectBaiduWords(cards, out, limit);
+        return out;
+    }
+
+    private static void collectBaiduWords(Object node, List<String> out, int limit) {
+        if (node == null || out.size() >= limit) {
+            return;
+        }
+        if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length() && out.size() < limit; i++) {
+                collectBaiduWords(array.opt(i), out, limit);
+            }
+            return;
+        }
+        if (!(node instanceof JSONObject)) {
+            return;
+        }
+        JSONObject object = (JSONObject) node;
+        String word = object.optString("word").trim();
+        if (!word.isEmpty() && !isLowValue(word) && !containsSimilarText(out, word)) {
+            out.add(word);
+        }
+        JSONArray content = object.optJSONArray("content");
+        if (content != null) {
+            collectBaiduWords(content, out, limit);
+        }
+    }
+
     private static String get(String url, int timeoutMs) throws Exception {
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(timeoutMs);
@@ -492,7 +546,9 @@ public final class NewsBriefingFlow {
         return containsAny(title,
                 "学习习近平", "总书记这样", "总书记心中", "总书记驻足", "新思想指引", "新征程",
                 "重要讲话心得", "贯彻重要讲话", "加快建设具有", "高质量发展新篇章", "绘就新图景",
-                "迈上新台阶", "释放新动能", "追光的你", "壹视界", "一见·", "圆满完成使命归航");
+                "迈上新台阶", "释放新动能", "追光的你", "壹视界", "一见·", "圆满完成使命归航",
+                "灾难表现遭", "心态崩了", "世界名画", "看傻了", "全网炸锅", "价值涌现",
+                "解码AI", "加速智能化跃迁", "数据赛道", "这些A股公司");
     }
 
     private static boolean containsAny(String text, String... terms) {
@@ -581,6 +637,61 @@ public final class NewsBriefingFlow {
                 .replaceAll("\\s+", " ").trim();
     }
 
+    private static boolean isGenericSummary(String value) {
+        return containsAny(value, "值得关注", "引发热议", "持续关注", "备受关注", "成为焦点", "意义重大", "释放信号");
+    }
+
+    private static String modelHeadline(String value, String original) {
+        String headline = cleanModelText(value);
+        if (headline.length() >= 10 && headline.length() <= 36 && relatedEnough(headline, original)) {
+            return headline;
+        }
+        return compactTitle(original);
+    }
+
+    private static boolean relatedEnough(String headline, String original) {
+        Set<String> left = bigrams(normalize(headline));
+        Set<String> right = bigrams(normalize(original));
+        int common = 0;
+        for (String gram : left) {
+            if (right.contains(gram)) {
+                common++;
+            }
+        }
+        return common >= 4;
+    }
+
+    private static String compactTitle(String value) {
+        String title = value == null ? "" : value.trim();
+        if (title.length() <= 34) {
+            return title;
+        }
+        int cut = -1;
+        for (char separator : new char[]{'，', '；', '：', '。', '！'}) {
+            int index = title.indexOf(separator);
+            if (index >= 16 && index <= 34 && (cut < 0 || index < cut)) {
+                cut = index;
+            }
+        }
+        return cut > 0 ? title.substring(0, cut) : trimTo(title, 34);
+    }
+
+    private static String classifyCategory(String title) {
+        if (containsAny(title, "世界杯", "球队", "比赛", "决赛", "半决赛", "晋级", "淘汰", "足球", "篮球", "网球", "球员")) {
+            return "体育";
+        }
+        if (containsAny(title, "AI", "人工智能", "科技", "芯片", "机器人", "手机", "互联网", "大模型")) {
+            return "科技";
+        }
+        if (containsAny(title, "股市", "A股", "财经", "油价", "金价", "公司", "银行", "基金", "消费", "经济")) {
+            return "财经";
+        }
+        if (containsAny(title, "美国", "法国", "英国", "俄罗斯", "乌克兰", "伊朗", "以色列", "特朗普", "马克龙", "国际")) {
+            return "国际";
+        }
+        return "社会";
+    }
+
     private static String safeCategory(String category, String fallback) {
         String value = category == null ? "" : category.trim();
         if (containsAny(value, "国际", "财经", "科技", "体育", "社会", "焦点")) {
@@ -613,6 +724,7 @@ public final class NewsBriefingFlow {
         String title;
         String source;
         String time;
+        boolean hot;
         List<String> related = new ArrayList<>();
     }
 

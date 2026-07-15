@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 198
-        versionName "0.1.198-news-briefing-image"
+        versionCode 199
+        versionName "0.1.199-news-briefing-quality"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
