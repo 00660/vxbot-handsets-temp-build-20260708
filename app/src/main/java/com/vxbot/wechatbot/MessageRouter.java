@@ -149,7 +149,7 @@ public final class MessageRouter {
                 || looksUncivil(command))) {
             return new Route(Kind.TROLL, "", extractRoastTarget(command), false, true);
         }
-        return new Route(Kind.TEXT, "普通群聊接话，短句，自然，不写长段说明。");
+        return new Route(Kind.TEXT, "普通群聊：以机器人本人第一人称直接接话，匹配群友语气，拒绝旁观者和客服腔。");
     }
 
     public static boolean isHighPriorityCommand(String text, BotConfig config) {

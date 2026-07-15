@@ -366,7 +366,7 @@ public final class BotConfig {
         happyDirectCwd = normalizeTextFallback(prefs.getString("happyDirectCwd", DEFAULT_HAPPY_DIRECT_CWD), DEFAULT_HAPPY_DIRECT_CWD);
         apiKey = normalizeApiKey(prefs.getString("apiKey", DEFAULT_API_KEY));
         model = prefs.getString("model", "gpt-5.5");
-        systemPrompt = prefs.getString("systemPrompt", "你是微信群里的机器人，回复短、自然、接上下文。");
+        systemPrompt = normalizeSystemPrompt(prefs.getString("systemPrompt", ""));
         personaPhotoPath = prefs.getString("personaPhotoPath", "");
         styleReferencePath = prefs.getString("styleReferencePath", "");
         imageEndpoint = normalizeImageEndpoint(prefs.getString("imageEndpoint", DEFAULT_IMAGE_ENDPOINT));
@@ -548,6 +548,15 @@ public final class BotConfig {
 
     private static int clampInt(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static String normalizeSystemPrompt(String value) {
+        String prompt = value == null ? "" : value.trim();
+        if ("你是微信群里的机器人，回复短、自然、接上下文。".equals(prompt)
+                || "你是微信群里的机器人，你叫慢一点你就是第一人称。请进入角色扮演。不要作为旁观者！".equals(prompt)) {
+            return "";
+        }
+        return prompt;
     }
 
     private static String normalizeChatEndpoint(String value) {

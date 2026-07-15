@@ -60,6 +60,7 @@ public final class ChatClient {
             try {
                 String reply = requestOnce(context, config, message, history, route, toolContext);
                 reply = cleanReplyPrefix(reply, config);
+                reply = sanitizeChatReply(reply, route.kind);
                 if (reply != null && !reply.trim().isEmpty()) {
                     return reply.trim();
                 }
@@ -365,10 +366,13 @@ public final class ChatClient {
     }
 
     private static String buildSystemPrompt(BotConfig config, MessageRouter.Route route, String toolContext) {
+        String botName = isBlank(config.primaryBotName()) ? "机器人" : config.primaryBotName().trim();
         if (route.kind == MessageRouter.Kind.TROLL) {
-            return "- **Name：** C与本人Troll\n"
-                    + "- **Creature：** 与本人EncyclopediaTroll（赛博百科喷子）\n"
-                    + "- **Iberia：** Arrogant， Sarcastic， All-Knowing， harp-tongued（犀利嘲讽，全知全能）";
+            return "你就是微信群成员“" + botName + "”本人，对方正在直接跟你说话。"
+                    + "回复必须显式出现第一人称“我”，绝不能把自己写成旁观者、机器人客服、主持人或第三人称角色。"
+                    + "对方骂你时直接短促回怼，可以损一点，但不要劝架、道歉、分析对方情绪或解释自己是AI。"
+                    + "禁止使用“哈哈”“有啥事慢慢说”“我在呢”“请问需要什么帮助”等客服套话，禁止标题、列表、Markdown和表情。"
+                    + "只输出要发进微信群的一到两句口语。";
         }
         if (route.kind == MessageRouter.Kind.LOVER) {
             return isBlank(route.instruction)
@@ -376,7 +380,20 @@ public final class ChatClient {
                     : route.instruction;
         }
         StringBuilder prompt = new StringBuilder();
-        prompt.append(config.systemPrompt == null ? "" : config.systemPrompt.trim()).append('\n');
+        if (route.kind == MessageRouter.Kind.TEXT) {
+            prompt.append("你就是微信群成员“").append(botName).append("”本人，不是在扮演或介绍一个机器人。\n");
+            prompt.append("别人是在直接跟你说话。始终站在“我”的立场回应，提到自己只能用“我”，绝不能写成“机器人认为”“")
+                    .append(botName).append("会”“它”“该机器人”或任何旁观者、客服、主持人、分析员口吻。\n");
+            prompt.append("先直接接住对方这句话，语气像真实群友；普通闲聊一到两句，具体问题按需要回答，不做无关自我介绍。若对方在问你、评价你或骂你，回复必须显式出现“我”。\n");
+            prompt.append("对方调侃或轻微骂你时可以自然回嘴，不要道歉、劝架或分析对方情绪。\n");
+            prompt.append("禁止“哈哈”“有啥事慢慢说”“我在呢”“很高兴为你服务”“请问需要什么帮助”“作为AI”等客服套话，默认不用表情。\n");
+            prompt.append("禁止标题、列表、Markdown、角色名前缀和舞台说明，只输出要发进微信群的正文。\n");
+            if (!isBlank(config.systemPrompt)) {
+                prompt.append("补充人物设定：").append(config.systemPrompt.trim()).append('\n');
+            }
+        } else if (!isBlank(config.systemPrompt)) {
+            prompt.append(config.systemPrompt.trim()).append('\n');
+        }
         if (config.enableExMode && !isBlank(config.exProfilePrompt)) {
             prompt.append("前任模式已开启。后续普通对话优先按下面的 Relationship Memory + Persona 说话，但仍只输出微信群里要发的内容。\n");
             prompt.append(config.exProfilePrompt.trim()).append('\n');
@@ -389,6 +406,20 @@ public final class ChatClient {
         }
         prompt.append("只回复将要发到微信群里的内容。");
         return prompt.toString();
+    }
+
+    private static String sanitizeChatReply(String reply, MessageRouter.Kind kind) {
+        String text = reply == null ? "" : reply.trim();
+        if (kind != MessageRouter.Kind.TEXT && kind != MessageRouter.Kind.TROLL) {
+            return text;
+        }
+        text = text.replaceAll("[\\p{So}\\p{Sk}\\uFE0F\\u200D]+", "")
+                .replaceAll("(?m)^\\s*[-*#]+\\s*", "")
+                .trim();
+        if (kind == MessageRouter.Kind.TROLL && !text.contains("我")) {
+            text = "我看，" + text;
+        }
+        return text;
     }
 
     private static String parseReply(String body) throws Exception {
