@@ -110,8 +110,13 @@ public final class SessionStore {
     }
 
     public synchronized void remember(WxMessage message, String role) {
+        remember(message, role, null);
+    }
+
+    public synchronized void remember(WxMessage message, String role, BotConfig config) {
         ArrayDeque<String> lines = histories.computeIfAbsent(message.sessionName, key -> new ArrayDeque<>());
-        lines.addLast(role + ":" + message.senderName + ":" + message.text);
+        String text = config == null ? message.text : MessageRouter.stripBotMention(message.text, config);
+        lines.addLast(role + ":" + message.senderName + ":" + text);
         while (lines.size() > MAX_LINES) {
             lines.removeFirst();
         }

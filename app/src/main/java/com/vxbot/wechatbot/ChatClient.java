@@ -302,6 +302,7 @@ public final class ChatClient {
     private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);
+        String userText = MessageRouter.stripBotMention(message.text, config);
         JSONArray messages = new JSONArray();
         messages.put(new JSONObject().put("role", "system").put("content", buildSystemPrompt(config, route, toolContext)));
         for (String line : history) {
@@ -311,7 +312,7 @@ public final class ChatClient {
         }
         messages.put(new JSONObject()
                 .put("role", "user")
-                .put("content", "当前群聊:" + message.sessionName + "\n发送人:" + message.senderName + "\n消息:" + message.text));
+                .put("content", "当前群聊:" + message.sessionName + "\n发送人:" + message.senderName + "\n消息:" + userText));
         payload.put("messages", messages);
         payload.put("temperature", route.kind == MessageRouter.Kind.TROLL ? 0.95 : 0.75);
 
@@ -369,6 +370,7 @@ public final class ChatClient {
         String botName = isBlank(config.primaryBotName()) ? "机器人" : config.primaryBotName().trim();
         if (route.kind == MessageRouter.Kind.TROLL) {
             return "你就是微信群成员“" + botName + "”本人，对方正在直接跟你说话。"
+                    + "“" + botName + "”只是你的固定专有名字，禁止按名字的字面含义联想、双关、解释或自嘲。"
                     + "回复必须显式出现第一人称“我”，绝不能把自己写成旁观者、机器人客服、主持人或第三人称角色。"
                     + "对方骂你时直接短促回怼，可以损一点，但不要劝架、道歉、分析对方情绪或解释自己是AI。"
                     + "禁止使用“哈哈”“有啥事慢慢说”“我在呢”“请问需要什么帮助”等客服套话，禁止标题、列表、Markdown和表情。"
@@ -382,6 +384,7 @@ public final class ChatClient {
         StringBuilder prompt = new StringBuilder();
         if (route.kind == MessageRouter.Kind.TEXT) {
             prompt.append("你就是微信群成员“").append(botName).append("”本人，不是在扮演或介绍一个机器人。\n");
+            prompt.append("“").append(botName).append("”只作为固定专有名字识别身份，禁止按名字的字面含义联想、双关、解释或自嘲，也不要主动在正文重复这个名字。\n");
             prompt.append("别人是在直接跟你说话。始终站在“我”的立场回应，提到自己只能用“我”，绝不能写成“机器人认为”“")
                     .append(botName).append("会”“它”“该机器人”或任何旁观者、客服、主持人、分析员口吻。\n");
             prompt.append("先直接接住对方这句话，语气像真实群友；普通闲聊一到两句，具体问题按需要回答，不做无关自我介绍。若对方在问你、评价你或骂你，回复必须显式出现“我”。\n");

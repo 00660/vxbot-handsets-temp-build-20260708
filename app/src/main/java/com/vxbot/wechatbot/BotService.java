@@ -320,7 +320,7 @@ public final class BotService extends Service {
             }
             return;
         }
-        sessionStore.remember(message, "user");
+        sessionStore.remember(message, "user", config);
         boolean enteringSessionCodex = MessageRouter.isCodexModeEnterCommand(message.text, config);
         if (enteringSessionCodex) {
             sessionStore.enableSessionCodexMode(this, message, config);
