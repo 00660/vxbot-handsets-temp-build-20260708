@@ -62,7 +62,7 @@ public final class ImageFlow {
             boolean coolStyle = looksCoolStyle(request);
             boolean selfie = revision && previous != null ? "persona_selfie".equals(previous.kind) : looksSelfie(request);
             boolean hasPersona = hasFile(config.selfieReferencePhotoPath());
-            boolean hasStyle = coolStyle && (hasFile(config.styleReferencePath) || hasRawCoolStyleReference(context));
+            boolean hasStyle = coolStyle && hasFile(config.styleReferencePath);
             List<String> imageRequests = buildImageRequestQueue(request, selfie, revision, incomingReference);
             if (imageRequests.size() > 1) {
                 BotLog.i(context, "image.batch.start", "自拍批量队列启动 count=" + imageRequests.size()
@@ -217,8 +217,10 @@ public final class ImageFlow {
             prompt.append("自拍人物方向：眼神像蜜妮跟对象见面时的样子，青涩、略带羞涩、脸红红、自然不好意思，日常自拍，不要强制全身照。\n");
             prompt.append(currentChinaSeasonOutfitRule()).append("\n");
             prompt.append(currentChinaTimeSceneRule()).append("\n");
-            prompt.append("人物参考图只锁定同一张脸、五官、发型气质和身份一致性；参考图里的衣服、毛衣纹理、针织材质、背景、姿势、手势、镜头角度都不要继承，除非当前请求明确要求。\n");
-            prompt.append("自拍表情和动作：表情要自然随机，可以是开心、害羞、微恼、困倦、酷一点、emo、偷笑、发呆、认真看镜头等；动作像临时自拍，不要照搬人物参考图、风格底图或上一张图。\n");
+            if (hasPersona) {
+                prompt.append("人物参考图只锁定同一张脸、五官、发型气质和身份一致性；参考图里的衣服、毛衣纹理、针织材质、背景、姿势、手势、镜头角度都不要继承，除非当前请求明确要求。\n");
+            }
+            prompt.append("自拍表情和动作：表情要自然随机，可以是开心、害羞、微恼、困倦、酷一点、emo、偷笑、发呆、认真看镜头等；动作像临时自拍，不能复制固定姿势。\n");
             prompt.append(random(SELFIE_PERSONA_LINES)).append("\n");
             prompt.append(random(SELFIE_STYLE_LINES)).append("\n");
             prompt.append(selfieSceneRule()).append("\n");
@@ -257,19 +259,13 @@ public final class ImageFlow {
             if (style != null) {
                 refs.add(style);
                 BotLog.i(context, "image.cool.reference", "清凉/比基尼请求已附带用户上传风格底图 bytes=" + style.bytes.length);
-            } else {
-                byte[] coolRef = loadCoolStyleReference(context);
-                if (coolRef != null && coolRef.length > 0) {
-                    refs.add(new ReferenceImage("cool_style_reference.png", coolRef));
-                    BotLog.i(context, "image.cool.reference", "清凉/比基尼请求已附带 APK 内置参考图 bytes=" + coolRef.length);
-                }
             }
         }
         if (!refs.isEmpty()) {
             return requestEditedImage(context, config, prompt, refs);
         }
         if (coolStyle) {
-            BotLog.w(context, "image.cool.ref.missing", "清凉/比基尼请求未找到上传风格底图或 APK raw/cool_style_reference，降级文生图");
+            BotLog.i(context, "image.cool.ref.missing", "清凉/比基尼请求未上传风格底图，按纯文生图处理");
         }
         return requestGeneratedImage(config, prompt);
     }
@@ -379,28 +375,6 @@ public final class ImageFlow {
         out.write(("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n").getBytes(StandardCharsets.UTF_8));
         out.write((value == null ? "" : value).getBytes(StandardCharsets.UTF_8));
         out.write("\r\n".getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static byte[] loadCoolStyleReference(Context context) {
-        int id = context.getResources().getIdentifier("cool_style_reference", "raw", context.getPackageName());
-        if (id == 0) {
-            return null;
-        }
-        try (InputStream in = context.getResources().openRawResource(id)) {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) >= 0) {
-                out.write(buf, 0, n);
-            }
-            return out.toByteArray();
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static boolean hasRawCoolStyleReference(Context context) {
-        return context.getResources().getIdentifier("cool_style_reference", "raw", context.getPackageName()) != 0;
     }
 
     private static ReferenceImage loadFileReference(String path, String filename) throws Exception {
@@ -2501,7 +2475,7 @@ public final class ImageFlow {
 
     private static final String[] SELFIE_STYLE_LINES = {
             "本次自拍变化约束：换一套与当前季节匹配的衣服和材质，避免连续使用同一种布料、同一种领口和同一种颜色。",
-            "本次自拍变化约束：穿搭、发丝状态、表情和手部动作都要重新设计，不能像参考图换脸或复制姿势。",
+            "本次自拍变化约束：穿搭、发丝状态、表情和手部动作都要重新设计，不能像换脸模板或复制固定姿势。",
             "本次自拍变化约束：镜头距离、手臂位置、头部角度和视线方向要随机变化，像真实手机临时拍出来。",
             "本次自拍变化约束：服装材质从季节适配材质里随机选，不要默认毛衣、针织开衫或厚实绒感。",
             "本次自拍变化约束：可以自然微笑、抿嘴害羞、轻轻皱眉、歪头、托腮、比小手势、侧身回头，但动作必须自然。"
@@ -2540,15 +2514,15 @@ public final class ImageFlow {
         Calendar calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"), Locale.CHINA);
         int month = calendar.get(Calendar.MONTH) + 1;
         if (month >= 3 && month <= 5) {
-            return "当前中国季节按春季处理：优先轻薄衬衫、薄开衫、卫衣、牛仔外套、棉质上衣、长裙或休闲裤等春季材质；不要套用人物参考图原衣服。";
+            return "当前中国季节按春季处理：优先轻薄衬衫、薄开衫、卫衣、牛仔外套、棉质上衣、长裙或休闲裤等春季材质；穿搭要自然重新设计。";
         }
         if (month >= 6 && month <= 8) {
             return "当前中国季节按夏季处理：优先短袖、吊带、衬衫裙、薄棉、棉麻、雪纺、真丝感、轻薄运动面料等清爽材质；普通自拍不要毛衣、针织、厚外套、绒感或冬季穿搭。";
         }
         if (month >= 9 && month <= 11) {
-            return "当前中国季节按秋季处理：优先薄风衣、衬衫、针织马甲、薄毛衫、牛仔外套、休闲夹克等秋季层次；可以有轻薄针织，但不要照搬参考图毛衣纹理和颜色。";
+            return "当前中国季节按秋季处理：优先薄风衣、衬衫、针织马甲、薄毛衫、牛仔外套、休闲夹克等秋季层次；可以有轻薄针织，但款式和颜色要自然变化。";
         }
-        return "当前中国季节按冬季处理：可以选择毛衣、针织、围巾、羽绒服、呢大衣或厚外套等冬季材质，但仍必须换款式、颜色、姿势和场景，不要照搬人物参考图。";
+        return "当前中国季节按冬季处理：可以选择毛衣、针织、围巾、羽绒服、呢大衣或厚外套等冬季材质，但款式、颜色、姿势和场景必须自然变化。";
     }
 
     private static String currentChinaTimeSceneRule() {
