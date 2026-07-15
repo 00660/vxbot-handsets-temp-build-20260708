@@ -63,7 +63,8 @@ public final class SessionStore {
         }
         boolean mentioned = config.isBotMentioned(message.text);
         boolean reportCommand = MessageRouter.isReportCommand(message.text);
-        boolean personaCommand = MessageRouter.isPersonaCommand(message.text);
+        boolean personaCommand = MessageRouter.isProfilePersonaCommand(message.text)
+                || MessageRouter.isPersonaCommand(message.text);
         if (mentioned || reportCommand || personaCommand) {
             if (canLockActiveSender(message, config)) {
                 activeSenders.put(session, message.senderName);

@@ -24,6 +24,7 @@ public final class MessageRouter {
         TTS,
         STICKER,
         REPORT,
+        PROFILE_PERSONA,
         PERSONA,
         SHUTUP,
         MANUAL,
@@ -84,6 +85,12 @@ public final class MessageRouter {
         }
         if (isReportCommand(command)) {
             return new Route(Kind.REPORT, "本地随机报道回复。");
+        }
+        if (isProfilePersonaCommand(command)) {
+            String target = extractProfilePersonaTarget(command);
+            return new Route(Kind.PROFILE_PERSONA,
+                    "人物画像：打开群成员资料页，结合头像、昵称、地区和个性签名分析人物风格。",
+                    target, false, true);
         }
         if (isPersonaCommand(command)) {
             return new Route(Kind.PERSONA, "群成员人物画像：按群、成员、日期统计发言，上游分析话痨排行、性格画像、代表发言和关键词重点。");
@@ -168,7 +175,7 @@ public final class MessageRouter {
         if (isReportCommand(command)) {
             return true;
         }
-        if (isPersonaCommand(command)) {
+        if (isProfilePersonaCommand(command) || isPersonaCommand(command)) {
             return true;
         }
         if (isCodexModeEnterCommand(command)) {
@@ -243,7 +250,43 @@ public final class MessageRouter {
         if (value.isEmpty()) {
             return false;
         }
-        return value.matches(".*(人物画像|群员画像|成员画像|群友画像|群画像|画像分析|话痨排行|活跃排行|谁是话痨|谁最话痨|谁话最多|群聊总结|昨日总结|今日总结|昨天总结|今天总结|昨天干了啥|昨天说了啥|昨日重点|今日重点|重点是啥).*");
+        return value.matches(".*(群画像|画像分析|话痨排行|活跃排行|谁是话痨|谁最话痨|谁话最多|群聊总结|昨日总结|今日总结|昨天总结|今天总结|昨天干了啥|昨天说了啥|昨日重点|今日重点|重点是啥).*");
+    }
+
+    public static boolean isProfilePersonaCommand(String text) {
+        String value = compact(text);
+        return value.contains("人物画像")
+                || value.contains("群员画像")
+                || value.contains("成员画像")
+                || value.contains("群友画像")
+                || value.contains("头像画像")
+                || value.contains("头像分析")
+                || value.contains("签名画像");
+    }
+
+    public static String extractProfilePersonaTarget(String text) {
+        String value = cleanCommand(text);
+        String[] markers = {"人物画像", "群员画像", "成员画像", "群友画像", "头像画像", "头像分析", "签名画像"};
+        for (String marker : markers) {
+            int index = value.indexOf(marker);
+            if (index < 0) {
+                continue;
+            }
+            String target = value.substring(index + marker.length()).trim();
+            String[] fillers = {"一下", "下", "分析", "看看", "看下", "看看这个人"};
+            boolean changed = true;
+            while (changed && !target.isEmpty()) {
+                changed = false;
+                for (String filler : fillers) {
+                    if (target.startsWith(filler)) {
+                        target = target.substring(filler.length()).trim();
+                        changed = true;
+                    }
+                }
+            }
+            return sanitizeTarget(target);
+        }
+        return "";
     }
 
     public static boolean isCodexModeEnterCommand(String text, BotConfig config) {

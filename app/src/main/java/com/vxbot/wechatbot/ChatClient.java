@@ -222,6 +222,41 @@ public final class ChatClient {
         return reply.trim();
     }
 
+    public String requestProfilePersona(Context context, BotConfig config, WxMessage message,
+                                        String targetName, String profileText, String imageDataUrl) throws Exception {
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置");
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("model", config.model);
+        JSONArray messages = new JSONArray();
+        messages.put(new JSONObject().put("role", "system").put("content",
+                "你是微信人物画像分析助手。根据用户公开展示的头像、昵称、地区和个性签名，"
+                        + "输出可直接发到微信群里的中文人物画像。必须包含：视觉风格、签名表达、"
+                        + "可能的性格特征、社交表达倾向、兴趣线索、情绪基调和判断置信度。"
+                        + "只做有依据的倾向性描述，不推断疾病、政治、宗教、性取向、收入等敏感属性，"
+                        + "资料不足就明确说明。不要输出内部推理，不要输出 JSON。"));
+        JSONArray content = new JSONArray();
+        content.put(new JSONObject().put("type", "text").put("text",
+                "目标人物:" + targetName
+                        + "\n资料页 OCR:" + profileText
+                        + "\n请结合截图中的头像和上述公开文字生成简洁人物画像。"));
+        content.put(new JSONObject()
+                .put("type", "image_url")
+                .put("image_url", new JSONObject().put("url", imageDataUrl)));
+        messages.put(new JSONObject().put("role", "user").put("content", content));
+        payload.put("messages", messages);
+        payload.put("temperature", 0.45);
+        BotLog.i(context, "profile.persona.request", "发送头像签名人物画像请求 group=" + message.sessionName
+                + " target=" + targetName
+                + " ocrChars=" + (profileText == null ? 0 : profileText.length()));
+        String reply = cleanReplyPrefix(postChat(config, payload), config);
+        if (reply == null || reply.trim().isEmpty()) {
+            throw new IllegalStateException("头像签名人物画像上游返回空内容");
+        }
+        return reply.trim();
+    }
+
     private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);

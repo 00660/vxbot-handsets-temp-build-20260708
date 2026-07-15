@@ -78,6 +78,11 @@ public final class HsClient {
         return command("tap x=" + x + " y=" + y);
     }
 
+    public String swipe(int x1, int y1, int x2, int y2, int durationMs) throws Exception {
+        return command("swipe x1=" + x1 + " y1=" + y1 + " x2=" + x2 + " y2=" + y2
+                + " dur=" + durationMs);
+    }
+
     public String down(int x, int y) throws Exception {
         return command("down x=" + x + " y=" + y);
     }

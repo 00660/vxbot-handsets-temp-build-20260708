@@ -299,7 +299,8 @@ public final class BotService extends Service {
             BotLog.w(this, "notice.skip.whitelist", "群不在白名单 " + message.sessionName);
             return;
         }
-        if (!MessageRouter.isPersonaCommand(message.text)) {
+        if (!MessageRouter.isProfilePersonaCommand(message.text)
+                && !MessageRouter.isPersonaCommand(message.text)) {
             personaStore.remember(this, message);
         }
         if (!sessionStore.shouldHandle(this, message, config)) {
@@ -504,6 +505,9 @@ public final class BotService extends Service {
                 if (route.kind == MessageRouter.Kind.ANALYSIS) {
                     return "__VISION_FLOW__";
                 }
+                if (route.kind == MessageRouter.Kind.PROFILE_PERSONA) {
+                    return "__PROFILE_PERSONA_FLOW__";
+                }
                 if (route.kind == MessageRouter.Kind.WOOL) {
                     return "__WOOL_FLOW__";
                 }
@@ -589,6 +593,9 @@ public final class BotService extends Service {
             }
             if ("__VISION_FLOW__".equals(reply)) {
                 reply = new ImageFlow().analyzeCurrentScreen(this, config, message, history);
+            }
+            if ("__PROFILE_PERSONA_FLOW__".equals(reply)) {
+                reply = new WechatProfileFlow().analyze(this, config, message, route.targetName);
             }
             if ("__WOOL_FLOW__".equals(reply)) {
                 boolean ok = new WoolHotFlow().handle(this, config, message, driver);
@@ -734,7 +741,7 @@ public final class BotService extends Service {
                 + "1. 聊天：@" + name + " 后面直接说内容。\n"
                 + "2. 图片：自拍、比基尼、换个场景、分析图片、生成表情包。\n"
                 + "3. 工具：天气、股票/基金/BTC/黄金克价、新闻热点、赛事比分/赛事分析、来点羊毛、短视频/图集链接解析。\n"
-                + "4. 画像：人物画像、昨日总结、谁是话痨、昨天说了啥。\n"
+                + "4. 画像：人物画像（分析发送人的头像和签名）、人物画像 名字、昨日总结、谁是话痨。\n"
                 + "5. 模式：进入 Codex 模式、退出 Codex 模式、撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
                 + "6. 语音：发语音 文字；机器人请报道可测在线。\n"
                 + "7. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
@@ -786,7 +793,8 @@ public final class BotService extends Service {
                 || "__WOOL_FLOW__".equals(reply)
                 || "__VIDEO_FLOW__".equals(reply)
                 || "__STICKER_FLOW__".equals(reply)
-                || "__TTS_FLOW__".equals(reply);
+                || "__TTS_FLOW__".equals(reply)
+                || "__PROFILE_PERSONA_FLOW__".equals(reply);
     }
 
     private boolean shouldSkipActionForPause(String action) {
