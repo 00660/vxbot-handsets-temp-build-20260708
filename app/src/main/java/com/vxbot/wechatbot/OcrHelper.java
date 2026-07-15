@@ -393,6 +393,9 @@ public final class OcrHelper {
     private static Rect findTopRightSearchIconBlock(Bitmap bitmap) {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
+        int minBlockSize = Math.max(8, Math.round(width * 0.022f));
+        int maxBlockSize = Math.max(minBlockSize, Math.round(width * 0.067f));
+        int minDarkPixels = Math.max(16, Math.round(width * height * 0.000032f));
         int minX = clamp(Math.round(width * 0.72f), 0, width - 1);
         int maxX = clamp(width - Math.round(width * 0.08f), minX, width - 1);
         int minY = clamp(Math.round(height * 0.045f), 0, height - 1);
@@ -444,9 +447,9 @@ public final class OcrHelper {
                 Rect rect = new Rect(minX + minGx, minY + minGy, minX + maxGx + 1, minY + maxGy + 1);
                 int blockWidth = rect.width();
                 int blockHeight = rect.height();
-                if (count >= 35
-                        && blockWidth >= 16 && blockWidth <= 48
-                        && blockHeight >= 16 && blockHeight <= 48
+                if (count >= minDarkPixels
+                        && blockWidth >= minBlockSize && blockWidth <= maxBlockSize
+                        && blockHeight >= minBlockSize && blockHeight <= maxBlockSize
                         && rect.centerX() >= Math.round(width * 0.78f)
                         && rect.centerX() <= Math.round(width * 0.91f)) {
                     int score = count * 10 - Math.abs(rect.width() - rect.height()) * 3;
@@ -544,26 +547,26 @@ public final class OcrHelper {
         Sample inputStrip = countColorSamples(
                 bitmap,
                 Math.round(w * 0.14f),
-                h - 185,
+                Math.round(h * 0.880f),
                 Math.round(w * 0.74f),
-                h - 95,
-                18,
+                Math.round(h * 0.940f),
+                Math.max(2, Math.round(w * 0.025f)),
                 true);
         Sample leftVoice = countColorSamples(
                 bitmap,
                 Math.round(w * 0.02f),
-                h - 190,
+                Math.round(h * 0.877f),
                 Math.round(w * 0.10f),
-                h - 95,
-                8,
+                Math.round(h * 0.940f),
+                Math.max(2, Math.round(w * 0.011f)),
                 false);
         Sample rightTools = countColorSamples(
                 bitmap,
                 Math.round(w * 0.78f),
-                h - 190,
+                Math.round(h * 0.877f),
                 Math.round(w * 0.98f),
-                h - 95,
-                8,
+                Math.round(h * 0.940f),
+                Math.max(2, Math.round(w * 0.011f)),
                 false);
         int score = 0;
         if (inputStrip.ratio >= 0.65f) {
@@ -646,7 +649,7 @@ public final class OcrHelper {
             int left = voice == null ? Math.round(width * 0.12f) : voice.rect.right + Math.round(width * 0.025f);
             int rightEdge = right == null ? Math.round(width * 0.78f) : right.rect.left - Math.round(width * 0.018f);
             int centerY = voice != null ? voice.rect.centerY() : right.rect.centerY();
-            int halfHeight = Math.max(32, Math.round(height * 0.028f));
+            int halfHeight = Math.max(Math.round(width * 0.035f), Math.round(height * 0.028f));
             int top = centerY - halfHeight;
             int bottom = centerY + halfHeight;
             if (rightEdge - left >= Math.round(width * 0.25f)) {
@@ -754,7 +757,7 @@ public final class OcrHelper {
         int height = bitmap.getHeight();
         int stepX = Math.max(2, width / 180);
         int stepY = Math.max(2, height / 360);
-        int minRun = Math.max(40, Math.round(width * 0.18f));
+        int minRun = Math.round(width * 0.18f);
         int maxRun = Math.round(width * 0.92f);
         int edgeGap = stepX * 3;
         Rect best = null;
@@ -803,7 +806,7 @@ public final class OcrHelper {
     }
 
     private static Rect inputRunRect(int runStart, int runEnd, int y, int stepY) {
-        int halfHeight = Math.max(18, stepY * 4);
+        int halfHeight = stepY * 5;
         return new Rect(runStart, y - halfHeight, runEnd, y + halfHeight);
     }
 
@@ -892,11 +895,11 @@ public final class OcrHelper {
     private static Rect findGreenSendBlock(Bitmap bitmap) {
         int width = bitmap.getWidth();
         int height = bitmap.getHeight();
-        int step = 4;
+        int step = Math.max(2, Math.round(width * 0.0056f));
         int minX = Math.round(width * 0.72f);
         int maxX = width - 1;
         int minY = Math.round(height * 0.45f);
-        int maxY = Math.max(minY, height - 70);
+        int maxY = Math.max(minY, Math.round(height * 0.955f));
         int gridW = Math.max(1, ((maxX - minX) / step) + 1);
         int gridH = Math.max(1, ((maxY - minY) / step) + 1);
         boolean[] mask = new boolean[gridW * gridH];
@@ -949,9 +952,11 @@ public final class OcrHelper {
                 int blockWidth = rect.width();
                 int blockHeight = rect.height();
                 if (count >= 18
-                        && blockWidth >= 36 && blockWidth <= 140
-                        && blockHeight >= 24 && blockHeight <= 90
-                        && rect.centerX() >= width - 120
+                        && blockWidth >= Math.round(width * 0.050f)
+                        && blockWidth <= Math.round(width * 0.195f)
+                        && blockHeight >= Math.round(width * 0.033f)
+                        && blockHeight <= Math.round(width * 0.125f)
+                        && rect.centerX() >= Math.round(width * 0.833f)
                         && (best == null || rect.centerX() > best.centerX()
                         || (rect.centerX() == best.centerX() && rect.centerY() > best.centerY())
                         || (rect.centerX() == best.centerX() && rect.centerY() == best.centerY() && count > bestSamples))) {
@@ -1129,10 +1134,10 @@ public final class OcrHelper {
         int centerY = input.centerY();
         int right = Math.max(Math.round(width * 0.07f), input.left - Math.round(width * 0.012f));
         int left = Math.max(0, Math.round(width * 0.004f));
-        right = clamp(right, left + 24, Math.round(width * 0.22f));
-        int halfHeight = Math.max(34, Math.round(height * 0.035f));
+        right = clamp(right, left + Math.max(12, Math.round(width * 0.033f)), Math.round(width * 0.22f));
+        int halfHeight = Math.max(Math.round(width * 0.047f), Math.round(height * 0.035f));
         int top = clamp(centerY - halfHeight, 0, height - 2);
-        int bottom = clamp(centerY + halfHeight, top + 16, height - 1);
+        int bottom = clamp(centerY + halfHeight, top + Math.max(8, Math.round(width * 0.022f)), height - 1);
         Rect region = detected == null
                 ? new Rect(left, top, right, bottom)
                 : expandRect(detected, Math.round(width * 0.018f), Math.round(height * 0.018f), width, height);
@@ -1166,8 +1171,9 @@ public final class OcrHelper {
         }
         int keyboardScore = denseCols + Math.max(0, denseCols - denseRows) * 2;
         int voiceScore = denseRows + Math.max(0, denseRows - denseCols) * 2;
-        boolean keyboardLikely = dark >= 80 && keyboardScore >= voiceScore + 6;
-        boolean voiceLikely = dark >= 80 && voiceScore >= keyboardScore + 6;
+        int minDarkPixels = Math.max(30, Math.round(width * height * 0.000072f));
+        boolean keyboardLikely = dark >= minDarkPixels && keyboardScore >= voiceScore + 6;
+        boolean voiceLikely = dark >= minDarkPixels && voiceScore >= keyboardScore + 6;
         return new IconShapeFeature(region, keyboardScore, voiceScore, keyboardLikely, voiceLikely);
     }
 
