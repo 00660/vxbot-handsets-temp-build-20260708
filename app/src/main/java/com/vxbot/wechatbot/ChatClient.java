@@ -13,6 +13,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class ChatClient {
     public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route) throws Exception {
@@ -303,8 +306,16 @@ public final class ChatClient {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);
         String userText = MessageRouter.stripBotMention(message.text, config);
+        String effectiveToolContext = toolContext;
+        if (route.kind == MessageRouter.Kind.TEXT
+                && isBlank(effectiveToolContext)
+                && shouldAutoWebSearch(userText)) {
+            effectiveToolContext = RealtimeTools.webSearch(context, userText);
+            BotLog.i(context, "chat.web_search.auto", "普通聊天自动搜索 query=" + userText
+                    + " success=" + !effectiveToolContext.startsWith("实时工具失败："));
+        }
         JSONArray messages = new JSONArray();
-        messages.put(new JSONObject().put("role", "system").put("content", buildSystemPrompt(config, route, toolContext)));
+        messages.put(new JSONObject().put("role", "system").put("content", buildSystemPrompt(config, route, effectiveToolContext)));
         for (String line : history) {
             messages.put(new JSONObject()
                     .put("role", line.startsWith("bot:") ? "assistant" : "user")
@@ -318,8 +329,72 @@ public final class ChatClient {
 
         BotLog.i(context, "chat.request", "发送文字请求 mode=" + route.kind
                 + " bytes=" + payload.toString().getBytes(StandardCharsets.UTF_8).length
-                + " tool=" + (!isBlank(toolContext)));
+                + " tool=" + (!isBlank(effectiveToolContext)));
+        String reply = postChat(config, payload);
+        if (route.kind != MessageRouter.Kind.TEXT || !isBlank(effectiveToolContext)) {
+            return reply;
+        }
+        String searchQuery = extractWebSearchQuery(reply);
+        if (searchQuery.isEmpty()) {
+            return reply;
+        }
+        String searchedContext = RealtimeTools.webSearch(context, searchQuery);
+        BotLog.i(context, "chat.web_search.requested", "上游请求搜索 query=" + searchQuery
+                + " success=" + !searchedContext.startsWith("实时工具失败："));
+        messages.put(0, new JSONObject().put("role", "system")
+                .put("content", buildSystemPrompt(config, route, searchedContext)));
+        payload.put("messages", messages);
         return postChat(config, payload);
+    }
+
+    private static boolean shouldAutoWebSearch(String text) {
+        String value = text == null ? "" : text.replace(" ", "").trim();
+        if (value.length() < 4) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (containsAny(lower, "搜索", "搜一下", "搜搜", "查一下", "查查", "查询", "网上",
+                "最新", "实时", "当前", "目前", "今天", "昨天", "最近", "刚刚", "新闻",
+                "热搜", "价格", "行情", "汇率", "赛果", "发布了吗", "上线了吗", "更新了吗",
+                "政策", "规定", "真假", "出处")) {
+            return true;
+        }
+        if (startsWithAny(lower, "你为什么", "你怎么", "你是不是", "你能不能", "你会不会",
+                "我为什么", "我怎么", "我是不是", "我能不能", "我该不该", "咱们")) {
+            return false;
+        }
+        return containsAny(lower, "什么是", "是什么", "谁是", "哪个国家", "哪些", "哪里",
+                "哪一年", "什么时候", "有多少", "怎么回事", "什么原因", "原理", "区别",
+                "是否存在", "有没有发生", "是真的吗", "是真的假的", "如何实现", "怎么实现",
+                "为什么会", "为何会", "谁发明", "谁提出", "属于什么", "意味着什么");
+    }
+
+    private static String extractWebSearchQuery(String reply) {
+        String value = reply == null ? "" : reply.trim();
+        Matcher marker = Pattern.compile("(?is)\\[\\[?WEB_SEARCH[:：]\\s*(.{2,180}?)\\]\\]?").matcher(value);
+        if (marker.find()) {
+            return marker.group(1).trim();
+        }
+        Matcher pseudo = Pattern.compile("(?is)^\\s*(?:web_)?search\\(\\s*[\"'](.{2,180}?)[\"']\\s*\\)").matcher(value);
+        return pseudo.find() ? pseudo.group(1).trim() : "";
+    }
+
+    private static boolean containsAny(String text, String... terms) {
+        for (String term : terms) {
+            if (text.contains(term.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean startsWithAny(String text, String... terms) {
+        for (String term : terms) {
+            if (text.startsWith(term.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String requestVisionOnce(BotConfig config, WxMessage message, List<String> history, String imageDataUrl) throws Exception {
@@ -391,6 +466,9 @@ public final class ChatClient {
             prompt.append("对方调侃或轻微骂你时可以自然回嘴，不要道歉、劝架或分析对方情绪。\n");
             prompt.append("禁止“哈哈”“有啥事慢慢说”“我在呢”“很高兴为你服务”“请问需要什么帮助”“作为AI”等客服套话，默认不用表情。\n");
             prompt.append("禁止标题、列表、Markdown、角色名前缀和舞台说明，只输出要发进微信群的正文。\n");
+            if (isBlank(toolContext)) {
+                prompt.append("你可以调用网页搜索工具。遇到实时信息、外部可核实事实、陌生名称，或你无法确认的内容时，禁止泛泛猜测；本轮只输出一行 [[WEB_SEARCH:适合搜索的查询词]]，不要同时回答。\n");
+            }
             if (!isBlank(config.systemPrompt)) {
                 prompt.append("补充人物设定：").append(config.systemPrompt.trim()).append('\n');
             }
@@ -405,7 +483,7 @@ public final class ChatClient {
         prompt.append(route.instruction).append('\n');
         if (!isBlank(toolContext)) {
             prompt.append("实时工具结果：\n").append(toolContext).append('\n');
-            prompt.append("回答必须基于实时工具结果，不要编造没有查到的数据。\n");
+            prompt.append("回答必须基于实时工具结果，给出具体事实；多条结果冲突时明确说法差异，不要编造没有查到的数据，也不要输出搜索工具调用格式。\n");
         }
         prompt.append("只回复将要发到微信群里的内容。");
         return prompt.toString();

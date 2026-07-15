@@ -53,6 +53,152 @@ public final class RealtimeTools {
         }
     }
 
+    public static String webSearch(Context context, String query) {
+        String value = cleanWebQuery(query);
+        if (value.isEmpty()) {
+            return "实时工具失败：搜索词为空";
+        }
+        try {
+            StringBuilder out = new StringBuilder("网页搜索工具：").append(value);
+            int resultCount = appendBingWebResults(out, value, 6);
+            if (looksTimeSensitiveQuery(value)) {
+                resultCount += appendGoogleNewsResults(out, value, 4);
+            }
+            if (resultCount == 0) {
+                resultCount += appendWikipediaResults(out, value, 4);
+            }
+            if (resultCount == 0) {
+                return "实时工具失败：没有找到与“" + value + "”相关的可靠结果";
+            }
+            BotLog.i(context, "tool.web_search.done", "网页搜索完成 query=" + value
+                    + " results=" + resultCount
+                    + " chars=" + out.length());
+            return out.toString();
+        } catch (Exception e) {
+            BotLog.w(context, "tool.web_search.fail", "网页搜索失败 query=" + value
+                    + " error=" + e.getMessage());
+            return "实时工具失败：" + e.getMessage();
+        }
+    }
+
+    private static int appendBingWebResults(StringBuilder out, String query, int limit) {
+        try {
+            String markdown = getUtf8("https://r.jina.ai/http://www.bing.com/search?q=" + enc(query), 15000);
+            Matcher matcher = Pattern.compile(
+                    "(?ms)^\\d+\\.\\s+##\\s+\\[(.+?)\\]\\((https?://[^\\n]+)\\)\\s*\\n\\n(.*?)(?=^\\d+\\.\\s+##\\s+\\[|\\z)")
+                    .matcher(markdown);
+            int count = 0;
+            while (matcher.find() && count < limit) {
+                String title = cleanMarkdownText(matcher.group(1));
+                String snippet = cleanMarkdownText(matcher.group(3));
+                if (title.isEmpty() || snippet.isEmpty()) {
+                    continue;
+                }
+                out.append("\n").append(++count).append(". ").append(title);
+                out.append("\n摘要：").append(limitText(snippet, 360));
+            }
+            return count;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static int appendGoogleNewsResults(StringBuilder out, String query, int limit) {
+        try {
+            String rss = getUtf8("https://news.google.com/rss/search?hl=zh-CN&gl=CN&ceid=CN:zh-Hans&q="
+                    + enc(query), 12000);
+            Matcher item = Pattern.compile("<item>(.*?)</item>", Pattern.DOTALL).matcher(rss);
+            int count = 0;
+            while (item.find() && count < limit) {
+                String block = item.group(1);
+                String title = xmlText(block, "title").replaceAll(" - .*$", "").trim();
+                String source = xmlText(block, "source");
+                String date = xmlText(block, "pubDate");
+                if (title.isEmpty()) {
+                    continue;
+                }
+                out.append("\n新闻").append(++count).append(". ").append(title);
+                if (!source.isEmpty()) {
+                    out.append(" / ").append(source);
+                }
+                if (!date.isEmpty()) {
+                    out.append(" / ").append(date);
+                }
+            }
+            return count;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static int appendWikipediaResults(StringBuilder out, String query, int limit) {
+        try {
+            JSONObject data = new JSONObject(getUtf8(
+                    "https://zh.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit="
+                            + limit + "&srsearch=" + enc(query), 12000));
+            JSONObject result = data.optJSONObject("query");
+            JSONArray rows = result == null ? null : result.optJSONArray("search");
+            if (rows == null) {
+                return 0;
+            }
+            int count = 0;
+            for (int i = 0; i < rows.length() && count < limit; i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) {
+                    continue;
+                }
+                String title = cleanMarkdownText(row.optString("title", ""));
+                String snippet = cleanMarkdownText(row.optString("snippet", ""));
+                if (title.isEmpty() || snippet.isEmpty()) {
+                    continue;
+                }
+                out.append("\n百科").append(++count).append(". ").append(title)
+                        .append("：").append(limitText(snippet, 300));
+            }
+            return count;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private static String cleanWebQuery(String query) {
+        String value = clean(query)
+                .replaceAll("(?i)\\[\\[?WEB_SEARCH[:：]", "")
+                .replaceAll("\\s*\\]\\]?$", "")
+                .replaceAll("(?i)^\\s*(?:请|麻烦)?(?:帮我)?(?:搜索|搜一下|查一下|查查|查询)\\s*", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return value.length() > 180 ? value.substring(0, 180) : value;
+    }
+
+    private static boolean looksTimeSensitiveQuery(String query) {
+        return matchesAny(query, "今天", "昨天", "现在", "当前", "目前", "最新", "最近", "刚刚",
+                "实时", "新闻", "热搜", "价格", "行情", "汇率", "天气", "赛果", "发布", "上线",
+                "更新", "政策", "规定", "2025", "2026");
+    }
+
+    private static String cleanMarkdownText(String text) {
+        String value = text == null ? "" : text;
+        value = value.replaceAll("<[^>]+>", " ")
+                .replaceAll("!\\[[^]]*]\\([^)]*\\)", " ")
+                .replaceAll("\\[([^]]+)]\\([^)]*\\)", "$1")
+                .replace("**", "")
+                .replace("__", "")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return value;
+    }
+
+    private static String limitText(String value, int maxChars) {
+        String text = value == null ? "" : value.trim();
+        return text.length() <= maxChars ? text : text.substring(0, maxChars) + "…";
+    }
+
     private static String weather(String text) throws Exception {
         String city = extractCity(text);
         JSONObject geo = new JSONObject(getUtf8("https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&format=json&name="
