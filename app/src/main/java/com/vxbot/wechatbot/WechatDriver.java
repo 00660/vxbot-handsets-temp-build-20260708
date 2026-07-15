@@ -354,8 +354,10 @@ public final class WechatDriver {
 
     private boolean tapInputModeToggle(Context context, String target, String reason,
                                        OcrHelper.InputModeFeature state, boolean retry) {
-        int x = state.toggleCenterX();
-        int y = state.toggleCenterY();
+        android.graphics.Point point = CoordinateProfileStore.resolve(context,
+                ClickOperationRegistry.INPUT_MODE_TOGGLE, state.toggleCenterX(), state.toggleCenterY());
+        int x = point.x;
+        int y = point.y;
         try {
             hs.tap(x, y);
             BotLog.i(context, retry ? "input.mode.toggle.retry_tap" : "input.mode.toggle.tap",
@@ -1142,6 +1144,15 @@ public final class WechatDriver {
     private boolean tapSearchEntryForBroadcast(Context context, BotConfig config) throws Exception {
         PageInfo state = inspectWechatScreenByOcr(context, "broadcast_search_entry");
         OcrHelper.Screen screen = state.screen;
+        android.graphics.Point calibrated = CoordinateProfileStore.get(context,
+                ClickOperationRegistry.WECHAT_SEARCH_ENTRY);
+        if (calibrated != null) {
+            hs.tap(calibrated.x, calibrated.y);
+            BotLog.i(context, "broadcast.search.entry.calibrated", "按机型校准坐标点击微信右上角搜索 x="
+                    + calibrated.x + " y=" + calibrated.y);
+            broadcastStepDelay(config, "search_entry_calibrated_tap");
+            return true;
+        }
         Rect searchIcon = OcrHelper.findTopRightSearchIcon(context, hs);
         if (searchIcon == null) {
             BotLog.e(context, "broadcast.search.entry.missing", "会话列表未找到顶部放大镜图标 ocrCount="
@@ -1612,6 +1623,14 @@ public final class WechatDriver {
     }
 
     private boolean focusChatInputForIme(Context context, BotConfig config) throws Exception {
+        android.graphics.Point calibrated = CoordinateProfileStore.get(context, ClickOperationRegistry.TEXT_INPUT);
+        if (calibrated != null) {
+            hs.tap(calibrated.x, calibrated.y);
+            SystemClock.sleep(stepDelay(config));
+            BotLog.i(context, "input.bot_ime.tap.calibrated", "已按机型校准坐标点击输入框 x="
+                    + calibrated.x + " y=" + calibrated.y);
+            return true;
+        }
         Rect input = OcrHelper.findChatInputBlock(context, hs);
         if (input != null) {
             hs.tap(input.centerX(), input.centerY());
@@ -1757,15 +1776,19 @@ public final class WechatDriver {
     private boolean pasteAfterImageInputFocus(Context context, BotConfig config, String text) {
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
-                Rect input = OcrHelper.findChatInputBlock(context, hs);
-                if (input == null) {
+                android.graphics.Point calibrated = CoordinateProfileStore.get(context, ClickOperationRegistry.TEXT_INPUT);
+                Rect input = calibrated == null ? OcrHelper.findChatInputBlock(context, hs) : null;
+                if (calibrated == null && input == null) {
                     return false;
                 }
-                hs.tap(input.centerX(), input.centerY());
+                int tapX = calibrated == null ? input.centerX() : calibrated.x;
+                int tapY = calibrated == null ? input.centerY() : calibrated.y;
+                hs.tap(tapX, tapY);
                 SystemClock.sleep(stepDelay(config));
-                BotLog.i(context, "input.image.tap", "已按截图识别输入框点击 attempt=" + attempt
-                        + " x=" + input.centerX() + " y=" + input.centerY()
-                        + " rect=" + input.flattenToString());
+                BotLog.i(context, calibrated == null ? "input.image.tap" : "input.image.tap.calibrated",
+                        (calibrated == null ? "已按截图识别输入框点击" : "已按机型校准坐标点击输入框")
+                                + " attempt=" + attempt + " x=" + tapX + " y=" + tapY
+                                + (input == null ? "" : " rect=" + input.flattenToString()));
                 setAppClipboard(context, text);
                 hs.keyCode(279);
                 BotLog.i(context, "input.image.keypaste.try", "输入框聚焦后按 KEYCODE_PASTE attempt=" + attempt);
@@ -1878,6 +1901,13 @@ public final class WechatDriver {
     }
 
     private boolean tapSendButton(Context context) throws Exception {
+        android.graphics.Point calibrated = CoordinateProfileStore.get(context, ClickOperationRegistry.SEND_BUTTON);
+        if (calibrated != null) {
+            hs.tap(calibrated.x, calibrated.y);
+            BotLog.i(context, "send.button.calibrated.tap", "按机型校准坐标点击发送按钮 x="
+                    + calibrated.x + " y=" + calibrated.y);
+            return true;
+        }
         Rect green = OcrHelper.findGreenSendButton(context, hs);
         if (green != null) {
             hs.tap(green.centerX(), green.centerY());

@@ -61,6 +61,14 @@
             android:launchMode="singleTask"
             android:theme="@style/KeepAwakeTheme" />
 
+        <activity
+            android:name=".CoordinateCalibrationActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleTop"
+            android:theme="@style/CoordinateCalibrationTheme" />
+
         <service
             android:name=".BotService"
             android:exported="false"

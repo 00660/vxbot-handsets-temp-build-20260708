@@ -23,7 +23,8 @@ import android.widget.TextView;
 
 public final class ControlOverlayWindow {
     private static final int DOT_SIZE_DP = 28;
-    private static final int PANEL_WIDTH_DP = 234;
+    public static final String ACTION_CALIBRATION_FINISHED = "com.vxbot.wechatbot.action.CALIBRATION_FINISHED";
+    private static final int PANEL_WIDTH_DP = 312;
     private static final int PANEL_HEIGHT_DP = 44;
     private static final int SHOW_IME_PICKER_DELAY_MS = 50;
     private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 1200;
@@ -34,6 +35,10 @@ public final class ControlOverlayWindow {
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context ctx, Intent intent) {
+            if (ACTION_CALIBRATION_FINISHED.equals(intent.getAction()) && root != null) {
+                root.setVisibility(View.VISIBLE);
+                setExpanded(false);
+            }
             updatePauseButton();
         }
     };
@@ -138,6 +143,12 @@ public final class ControlOverlayWindow {
         pauseParams.setMargins(dp(6), 0, 0, 0);
         panel.addView(pauseButton, pauseParams);
 
+        TextView calibrationButton = actionButton("采集");
+        calibrationButton.setOnClickListener(v -> openCoordinateCalibration());
+        LinearLayout.LayoutParams calibrationParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        calibrationParams.setMargins(dp(6), 0, 0, 0);
+        panel.addView(calibrationButton, calibrationParams);
+
         TextView collapseButton = actionButton("收起");
         collapseButton.setBackground(roundBackground(0xFF475569));
         collapseButton.setOnClickListener(v -> setExpanded(false));
@@ -177,6 +188,23 @@ public final class ControlOverlayWindow {
         } catch (Exception e) {
             BotLog.e(context, "control.ime.fail", e.getClass().getSimpleName() + " " + e.getMessage());
             restoreOverlayNotFocusableDelayed();
+        }
+    }
+
+    private void openCoordinateCalibration() {
+        try {
+            Intent intent = new Intent(context, CoordinateCalibrationActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            if (root != null) {
+                root.setVisibility(View.GONE);
+            }
+            BotLog.i(context, "coordinate.capture.launch", "已从控制小白点打开坐标采集");
+        } catch (Exception e) {
+            if (root != null) {
+                root.setVisibility(View.VISIBLE);
+            }
+            BotLog.e(context, "coordinate.capture.launch.fail", e.getClass().getSimpleName() + " " + e.getMessage());
         }
     }
 
@@ -334,6 +362,7 @@ public final class ControlOverlayWindow {
             return;
         }
         IntentFilter filter = new IntentFilter(BotRuntimeControls.ACTION_CHANGED);
+        filter.addAction(ACTION_CALIBRATION_FINISHED);
         if (Build.VERSION.SDK_INT >= 33) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
