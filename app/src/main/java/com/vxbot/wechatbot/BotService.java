@@ -511,6 +511,9 @@ public final class BotService extends Service {
                 if (route.kind == MessageRouter.Kind.WOOL) {
                     return "__WOOL_FLOW__";
                 }
+                if (route.kind == MessageRouter.Kind.NEWS) {
+                    return "__NEWS_FLOW__";
+                }
                 if (route.kind == MessageRouter.Kind.VIDEO) {
                     return "__VIDEO_FLOW__";
                 }
@@ -604,6 +607,13 @@ public final class BotService extends Service {
                 }
                 return;
             }
+            if ("__NEWS_FLOW__".equals(reply)) {
+                boolean ok = new NewsBriefingFlow().handle(this, config, message, driver);
+                if (!ok) {
+                    BotLog.e(this, "news.flow.fail", "新闻早报流程失败 " + message.display());
+                }
+                return;
+            }
             if ("__VIDEO_FLOW__".equals(reply)) {
                 boolean ok = new VideoParseFlow().handle(this, config, message, driver);
                 if (!ok) {
@@ -674,7 +684,6 @@ public final class BotService extends Service {
                 || route.kind == MessageRouter.Kind.FINANCE
                 || route.kind == MessageRouter.Kind.SPORTS
                 || route.kind == MessageRouter.Kind.UTILITY
-                || route.kind == MessageRouter.Kind.NEWS
                 || route.kind == MessageRouter.Kind.WEATHER
                 || route.kind == MessageRouter.Kind.ANALYSIS
                 || route.kind == MessageRouter.Kind.REPORT
@@ -791,6 +800,7 @@ public final class BotService extends Service {
         return "__IMAGE_FLOW__".equals(reply)
                 || "__VISION_FLOW__".equals(reply)
                 || "__WOOL_FLOW__".equals(reply)
+                || "__NEWS_FLOW__".equals(reply)
                 || "__VIDEO_FLOW__".equals(reply)
                 || "__STICKER_FLOW__".equals(reply)
                 || "__TTS_FLOW__".equals(reply)
@@ -929,17 +939,37 @@ public final class BotService extends Service {
             BotLog.i(this, "morning.skip.disabled", "早安问好开关已关闭");
             return;
         }
-        String text = MORNING_GREETINGS[RANDOM.nextInt(MORNING_GREETINGS.length)];
-        try {
-            String briefing = RealtimeTools.morningBriefing();
-            if (briefing != null && !briefing.trim().isEmpty()) {
-                text = text + "\n\n" + briefing.trim();
-            }
-        } catch (Exception e) {
-            BotLog.w(this, "morning.briefing.fail", "新闻早报生成失败，继续发送问好: " + e.getMessage());
+        List<String> sessions = config.allowedSessionList();
+        if (sessions.isEmpty()) {
+            BotLog.e(this, "morning.abort", "白名单群为空");
+            return;
         }
-        BotLog.i(this, "morning.broadcast.start", "早安问好接入白名单群发 text=" + text);
-        runBroadcastText(text, "morning");
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, "morning.abort", "hs daemon 未就绪");
+            return;
+        }
+        pauseLogOverlayForOperation(config);
+        int okCount = 0;
+        try {
+            File image = new NewsBriefingFlow().createImage(this, config);
+            BotLog.i(this, "morning.broadcast.start", "开始向白名单群发送早报图片 count=" + sessions.size());
+            for (int i = 0; i < sessions.size(); i++) {
+                String sessionName = sessions.get(i);
+                boolean ok = new ImageFlow().shareExistingImage(this, config, image, sessionName);
+                if (ok) {
+                    okCount++;
+                }
+                if (i + 1 < sessions.size()) {
+                    SystemClock.sleep(config.broadcastGapMs);
+                }
+            }
+            BotLog.write(this, okCount == sessions.size() ? "SUCCESS" : (okCount > 0 ? "WARN" : "ERROR"),
+                    "morning.broadcast.done", "早报图片群发结束 okCount=" + okCount + " count=" + sessions.size());
+        } catch (Exception e) {
+            BotLog.e(this, "morning.briefing.fail", "新闻早报图片生成或发送失败: " + e.getMessage());
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
     }
 
     private void runDebugOpenImageShare(String rawPath) {
@@ -998,36 +1028,4 @@ public final class BotService extends Service {
                 .build();
     }
 
-    private static final String[] MORNING_GREETINGS = {
-            "早，今天也别空手而归，羊毛和好心情都安排上。",
-            "早上好，醒醒，今天继续薅点正经毛。",
-            "早，打工先放一边，先看看今天有没有漏网羊毛。",
-            "早安各位，今天也要稳稳当当捡便宜。",
-            "早，咖啡还没喝，羊毛雷达先开机了。",
-            "早上好，祝大家今天下单不反撸。",
-            "早，今天谁先发现好价谁就是群里大功臣。",
-            "早安，今天继续低调发财，高调捡漏。",
-            "早，别睡太死，神价不会等人。",
-            "早上好，今天也要把钱包守住，把优惠拿下。",
-            "早，醒了就看看群，别让好价跑了。",
-            "早安，今天主打一个不花冤枉钱。",
-            "早，今日份好运已开机。",
-            "早上好，祝大家今天券到手软。",
-            "早，今天继续做精明消费者。",
-            "早安，群里先热个场，毛来了记得吱声。",
-            "早，今天别上头，便宜也要看需求。",
-            "早上好，祝今天红包不断，快递不断。",
-            "早，薅毛归薅毛，别忘了吃早餐。",
-            "早安，今天先从一条好消息开始。",
-            "早，愿今天每个链接都靠谱一点。",
-            "早上好，今天也要快准狠。",
-            "早，手慢无先说，先把精神头拉满。",
-            "早安，今天谁发神车我第一个鼓掌。",
-            "早，羊毛可以小，快乐不能少。",
-            "早上好，今日份摸鱼和捡漏同步开始。",
-            "早，祝大家今天少踩坑，多捡漏。",
-            "早安，今天也请优惠券主动点。",
-            "早，醒醒，该给生活省点钱了。",
-            "早上好，愿今天全是正经福利。"
-    };
 }

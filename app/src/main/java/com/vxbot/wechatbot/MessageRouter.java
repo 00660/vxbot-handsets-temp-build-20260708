@@ -132,7 +132,7 @@ public final class MessageRouter {
             return new Route(Kind.WOOL, "羊毛线报：抓取赚客吧最新线报并生成榜单图片发群。");
         }
         if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")) {
-            return new Route(Kind.NEWS, "新闻/早报查询：整合热搜、热榜和 RSS 新闻，只输出适合群里的简短摘要。");
+            return new Route(Kind.NEWS, "新闻/早报查询：筛选去重后生成新闻卡片图片发群。");
         }
         if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
             return new Route(Kind.WEATHER, "天气查询：按用户地点请求回复，不确定地点就追问。");

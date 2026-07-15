@@ -266,6 +266,32 @@ public final class ChatClient {
         return reply.trim();
     }
 
+    public String requestNewsDigest(Context context, BotConfig config, String evidence) throws Exception {
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置");
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("model", config.model);
+        JSONArray messages = new JSONArray();
+        messages.put(new JSONObject().put("role", "system").put("content",
+                "你是新闻早报编辑。只能使用用户给出的候选标题、来源、时间和关联报道，不得补写候选中没有的事实。"
+                        + "从候选中选出恰好8条真正有信息量且彼此不重复的新闻，兼顾国际、社会、财经、科技、体育。"
+                        + "过滤宣传口号、会议套话、纯情绪热搜、同一比赛或同一事件的重复标题。"
+                        + "summary必须说明新进展、数字、影响或争议点，不能复述标题，不能写值得关注、引发热议、持续关注等空话。"
+                        + "只输出JSON数组，不要Markdown，不要任何解释。"
+                        + "每项格式：{\"id\":候选编号,\"category\":\"国际/社会/财经/科技/体育\",\"summary\":\"28至55个汉字的一句话看点\"}。"));
+        messages.put(new JSONObject().put("role", "user").put("content", evidence));
+        payload.put("messages", messages);
+        payload.put("temperature", 0.2);
+        BotLog.i(context, "news.editor.request", "发送新闻编辑请求 candidatesBytes="
+                + (evidence == null ? 0 : evidence.getBytes(StandardCharsets.UTF_8).length));
+        String reply = postChat(config, payload);
+        if (reply == null || reply.trim().isEmpty()) {
+            throw new IllegalStateException("新闻编辑上游返回空内容");
+        }
+        return reply.trim();
+    }
+
     private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);
