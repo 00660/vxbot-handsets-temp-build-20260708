@@ -448,6 +448,18 @@ public final class WechatDriver {
     }
 
     private boolean openTargetChat(Context context, BotConfig config, WxMessage message) throws Exception {
+        if (message.notificationKey.startsWith("debug-current-")) {
+            BotLog.i(context, "debug.message.open.current", "调试消息复用当前会话 sessionName="
+                    + message.sessionName);
+            OcrHelper.Screen current = inspectCurrentCodexScreen(context, "debug_current", message.sessionName);
+            if (current != null) {
+                waitChatBottomReady(context, config, "debug-current", message.sessionName);
+                return true;
+            }
+            BotLog.w(context, "debug.message.open.current.missing", "当前不是目标会话，回退会话列表 sessionName="
+                    + message.sessionName);
+            return openTargetChatFromConversationList(context, config, message, "debug-current-fallback");
+        }
         if (message.notificationKey.startsWith("debug-adb-")) {
             BotLog.i(context, "debug.message.open.list", "调试消息直接从会话列表打开 sessionName="
                     + message.sessionName);
