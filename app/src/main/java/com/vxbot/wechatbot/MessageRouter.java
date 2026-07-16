@@ -792,7 +792,7 @@ public final class MessageRouter {
         if (lower.matches(".*(differentbackground|changebackground|newbackground|anotherone|again|redo|retry|remake|regenerate|newpose|differentpose|changeangle|makeitclearer|moreclear).*")) {
             return true;
         }
-        if (value.matches("^(自拍|拍照|发照片|露脸|发个自拍|来张自拍|拍张自拍|发你的自拍|给我发自拍|展示一下自拍|看看你的自拍|发张照片|露个脸|让我看看你)$")) {
+        if (value.matches("^((自然|随手|日常|清晰|原相机|素颜|户外|室内)?自拍|拍照|发照片|露脸|发个自拍|来张自拍|拍张自拍|发你的自拍|给我发自拍|展示一下自拍|看看你的自拍|发张照片|露个脸|让我看看你)$")) {
             return true;
         }
         if (value.matches("^(发张你的自拍呗|来一张自拍看看|有没有自拍呀|快发自拍|来个自拍瞧瞧|想看你的自拍|分享下自拍|发一下你的照片|来张近照|看看你现在的样子|拍一张给我看看|有没有新自拍|发张新自拍|整点自拍看看|晒一下自拍|露个脸呗|出来露个脸|让我瞅瞅你|看看真人样子|亮个相吧|出来冒个泡拍张照)$")) {
