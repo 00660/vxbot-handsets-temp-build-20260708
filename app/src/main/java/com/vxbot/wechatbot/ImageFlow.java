@@ -942,7 +942,9 @@ public final class ImageFlow {
         }
         for (OcrHelper.OcrItem item : screen.items) {
             String value = normalizeShareTargetName(item.text);
-            if (value.matches(".*(未发送|发送失败|无法发送|重试|重新发送).*")) {
+            if (value.contains("发送失败")
+                    || value.contains("无法发送")
+                    || value.matches("^(未发送|重新发送|发送未成功)$")) {
                 BotLog.e(context, "image.share.failure.hint", prefix + " OCR 发现分享失败提示 text=" + item.text);
                 return true;
             }
