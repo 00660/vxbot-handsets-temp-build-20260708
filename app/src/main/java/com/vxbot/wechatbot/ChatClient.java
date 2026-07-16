@@ -216,7 +216,8 @@ public final class ChatClient {
                 "你是微信群人物画像分析助手。只根据用户提供的群聊分组样本分析，不要编造样本外事实。"
                         + "输出可直接发到微信群里的中文短报告，必须包含：话痨是谁、各主要成员性格/表达风格、"
                         + "他们昨天或今天干了啥说了啥、群聊重点。数据不足就明确说样本不足。"
-                        + "不要写内部推理，不要输出 JSON。"));
+                        + "先给一句总览，再写话痨、主要成员、群聊重点三个短段。控制在350至700个汉字。"
+                        + "不要写内部推理，不要输出 JSON，不要使用Markdown星号、井号、表情符号或多层列表。"));
         messages.put(new JSONObject().put("role", "user").put("content", personaContext));
         payload.put("messages", messages);
         payload.put("temperature", 0.45);
@@ -226,7 +227,17 @@ public final class ChatClient {
         if (reply == null || reply.trim().isEmpty()) {
             throw new IllegalStateException("人物画像上游返回空内容");
         }
-        return reply.trim();
+        return cleanPersonaReport(reply);
+    }
+
+    private static String cleanPersonaReport(String reply) {
+        String text = reply == null ? "" : reply.trim();
+        text = text.replace("**", "").replace("__", "").replace("`", "")
+                .replaceAll("(?m)^\\s*#{1,6}\\s*", "")
+                .replaceAll("(?m)^\\s*[-*]\\s+", "")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
+        return limitAtSentence(text, 1000);
     }
 
     public String requestProfilePersona(Context context, BotConfig config, WxMessage message,

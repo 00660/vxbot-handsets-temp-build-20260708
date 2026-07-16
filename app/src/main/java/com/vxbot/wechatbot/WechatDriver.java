@@ -1088,29 +1088,36 @@ public final class WechatDriver {
     }
 
     private boolean openSessionBySearchForBroadcast(Context context, BotConfig config, String sessionName) throws Exception {
-        if (!ensureConversationListForBroadcast(context, config, "broadcast:" + sessionName)) {
-            BotLog.e(context, "broadcast.search.list.failed", "主动群发无法进入微信会话列表 sessionName=" + sessionName);
-            return false;
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            if (attempt > 1) {
+                BotLog.w(context, "broadcast.search.retry", "主动群发进入会话失败，返回微信列表后重试 attempt=" + attempt
+                        + " sessionName=" + sessionName);
+                try {
+                    hs.key("BACK");
+                } catch (Exception ignored) {
+                }
+                SystemClock.sleep(Math.max(800L, stepDelay(config)));
+            }
+            if (!ensureConversationListForBroadcast(context, config, "broadcast:" + sessionName + ":" + attempt)) {
+                continue;
+            }
+            if (!tapSearchEntryForBroadcast(context, config)
+                    || !setSearchKeywordForBroadcast(context, config, sessionName)
+                    || !waitSearchResultReadyForBroadcast(context, config, sessionName)
+                    || !tapSearchResultForBroadcast(context, config, sessionName)) {
+                continue;
+            }
+            if (!waitForBroadcastChatReady(context, config, sessionName,
+                    Math.max(8000, config.notificationSettleMs + 5000), "broadcast_search_confirm")) {
+                BotLog.w(context, "broadcast.search.chat.retry", "微信搜索结果进入目标会话失败，准备重试 sessionName=" + sessionName);
+                continue;
+            }
+            waitChatBottomReady(context, config, "broadcast-search", sessionName);
+            BotLog.write(context, "SUCCESS", "broadcast.search.chat.confirmed", "群发搜索已进入目标会话 sessionName=" + sessionName);
+            return true;
         }
-        if (!tapSearchEntryForBroadcast(context, config)) {
-            return false;
-        }
-        if (!setSearchKeywordForBroadcast(context, config, sessionName)) {
-            return false;
-        }
-        if (!waitSearchResultReadyForBroadcast(context, config, sessionName)) {
-            return false;
-        }
-        if (!tapSearchResultForBroadcast(context, config, sessionName)) {
-            return false;
-        }
-        if (!waitForBroadcastChatReady(context, config, sessionName, Math.max(8000, config.notificationSettleMs + 5000), "broadcast_search_confirm")) {
-            BotLog.e(context, "broadcast.search.chat.failed", "微信搜索结果进入目标会话失败 sessionName=" + sessionName);
-            return false;
-        }
-        waitChatBottomReady(context, config, "broadcast-search", sessionName);
-        BotLog.write(context, "SUCCESS", "broadcast.search.chat.confirmed", "群发搜索已进入目标会话 sessionName=" + sessionName);
-        return true;
+        BotLog.e(context, "broadcast.search.chat.failed", "微信搜索结果进入目标会话失败 sessionName=" + sessionName);
+        return false;
     }
 
     private boolean ensureConversationListForBroadcast(Context context, BotConfig config, String reason) throws Exception {
