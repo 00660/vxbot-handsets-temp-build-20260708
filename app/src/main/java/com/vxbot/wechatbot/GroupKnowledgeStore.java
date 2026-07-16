@@ -20,15 +20,20 @@ public final class GroupKnowledgeStore {
         }
         String content = text.replaceFirst("^.*?(?:记住|加入群知识库|保存到群知识库)[：:]?\\s*", "").trim();
         if (!content.equals(text) && !content.isEmpty()) {
-            JSONArray items = items(context, session);
-            items.put(new JSONObject().put("text", content).put("time", System.currentTimeMillis()));
-            while (items.length() > MAX_ITEMS) {
-                JSONArray next = new JSONArray();
-                for (int i = 1; i < items.length(); i++) next.put(items.opt(i));
-                items = next;
+            try {
+                JSONArray items = items(context, session);
+                items.put(new JSONObject().put("text", content).put("time", System.currentTimeMillis()));
+                while (items.length() > MAX_ITEMS) {
+                    JSONArray next = new JSONArray();
+                    for (int i = 1; i < items.length(); i++) next.put(items.opt(i));
+                    items = next;
+                }
+                save(context, session, items);
+                return "已加入本群知识库：" + content;
+            } catch (Exception e) {
+                BotLog.e(context, "knowledge.save.fail", e.getMessage());
+                return "群知识库保存失败：" + e.getMessage();
             }
-            save(context, session, items);
-            return "已加入本群知识库：" + content;
         }
         JSONArray items = items(context, session);
         if (items.length() == 0) {
