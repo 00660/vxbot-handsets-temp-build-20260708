@@ -30,10 +30,12 @@ public final class BotService extends Service {
     public static final String ACTION_BROADCAST_TEXT = "com.vxbot.wechatbot.BROADCAST_TEXT";
     public static final String ACTION_DEBUG_OPEN_IMAGE_SHARE = "com.vxbot.wechatbot.DEBUG_OPEN_IMAGE_SHARE";
     public static final String ACTION_MORNING_GREETING = "com.vxbot.wechatbot.MORNING_GREETING";
+    public static final String ACTION_REMINDER_FIRE = "com.vxbot.wechatbot.REMINDER_FIRE";
     private static final String CHANNEL_ID = "bot_status";
     private static final long STARTUP_NOTIFICATION_GRACE_MS = 5000L;
     private static final Random RANDOM = new Random();
     private static volatile boolean running;
+    private volatile boolean immediateCancelResult;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService paymentWorker = Executors.newSingleThreadExecutor();
@@ -98,6 +100,7 @@ public final class BotService extends Service {
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
         worker.execute(() -> VmicInjector.resetMtkState(this, "bot-service-create"));
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
+        ReminderManager.rescheduleAll(this);
     }
 
     @Override
@@ -105,6 +108,16 @@ public final class BotService extends Service {
         final boolean stickyRestart = intent == null;
         String action = stickyRestart ? ACTION_START : intent.getAction();
         String reason = stickyRestart ? "sticky-restart" : intent.getStringExtra("reason");
+        if (ACTION_HANDLE_NOTIFICATION.equals(action) && intent != null) {
+            String command = intent.getStringExtra("text");
+            BotConfig current = BotConfig.load(this);
+            if (command != null && command.replaceAll("\\s+", "").contains("取消当前任务")
+                    && current.isAllowedSession(intent.getStringExtra("sessionName"))
+                    && current.isFollowUpSenderAllowed(intent.getStringExtra("senderName"))) {
+                immediateCancelResult = TaskController.cancel();
+                BotLog.i(this, "task.cancel.immediate", "result=" + immediateCancelResult);
+            }
+        }
         if (ACTION_STOP.equals(action)) {
             BotConfig config = BotConfig.load(this);
             KeepAliveScheduler.cancel(this);
@@ -153,6 +166,13 @@ public final class BotService extends Service {
         }
         if (ACTION_MORNING_GREETING.equals(action)) {
             worker.execute(this::runMorningGreeting);
+            return START_STICKY;
+        }
+        if (ACTION_REMINDER_FIRE.equals(action)) {
+            String sessionName = intent == null ? "" : intent.getStringExtra("sessionName");
+            String senderName = intent == null ? "" : intent.getStringExtra("senderName");
+            String text = intent == null ? "" : intent.getStringExtra("text");
+            worker.execute(() -> runReminder(sessionName, senderName, text));
             return START_STICKY;
         }
         worker.execute(() -> {
@@ -526,6 +546,21 @@ public final class BotService extends Service {
                 if (route.kind == MessageRouter.Kind.MANUAL) {
                     return buildManualReply(config);
                 }
+                if (route.kind == MessageRouter.Kind.REMINDER) {
+                    return ReminderManager.createOrList(this, message,
+                            MessageRouter.stripBotMention(message.text, config));
+                }
+                if (route.kind == MessageRouter.Kind.SELF_CHECK) {
+                    return BotDiagnostics.report(this, config);
+                }
+                if (route.kind == MessageRouter.Kind.ADMIN) {
+                    return handleAdminCommand(config, message,
+                            MessageRouter.stripBotMention(message.text, config));
+                }
+                if (route.kind == MessageRouter.Kind.KNOWLEDGE) {
+                    return GroupKnowledgeStore.handle(this, message.sessionName,
+                            MessageRouter.stripBotMention(message.text, config));
+                }
                 if (route.kind == MessageRouter.Kind.PERSONA) {
                     String local = personaStore.buildReport(this, message.sessionName, message.text, System.currentTimeMillis());
                     String personaContext = personaStore.buildModelContext(this, message.sessionName, message.text, System.currentTimeMillis());
@@ -753,7 +788,40 @@ public final class BotService extends Service {
                 + "4. 画像：人物画像（分析发送人的头像和签名）、人物画像 名字、昨日总结、谁是话痨。\n"
                 + "5. 模式：进入 Codex 模式、退出 Codex 模式、撩一下名字、表白名字、跟名字表白、对喷一下名字、退出恋人模式、退出对喷。\n"
                 + "6. 语音：发语音 文字；机器人请报道可测在线。\n"
-                + "7. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
+                + "7. 提醒：10分钟后提醒我喝水；明天9点提醒群里开会；查看提醒。\n"
+                + "8. 网页：把网页或公众号链接发给我，直接读取正文总结。\n"
+                + "9. 知识库：记住：内容；群知识库；清空本群知识库。\n"
+                + "10. 管理：自检、机器人状态、任务队列、取消当前任务、切换文字回复、切换语音回复、清空本群上下文。\n"
+                + "11. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
+    }
+
+    private String handleAdminCommand(BotConfig config, WxMessage message, String command) {
+        if (!config.isFollowUpSenderAllowed(message.senderName)) {
+            return "这个管理命令只允许续聊控制人使用。";
+        }
+        String value = command == null ? "" : command.replaceAll("\\s+", "");
+        if (value.contains("取消当前任务")) {
+            boolean result = immediateCancelResult;
+            immediateCancelResult = false;
+            return result ? "当前图片网络任务已取消。" : "当前没有可取消的图片网络任务。";
+        }
+        if (value.contains("切换语音回复")) {
+            BotConfig.prefs(this).edit().putBoolean("normalReplyAsVoice", true).apply();
+            return "普通聊天已切换为语音回复。";
+        }
+        if (value.contains("切换文字回复")) {
+            BotConfig.prefs(this).edit().putBoolean("normalReplyAsVoice", false).apply();
+            return "普通聊天已切换为文字回复。";
+        }
+        if (value.contains("清空本群")) {
+            sessionStore.clearContext(message.sessionName);
+            return "本群短期聊天上下文已清空，长期成员统计保留。";
+        }
+        if (value.contains("任务")) {
+            return "任务状态：" + TaskController.status() + "；待执行提醒 "
+                    + ReminderManager.pendingCount(this) + " 个。";
+        }
+        return BotDiagnostics.report(this, config);
     }
 
     private boolean startTtsVoiceInCurrentChat(BotConfig config, WechatDriver driver, WxMessage message, String text, String reason) {
@@ -967,6 +1035,28 @@ public final class BotService extends Service {
                     "morning.broadcast.done", "早报图片群发结束 okCount=" + okCount + " count=" + sessions.size());
         } catch (Exception e) {
             BotLog.e(this, "morning.briefing.fail", "新闻早报图片生成或发送失败: " + e.getMessage());
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
+    }
+
+    private void runReminder(String sessionName, String senderName, String text) {
+        BotConfig config = BotConfig.load(this);
+        if (!config.isAllowedSession(sessionName) || text == null || text.trim().isEmpty()) {
+            BotLog.w(this, "reminder.fire.skip", "session=" + sessionName + " text=" + text);
+            return;
+        }
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, "reminder.fire.abort", "hs daemon 未就绪 session=" + sessionName);
+            return;
+        }
+        pauseLogOverlayForOperation(config);
+        try {
+            String prefix = senderName == null || senderName.trim().isEmpty() ? "" : "@" + senderName.trim() + " ";
+            String reply = prefix + "提醒：" + text.trim();
+            boolean ok = new WechatDriver(config.hsPort).sendBroadcastTextToSession(this, config, sessionName, reply);
+            BotLog.write(this, ok ? "SUCCESS" : "ERROR", "reminder.fire.done",
+                    "session=" + sessionName + " text=" + text);
         } finally {
             resumeLogOverlayAfterOperation();
         }

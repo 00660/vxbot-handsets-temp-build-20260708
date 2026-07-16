@@ -15,6 +15,7 @@ public final class BootReceiver extends BroadcastReceiver {
         KeepAliveScheduler.startBotService(context, "boot:" + action);
         KeepAliveScheduler.schedule(context);
         MorningGreetingScheduler.schedule(context);
+        ReminderManager.rescheduleAll(context);
         GarbageCleaner.runIfDue(context, "boot");
     }
 }

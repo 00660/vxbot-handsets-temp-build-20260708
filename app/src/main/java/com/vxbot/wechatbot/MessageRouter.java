@@ -29,7 +29,12 @@ public final class MessageRouter {
         SHUTUP,
         MANUAL,
         SCREEN_DIM,
-        SCREEN_BRIGHT
+        SCREEN_BRIGHT,
+        REMINDER,
+        SELF_CHECK,
+        ADMIN,
+        LINK,
+        KNOWLEDGE
     }
 
     public static final class Route {
@@ -69,6 +74,18 @@ public final class MessageRouter {
         }
         if (isManualCommand(command)) {
             return new Route(Kind.MANUAL, "机器人操作手册。");
+        }
+        if (isAdminCommand(command)) {
+            return new Route(Kind.ADMIN, command);
+        }
+        if (isSelfCheckCommand(command)) {
+            return new Route(Kind.SELF_CHECK, "检查机器人、HS、通知监听及文字/图片上游状态。");
+        }
+        if (isReminderCommand(command)) {
+            return new Route(Kind.REMINDER, command);
+        }
+        if (isKnowledgeCommand(command)) {
+            return new Route(Kind.KNOWLEDGE, command);
         }
         if (isScreenBrightCommand(command)) {
             return new Route(Kind.SCREEN_BRIGHT, "关闭低亮防熄屏并把亮度调高。");
@@ -112,6 +129,9 @@ public final class MessageRouter {
         }
         if (config.enableVideoParse && looksLikeVideoParseRequest(command)) {
             return new Route(Kind.VIDEO, "短视频/图集解析：解析分享链接，下载无水印视频或图集，并通过微信分享链路发回当前群。");
+        }
+        if (looksLikeWebLinkRequest(command)) {
+            return new Route(Kind.LINK, "网页/公众号解析：读取链接正文后直接总结重点、风险和关键数据。");
         }
         if (config.enableImageAnalysis && looksLikeImageAnalysis(command)) {
             return new Route(Kind.ANALYSIS, "图片分析：分析当前会话截图里用户要求看的图片，只输出微信群里要回复的内容。");
@@ -166,6 +186,10 @@ public final class MessageRouter {
         if (isManualCommand(command) || isScreenDimCommand(command) || isScreenBrightCommand(command)) {
             return true;
         }
+        if (isAdminCommand(command) || isSelfCheckCommand(command) || isReminderCommand(command)
+                || isKnowledgeCommand(command)) {
+            return true;
+        }
         if (looksLikeLicenseRequest(command)) {
             return true;
         }
@@ -191,6 +215,9 @@ public final class MessageRouter {
             return true;
         }
         if (config.enableVideoParse && looksLikeVideoParseRequest(command)) {
+            return true;
+        }
+        if (looksLikeWebLinkRequest(command)) {
             return true;
         }
         if ((config.enableImageAnalysis && looksLikeImageAnalysis(command)) || (config.enableImage && looksLikeImageRequest(command))) {
@@ -243,6 +270,39 @@ public final class MessageRouter {
         }
         return value.matches("^(机器人|bot|慢一点|韵味)?(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)$")
                 || value.matches("^(菜单|帮助|操作手册|使用手册|指令|功能列表|命令列表)(机器人|bot|慢一点|韵味)?$");
+    }
+
+    public static boolean isReminderCommand(String text) {
+        String value = cleanCommand(text);
+        return value.contains("提醒我")
+                || value.contains("提醒群里")
+                || value.matches(".*(?:分钟|小时|天)后提醒.+")
+                || value.matches(".*(?:今天|明天|后天).{0,8}(?:点|:|：).{0,8}提醒.+")
+                || compact(value).matches("^(查看|查询|我的|群里)?提醒(列表)?$");
+    }
+
+    public static boolean isSelfCheckCommand(String text) {
+        String value = compact(text);
+        return value.matches("^(机器人|bot|慢一点)?(自检|系统自检|检查状态|上游状态|链路自检)$")
+                || value.matches("^(自检|系统自检|检查状态|上游状态|链路自检)(机器人|bot|慢一点)?$");
+    }
+
+    public static boolean isAdminCommand(String text) {
+        String value = compact(text);
+        return value.matches("^(机器人)?(状态|任务状态|任务队列|取消当前任务|切换语音回复|切换文字回复|清空本群上下文|清空本群记忆)$");
+    }
+
+    public static boolean looksLikeWebLinkRequest(String text) {
+        String value = text == null ? "" : text;
+        return value.matches("(?s).*https?://\\S+.*")
+                && !looksLikeVideoParseRequest(value);
+    }
+
+    public static boolean isKnowledgeCommand(String text) {
+        String value = cleanCommand(text);
+        return value.matches(".*(?:记住|加入群知识库|保存到群知识库)[：:].+")
+                || compact(value).matches("^(查看|本群)?群?知识库$")
+                || value.matches(".*(?:清空|删除|忘记)(?:本群)?知识库.*");
     }
 
     public static boolean isPersonaCommand(String text) {

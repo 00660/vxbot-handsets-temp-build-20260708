@@ -115,7 +115,18 @@ public final class ImageFlow {
                         + " revision=" + revision + " incomingReference=" + incomingReference
                         + " sourceImages=" + sourceImages.size()
                         + " batchIndex=" + (i + 1) + "/" + imageRequests.size());
-                String image = requestImage(context, config, prompt, coolStyle, selfie, incomingReference, sourceImages);
+                String image;
+                try {
+                    image = requestImage(context, config, prompt, coolStyle, selfie, incomingReference, sourceImages);
+                } catch (Exception first) {
+                    if (TaskController.consumeCancelled()) {
+                        throw new IllegalStateException("任务已由管理员取消", first);
+                    }
+                    BotLog.w(context, "image.api.retry", "首次图片请求失败，自动重试一次: " + first.getMessage());
+                    driver.sendTextInCurrentChat(context, config, message.sessionName,
+                            "图片上游有点堵，我自动再试一次。", true);
+                    image = requestImage(context, config, prompt, coolStyle, selfie, incomingReference, sourceImages);
+                }
                 File file = saveImage(context, image);
                 rememberImageMemory(message.sessionName, itemRequest, selfie ? "persona_selfie" : "general", file, image);
                 BotLog.i(context, "image.save", "图片已保存 path=" + file.getAbsolutePath()
@@ -286,15 +297,21 @@ public final class ImageFlow {
         if (config.imageApiKey != null && !config.imageApiKey.trim().isEmpty()) {
             conn.setRequestProperty("Authorization", "Bearer " + config.imageApiKey.trim());
         }
-        try (OutputStream out = conn.getOutputStream()) {
-            out.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+        TaskController.register("图片生成", conn);
+        try {
+            try (OutputStream out = conn.getOutputStream()) {
+                out.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            int code = conn.getResponseCode();
+            String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException("图片上游 HTTP " + code + " " + trim(body));
+            }
+            return parseImage(body, config.imageEndpoint);
+        } finally {
+            TaskController.clear(conn);
+            conn.disconnect();
         }
-        int code = conn.getResponseCode();
-        String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
-        if (code < 200 || code >= 300) {
-            throw new IllegalStateException("图片上游 HTTP " + code + " " + trim(body));
-        }
-        return parseImage(body, config.imageEndpoint);
     }
 
     private String requestEditedImage(Context context, BotConfig config, String prompt, List<ReferenceImage> images) throws Exception {
@@ -315,27 +332,33 @@ public final class ImageFlow {
         if (config.imageApiKey != null && !config.imageApiKey.trim().isEmpty()) {
             conn.setRequestProperty("Authorization", "Bearer " + config.imageApiKey.trim());
         }
-        try (OutputStream out = conn.getOutputStream()) {
-            writeFormField(out, boundary, "model", config.imageModel);
-            writeFormField(out, boundary, "prompt", prompt);
-            writeFormField(out, boundary, "n", "1");
-            writeFormField(out, boundary, "size", normalizeSize(config.imageSize));
-            writeFormField(out, boundary, "response_format", "b64_json");
-            for (ReferenceImage image : images) {
-                out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
-                out.write(("Content-Disposition: form-data; name=\"image\"; filename=\"" + image.filename + "\"\r\n").getBytes(StandardCharsets.UTF_8));
-                out.write("Content-Type: image/png\r\n\r\n".getBytes(StandardCharsets.UTF_8));
-                out.write(image.bytes);
-                out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+        TaskController.register("图片编辑", conn);
+        try {
+            try (OutputStream out = conn.getOutputStream()) {
+                writeFormField(out, boundary, "model", config.imageModel);
+                writeFormField(out, boundary, "prompt", prompt);
+                writeFormField(out, boundary, "n", "1");
+                writeFormField(out, boundary, "size", normalizeSize(config.imageSize));
+                writeFormField(out, boundary, "response_format", "b64_json");
+                for (ReferenceImage image : images) {
+                    out.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+                    out.write(("Content-Disposition: form-data; name=\"image\"; filename=\"" + image.filename + "\"\r\n").getBytes(StandardCharsets.UTF_8));
+                    out.write("Content-Type: image/png\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                    out.write(image.bytes);
+                    out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+                }
+                out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
             }
-            out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            int code = conn.getResponseCode();
+            String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException("图片编辑上游 HTTP " + code + " " + trim(body));
+            }
+            return parseImage(body, config.imageEndpoint);
+        } finally {
+            TaskController.clear(conn);
+            conn.disconnect();
         }
-        int code = conn.getResponseCode();
-        String body = readAll(code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream());
-        if (code < 200 || code >= 300) {
-            throw new IllegalStateException("图片编辑上游 HTTP " + code + " " + trim(body));
-        }
-        return parseImage(body, config.imageEndpoint);
     }
 
     private static String referenceSummary(List<ReferenceImage> images) {

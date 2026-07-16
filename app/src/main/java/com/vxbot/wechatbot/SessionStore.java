@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 public final class SessionStore {
-    private static final int MAX_LINES = 15;
+    private static final int MAX_LINES = 40;
     private static final String PREFS = "session_store";
     private static final String KEY_ACTIVE_PREFIX = "active_sender_";
     private static final String KEY_CODEX_MODE_SENDER_PREFIX = "codex_mode_sender_";
@@ -133,6 +133,11 @@ public final class SessionStore {
     public synchronized List<String> contextOf(String sessionName) {
         ArrayDeque<String> lines = histories.get(sessionName);
         return lines == null ? new ArrayList<>() : new ArrayList<>(lines);
+    }
+
+    public synchronized void clearContext(String sessionName) {
+        histories.remove(sessionName);
+        activeSenders.remove(sessionName);
     }
 
     public synchronized boolean looksLikeRecentBotReply(String sessionName, String text) {

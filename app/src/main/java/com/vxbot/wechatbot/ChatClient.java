@@ -54,6 +54,9 @@ public final class ChatClient {
         }
         Exception last = null;
         String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);
+        if (route.kind == MessageRouter.Kind.TEXT && isBlank(toolContext)) {
+            toolContext = GroupKnowledgeStore.context(context, message.sessionName, message.text);
+        }
         if (shouldReplyWithToolContext(route.kind, toolContext, message.text)) {
             BotLog.i(context, "chat.tool.direct", "实时工具直出 mode=" + route.kind
                     + " bytes=" + toolContext.getBytes(StandardCharsets.UTF_8).length);

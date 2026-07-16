@@ -46,6 +46,9 @@ public final class RealtimeTools {
             if (kind == MessageRouter.Kind.UTILITY) {
                 return utility(text);
             }
+            if (kind == MessageRouter.Kind.LINK) {
+                return webPage(text);
+            }
             return "";
         } catch (Exception e) {
             BotLog.w(context, "tool.context.fail", "实时工具失败 mode=" + kind + " error=" + e.getMessage());
@@ -79,6 +82,23 @@ public final class RealtimeTools {
                     + " error=" + e.getMessage());
             return "实时工具失败：" + e.getMessage();
         }
+    }
+
+    private static String webPage(String text) throws Exception {
+        Matcher matcher = Pattern.compile("https?://[^\\s，。！？!?]+", Pattern.CASE_INSENSITIVE).matcher(text == null ? "" : text);
+        if (!matcher.find()) {
+            return "网页解析工具：没有找到链接";
+        }
+        String url = matcher.group();
+        String markdown = getUtf8("https://r.jina.ai/" + url, 20000);
+        String cleaned = markdown == null ? "" : markdown.trim();
+        if (cleaned.isEmpty()) {
+            return "网页解析工具：页面正文为空，链接=" + url;
+        }
+        if (cleaned.length() > 12000) {
+            cleaned = cleaned.substring(0, 12000);
+        }
+        return "网页解析工具：\n链接：" + url + "\n正文：\n" + cleaned;
     }
 
     private static int appendBingWebResults(StringBuilder out, String query, int limit) {
