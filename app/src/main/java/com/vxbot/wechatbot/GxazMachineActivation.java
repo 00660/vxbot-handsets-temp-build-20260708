@@ -6,6 +6,8 @@ import java.security.GeneralSecurityException;
 import java.util.Calendar;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -14,8 +16,10 @@ public final class GxazMachineActivation {
     private static final String AUTH_SECRET = "gxaz-auth-secret-2026";
     private static final String ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
     private static final int MACHINE_CODE_LENGTH = 10;
-    private static final int DEFAULT_DAYS = 30;
     private static final TimeZone CHINA_TIME_ZONE = TimeZone.getTimeZone("GMT+08:00");
+    private static final Pattern ACTIVATION_COMMAND = Pattern.compile(
+            "^(?:(?:gxaz|ai统计)\\s*)?(?:机器绑定|机器码激活|机器码|激活码|激活)\\s*[:：]?\\s*([0-9a-z]{10})\\s*(天卡|月卡|季卡|年卡)$",
+            Pattern.CASE_INSENSITIVE);
 
     private GxazMachineActivation() {
     }
@@ -25,10 +29,18 @@ public final class GxazMachineActivation {
         return normalized.matches("^[0-9a-z]{" + MACHINE_CODE_LENGTH + "}$");
     }
 
-    public static String replyFor(String machineCode) {
-        String endTime = endDateAfterDays(DEFAULT_DAYS);
-        return "GXAZ 机器绑定激活码（30 天）：\n"
-                + activationCodeFor(machineCode, endTime)
+    public static boolean isActivationCommand(String text) {
+        return parseCommand(text) != null;
+    }
+
+    public static String replyFor(String text) {
+        ActivationRequest request = parseCommand(text);
+        if (request == null) {
+            throw new IllegalArgumentException("请输入：机器绑定 10位机器码 月卡");
+        }
+        String endTime = endDateAfterDays(request.days);
+        return "GXAZ 机器绑定激活码（" + request.card + "）：\n"
+                + activationCodeFor(request.machineCode, endTime)
                 + "\n到期：" + endTime;
     }
 
@@ -57,6 +69,25 @@ public final class GxazMachineActivation {
                 calendar.get(Calendar.DAY_OF_MONTH));
     }
 
+    private static ActivationRequest parseCommand(String text) {
+        Matcher match = ACTIVATION_COMMAND.matcher(text == null ? "" : text.trim());
+        if (!match.matches()) {
+            return null;
+        }
+        String card = match.group(2);
+        int days;
+        if ("天卡".equals(card)) {
+            days = 1;
+        } else if ("季卡".equals(card)) {
+            days = 90;
+        } else if ("年卡".equals(card)) {
+            days = 365;
+        } else {
+            days = 30;
+        }
+        return new ActivationRequest(normalizeMachineCode(match.group(1)), card, days);
+    }
+
     private static String signatureFor(String payload) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
@@ -81,5 +112,17 @@ public final class GxazMachineActivation {
 
     private static String normalizeMachineCode(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static final class ActivationRequest {
+        final String machineCode;
+        final String card;
+        final int days;
+
+        ActivationRequest(String machineCode, String card, int days) {
+            this.machineCode = machineCode;
+            this.card = card;
+            this.days = days;
+        }
     }
 }

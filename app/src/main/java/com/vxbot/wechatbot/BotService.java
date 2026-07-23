@@ -594,7 +594,7 @@ public final class BotService extends Service {
                     return randomReportReply(config);
                 }
                 if (route.kind == MessageRouter.Kind.GXAZ_MACHINE_ACTIVATION) {
-                    BotLog.i(this, "gxaz.machine.activation", "本地生成 30 天机器绑定激活码");
+                    BotLog.i(this, "gxaz.machine.activation", "本地生成机器绑定激活码");
                     return GxazMachineActivation.replyFor(message.text);
                 }
                 if (route.kind == MessageRouter.Kind.LICENSE) {
