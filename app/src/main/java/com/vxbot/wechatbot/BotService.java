@@ -595,7 +595,7 @@ public final class BotService extends Service {
                 }
                 if (route.kind == MessageRouter.Kind.GXAZ_MACHINE_ACTIVATION) {
                     BotLog.i(this, "gxaz.machine.activation", "本地生成机器绑定激活码");
-                    return GxazMachineActivation.replyFor(message.text);
+                    return GxazMachineActivation.replyFor(MessageRouter.stripBotMention(message.text, config));
                 }
                 if (route.kind == MessageRouter.Kind.LICENSE) {
                     BotLog.i(this, "license.request", "请求 18088 注册机面板 " + message.display());

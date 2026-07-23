@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 214
-        versionName "0.1.214-gxaz-card-menu"
+        versionCode 215
+        versionName "0.1.215-gxaz-mention-command"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 
