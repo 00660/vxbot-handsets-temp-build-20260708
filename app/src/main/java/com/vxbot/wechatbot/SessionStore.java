@@ -53,6 +53,9 @@ public final class SessionStore {
         if (System.currentTimeMillis() < until) {
             return false;
         }
+        if (MessageRouter.isGxazMachineCode(message.text)) {
+            return true;
+        }
         ModeTarget roast = activeRoastTarget(session);
         if (roast != null) {
             return NameNormalizer.sameName(roast.targetName, message.senderName) || MessageRouter.isRoastExitCommand(message.text);

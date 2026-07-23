@@ -593,6 +593,10 @@ public final class BotService extends Service {
                 if (route.kind == MessageRouter.Kind.REPORT) {
                     return randomReportReply(config);
                 }
+                if (route.kind == MessageRouter.Kind.GXAZ_MACHINE_ACTIVATION) {
+                    BotLog.i(this, "gxaz.machine.activation", "本地生成 30 天机器绑定激活码");
+                    return GxazMachineActivation.replyFor(message.text);
+                }
                 if (route.kind == MessageRouter.Kind.LICENSE) {
                     BotLog.i(this, "license.request", "请求 18088 注册机面板 " + message.display());
                     return new LicensePanelClient().request(this, config, message.text);

@@ -11,8 +11,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`163`
-- `versionName`：`0.1.163-boot-hs-recovery`
+- `versionCode`：`212`
+- `versionName`：`0.1.212-gxaz-machine-activation`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -35,6 +35,7 @@
 - 金融/天气/新闻/体育/本地工具/羊毛：内置实时工具分流与回复；金融支持股票代码、A/HK/US 个股名称搜索、指数、汇率、贵金属克价；虚拟币查询优先走 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko，支持合约地址和币安链/BSC 等链偏好，不再让虚拟币问题先落到 Yahoo 或固定 BTC/ETH；体育支持世界杯、足球联赛、NBA/WNBA/NFL/NHL/MLB 等赛程比分；赛事分析类问题会带实时赛程上下文请求上游分析。
 - 短视频/图集解析：命中抖音、快手、小红书、微博、B站等分享链接后，APK 内置 parse-video 平台解析逻辑直接解析，下载无水印视频、图集或 LivePhoto，并复用图片分享链路发回当前群。
 - 注册机：对接注册码/授权码查询链路，固定文字回复。
+- GXAZ 机器码激活：白名单会话发送纯 10 位机器码，APK 内部签发 30 天、设备绑定的 24 位激活码，不依赖注册机面板。
 - 赛博喷子模式：支持触发、目标锁定、退出指令。
 - 恋人模式：支持 `撩一下$name`、`表白$name`、`跟$name表白` 等触发。
 - 悬浮日志：支持开关、拖动、收起为小圆点。

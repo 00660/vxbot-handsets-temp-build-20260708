@@ -14,6 +14,7 @@ public final class MessageRouter {
         LOVER,
         CODEX,
         LICENSE,
+        GXAZ_MACHINE_ACTIVATION,
         FINANCE,
         SPORTS,
         UTILITY,
@@ -92,6 +93,9 @@ public final class MessageRouter {
         }
         if (isScreenDimCommand(command)) {
             return new Route(Kind.SCREEN_DIM, "开启低亮防熄屏。");
+        }
+        if (isGxazMachineCode(command)) {
+            return new Route(Kind.GXAZ_MACHINE_ACTIVATION, "GXAZ 机器绑定激活码：本地签发 30 天设备专属激活码。");
         }
         if (looksLikeLicenseRequest(command)) {
             return new Route(Kind.LICENSE, "注册机/授权码请求：按旧版 LicensePanelBot 逻辑本地分流处理。");
@@ -190,6 +194,9 @@ public final class MessageRouter {
                 || isKnowledgeCommand(command)) {
             return true;
         }
+        if (isGxazMachineCode(command)) {
+            return true;
+        }
         if (looksLikeLicenseRequest(command)) {
             return true;
         }
@@ -239,6 +246,10 @@ public final class MessageRouter {
             return true;
         }
         return config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报");
+    }
+
+    public static boolean isGxazMachineCode(String text) {
+        return GxazMachineActivation.isMachineCode(text);
     }
 
     public static boolean isMediaOnlyMessage(String text) {
