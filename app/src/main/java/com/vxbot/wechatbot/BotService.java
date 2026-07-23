@@ -796,7 +796,8 @@ public final class BotService extends Service {
                 + "8. 网页：把网页或公众号链接发给我，直接读取正文总结。\n"
                 + "9. 知识库：记住：内容；群知识库；清空本群知识库。\n"
                 + "10. 管理：自检、机器人状态、任务队列、取消当前任务、切换文字回复、切换语音回复、清空本群上下文。\n"
-                + "11. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。";
+                + "11. 屏幕：屏幕最暗开启低亮防熄屏，屏幕最亮恢复。\n"
+                + "12. GXAZ 激活：机器绑定 10位机器码 天卡/月卡/季卡/年卡。";
     }
 
     private String handleAdminCommand(BotConfig config, WxMessage message, String command) {
