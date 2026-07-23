@@ -39,9 +39,7 @@ public final class GxazMachineActivation {
             throw new IllegalArgumentException("请输入：机器绑定 10位机器码 月卡");
         }
         String endTime = endDateAfterDays(request.days);
-        return "GXAZ 机器绑定激活码（" + request.card + "）：\n"
-                + activationCodeFor(request.machineCode, endTime)
-                + "\n到期：" + endTime;
+        return activationCodeFor(request.machineCode, endTime);
     }
 
     public static String activationCodeFor(String machineCode, String endTime) {
@@ -85,7 +83,7 @@ public final class GxazMachineActivation {
         } else {
             days = 30;
         }
-        return new ActivationRequest(normalizeMachineCode(match.group(1)), card, days);
+        return new ActivationRequest(normalizeMachineCode(match.group(1)), days);
     }
 
     private static String signatureFor(String payload) {
@@ -116,12 +114,10 @@ public final class GxazMachineActivation {
 
     private static final class ActivationRequest {
         final String machineCode;
-        final String card;
         final int days;
 
-        ActivationRequest(String machineCode, String card, int days) {
+        ActivationRequest(String machineCode, int days) {
             this.machineCode = machineCode;
-            this.card = card;
             this.days = days;
         }
     }
