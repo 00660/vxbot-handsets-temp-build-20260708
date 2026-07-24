@@ -618,6 +618,7 @@ public final class BotService extends Service {
             }
             boolean opened = openFuture.get();
             if (!opened) {
+                driver.leaveWechatIfForeground(this, "reply-open-failed");
                 cleanupPreparedFutureIfDone(preparedVoiceFuture, "open-failed");
                 BotLog.e(this, "reply.abort", "目标会话未打开，取消发送 " + message.display());
                 return;

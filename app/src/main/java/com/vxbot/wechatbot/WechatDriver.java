@@ -1016,6 +1016,7 @@ public final class WechatDriver {
             return null;
         }
         OcrHelper.OcrItem best = null;
+        int bestMatchScore = 0;
         int bestScore = Integer.MAX_VALUE;
         for (OcrHelper.OcrItem item : screen.items) {
             if (item.centerY < screen.height * 0.10f || item.centerY > screen.height * 0.84f) {
@@ -1025,36 +1026,50 @@ public final class WechatDriver {
             if (value.isEmpty()) {
                 continue;
             }
-            if (!isConversationTitleMatch(item.text, value, target)) {
+            int matchScore = conversationTitleMatchScore(item.text, value, target);
+            if (matchScore == 0) {
                 continue;
             }
             int score = item.rect.top + Math.abs(item.centerX - Math.round(screen.width * 0.28f));
-            if (score < bestScore) {
+            if (matchScore > bestMatchScore || (matchScore == bestMatchScore && score < bestScore)) {
                 best = item;
+                bestMatchScore = matchScore;
                 bestScore = score;
             }
         }
         return best;
     }
 
-    private static boolean isConversationTitleMatch(String rawText, String value, String target) {
+    private static int conversationTitleMatchScore(String rawText, String value, String target) {
         if (value == null || target == null || value.isEmpty() || target.isEmpty()) {
-            return false;
+            return 0;
         }
         if (value.equals(target)) {
-            return true;
+            return 3;
         }
         if (target.length() <= 2) {
-            return false;
+            return 0;
         }
         String raw = rawText == null ? "" : rawText;
         if (raw.contains(":") || raw.contains("：")) {
-            return false;
+            return 0;
         }
         if (value.length() > target.length() + 6) {
-            return false;
+            return 0;
         }
-        return value.contains(target) || target.contains(value);
+        if (value.contains(target) || target.contains(value)) {
+            return 2;
+        }
+        if (value.length() != target.length() || target.length() < 4) {
+            return 0;
+        }
+        int mismatches = 0;
+        for (int i = 0; i < target.length(); i++) {
+            if (value.charAt(i) != target.charAt(i) && ++mismatches > 1) {
+                return 0;
+            }
+        }
+        return mismatches == 1 ? 1 : 0;
     }
 
     private boolean waitWechatChatByOcr(Context context, BotConfig config, long timeoutMs) {
