@@ -100,6 +100,7 @@ public final class BotService extends Service {
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
         worker.execute(() -> VmicInjector.resetMtkState(this, "bot-service-create"));
+        worker.execute(this::resumePendingReply);
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
         ReminderManager.rescheduleAll(this);
     }
@@ -370,10 +371,25 @@ public final class BotService extends Service {
     }
 
     private void resumePendingReply() {
-        WxMessage message = PendingReplyStore.load(this);
-        if (message == null) {
+        if (pendingRecoveryAttempted) {
             return;
         }
+        WxMessage message = PendingReplyStore.load(this);
+        if (message == null) {
+            pendingRecoveryAttempted = true;
+            return;
+        }
+        BotConfig config = BotConfig.load(this);
+        boolean hsReady = new HsClient(config.hsPort).ping();
+        if (!hsReady) {
+            BotLog.w(this, "reply.recovery.daemon.start", "恢复未完成回复前 HS 未响应，尝试拉起守护");
+            hsReady = daemonManager.ensureRunning(this, config);
+        }
+        if (!hsReady) {
+            BotLog.e(this, "reply.recovery.daemon.fail", "HS 未就绪，保留未完成回复等待下次恢复");
+            return;
+        }
+        pendingRecoveryAttempted = true;
         BotLog.i(this, "reply.recovery.start", "服务重启后恢复未完成回复 " + message.display());
         handleMessage(message, false, true);
     }
