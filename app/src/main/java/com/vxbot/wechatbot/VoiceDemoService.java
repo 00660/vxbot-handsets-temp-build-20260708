@@ -609,8 +609,8 @@ public final class VoiceDemoService extends Service {
     }
 
     private static int vmicPlaybackTimeoutMs(int durationMs) {
-        int completionAllowanceMs = Math.max(5000, Math.min(14000, durationMs / 2 + 3000));
-        return Math.max(8000, Math.min(58000, durationMs + completionAllowanceMs));
+        int completionAllowanceMs = Math.max(5000, Math.min(20000, durationMs / 2 + 3000));
+        return Math.max(8000, Math.min(65000, durationMs + completionAllowanceMs));
     }
 
     private static final class PressHandle {
