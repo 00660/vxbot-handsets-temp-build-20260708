@@ -189,9 +189,11 @@ public final class RealtimeTools {
     }
 
     private static boolean looksTimeSensitiveQuery(String query) {
-        return matchesAny(query, "今天", "昨天", "现在", "当前", "目前", "最新", "最近", "刚刚",
+        String value = query == null ? "" : query.toLowerCase(Locale.ROOT);
+        return matchesAny(value, "今天", "昨天", "现在", "当前", "目前", "最新", "最近", "刚刚",
                 "实时", "新闻", "热搜", "价格", "行情", "汇率", "天气", "赛果", "发布", "上线",
-                "更新", "政策", "规定", "2025", "2026");
+                "更新", "政策", "规定", "2025", "2026", "比赛", "赛程", "比分", "体育", "转会", "伤病",
+                "阵容", "联赛", "球队", "足球", "篮球", "nba", "cba", "英超", "欧冠", "世界杯");
     }
 
     private static String cleanMarkdownText(String text) {

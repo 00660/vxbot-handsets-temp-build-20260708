@@ -60,7 +60,7 @@ public final class ChatClient {
         if (route.kind == MessageRouter.Kind.TEXT && isBlank(toolContext)) {
             toolContext = GroupKnowledgeStore.context(context, message.sessionName, message.text);
         }
-        if (shouldReplyWithToolContext(route.kind, toolContext, message.text)) {
+        if (shouldReplyWithToolContext(route.kind, toolContext)) {
             BotLog.i(context, "chat.tool.direct", "实时工具直出 mode=" + route.kind
                     + " bytes=" + toolContext.getBytes(StandardCharsets.UTF_8).length);
             return stripToolLabels(formatToolReply(route.kind, toolContext));
@@ -138,11 +138,8 @@ public final class ChatClient {
         return text.length() > 12000 ? text.substring(0, 12000) : text;
     }
 
-    private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext, String userText) {
+    private static boolean shouldReplyWithToolContext(MessageRouter.Kind kind, String toolContext) {
         if (isBlank(toolContext)) {
-            return false;
-        }
-        if (kind == MessageRouter.Kind.SPORTS && looksLikeSportsAnalysis(userText)) {
             return false;
         }
         return kind == MessageRouter.Kind.NEWS
@@ -168,21 +165,6 @@ public final class ChatClient {
             }
         }
         return text;
-    }
-
-    private static boolean looksLikeSportsAnalysis(String text) {
-        String value = text == null ? "" : text.toLowerCase();
-        return value.contains("分析")
-                || value.contains("预测")
-                || value.contains("怎么看")
-                || value.contains("看法")
-                || value.contains("谁强")
-                || value.contains("谁赢")
-                || value.contains("胜率")
-                || value.contains("盘口")
-                || value.contains("推荐")
-                || value.contains("买谁")
-                || value.contains("能不能赢");
     }
 
     public String requestVisionReply(Context context, BotConfig config, WxMessage message, List<String> history, String imageDataUrl) throws Exception {

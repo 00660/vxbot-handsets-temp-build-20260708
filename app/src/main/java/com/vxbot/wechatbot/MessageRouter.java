@@ -147,7 +147,10 @@ public final class MessageRouter {
             return new Route(Kind.SEARCH, "金融、股票和虚拟币问题：使用网页搜索获取实时信息，再基于搜索结果回答。");
         }
         if (config.enableSports && looksLikeSportsRequest(command)) {
-            return new Route(Kind.SPORTS, "体育赛事查询/分析：查询比赛赛程、比分和状态；分析类问题基于实时赛事结果给上游判断。");
+            if (looksLikeSportsSearchRequest(command)) {
+                return new Route(Kind.SEARCH, "体育分析、转会、伤病和球队动态：使用网页搜索获取实时信息，再基于搜索结果回答。");
+            }
+            return new Route(Kind.SPORTS, "体育比分和赛程查询：查询比赛时间、比分和状态。");
         }
         if (looksLikeUtilityRequest(command)) {
             return new Route(Kind.UTILITY, "本地工具：时间日期、简单计算和单位换算。");
@@ -156,6 +159,9 @@ public final class MessageRouter {
             return new Route(Kind.WOOL, "羊毛线报：抓取赚客吧最新线报并生成榜单图片发群。");
         }
         if (config.enableNews && matchesAny(command, "新闻", "微博热点", "热搜", "热点", "今日头条", "早报", "晨报", "简报")) {
+            if (!looksLikeNewsBriefingRequest(command)) {
+                return new Route(Kind.SEARCH, "专题新闻问题：使用网页搜索获取最新报道，再基于搜索结果回答。");
+            }
             return new Route(Kind.NEWS, "新闻/早报查询：筛选去重后生成新闻卡片图片发群。");
         }
         if (config.enableWeather && matchesAny(command, "天气", "下雨", "温度", "气温", "预报")) {
@@ -556,8 +562,21 @@ public final class MessageRouter {
                 "世界杯", "世俱杯", "欧洲杯", "亚洲杯", "美洲杯", "欧冠", "欧联", "英超", "西甲", "意甲", "德甲", "法甲", "中超",
                 "nba", "wnba", "cba", "nfl", "nhl", "mlb", "f1", "ufc",
                 "足球", "篮球", "网球", "羽毛球", "乒乓球", "排球",
-                "赛程", "赛事", "比分", "战绩", "排名", "积分榜", "对阵", "谁赢", "几比几", "比赛结果", "今日比赛", "今晚比赛", "明天比赛")
+                "赛程", "赛事", "比分", "战绩", "排名", "积分榜", "对阵", "谁赢", "几比几", "比赛结果", "今日比赛", "今晚比赛", "明天比赛",
+                "转会", "伤病", "阵容", "教练", "战术", "球员", "球队")
                 || value.matches(".*(\\w+vs\\w+|\\w+v\\w+).*");
+    }
+
+    private static boolean looksLikeSportsSearchRequest(String text) {
+        String value = compact(text).toLowerCase(Locale.ROOT);
+        return matchesAny(value,
+                "分析", "预测", "怎么看", "看法", "谁强", "谁赢", "胜率", "盘口", "推荐", "买谁", "能不能赢",
+                "转会", "伤病", "阵容", "教练", "战术", "新闻", "消息", "动态", "排名", "积分榜", "战绩");
+    }
+
+    private static boolean looksLikeNewsBriefingRequest(String text) {
+        return matchesAny(text, "早报", "晨报", "新闻早餐", "今日简报", "每日简报",
+                "微博热点", "微博热搜", "百度热搜", "百度热榜", "热榜");
     }
 
     private static boolean isCodexCommand(String text) {
