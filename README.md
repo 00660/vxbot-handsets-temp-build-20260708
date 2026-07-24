@@ -32,7 +32,7 @@
 - 图片分析/表情：支持引用图点开截图后传上游分析或生成表情图。
 - 群发消息：从配置面板向白名单群依次发送自定义消息。
 - 每日问好/新闻早报：定时向白名单群发送随机问好，并附带微博热搜、百度热榜和 Google News RSS 组成的今日早报；群里发送 `早报`、`晨报`、`今日简报` 也可手动触发。
-- 金融/天气/新闻/体育/本地工具/羊毛：内置实时工具分流与回复；金融支持股票代码、A/HK/US 个股名称搜索、指数、汇率、贵金属克价；虚拟币查询优先走 Binance.US/Binance 交易所 ticker，再走 DexScreener 链上/DEX 池，最后才用 CoinGecko，支持合约地址和币安链/BSC 等链偏好，不再让虚拟币问题先落到 Yahoo 或固定 BTC/ETH；体育支持世界杯、足球联赛、NBA/WNBA/NFL/NHL/MLB 等赛程比分；赛事分析类问题会带实时赛程上下文请求上游分析。
+- 金融/天气/新闻/体育/本地工具/羊毛：内置实时工具分流与回复；金融、股票和虚拟币问题统一走网页搜索并由上游基于搜索结果回答；体育支持世界杯、足球联赛、NBA/WNBA/NFL/NHL/MLB 等赛程比分；赛事分析类问题会带实时赛程上下文请求上游分析。
 - 短视频/图集解析：命中抖音、快手、小红书、微博、B站等分享链接后，APK 内置 parse-video 平台解析逻辑直接解析，下载无水印视频、图集或 LivePhoto，并复用图片分享链路发回当前群。
 - 注册机：对接注册码/授权码查询链路，固定文字回复。
 - GXAZ 机器码激活：白名单会话发送 `机器绑定 10位机器码 天卡|月卡|季卡|年卡`，APK 内部按 1/30/90/365 天签发设备绑定的 24 位激活码，不依赖注册机面板。
@@ -130,7 +130,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 - `tts.mimo.start` / `tts.mimo.done`：MiMo TTS 开始和生成完成。
 - `tts.preview.fail` / `tts.preview.play.fail`：面板试听生成或播放失败。
 - `tts.prepare.fallback`：豆包三段 Cookie 缺失、MiMo API Key 缺失、失效或请求失败后，自动回退千问 TTS。
-- `chat.tool.direct`：新闻、金融、天气、体育和本地工具命中后直接使用实时工具结果回复。
+- `chat.tool.direct`：新闻、天气、体育和本地工具命中后直接使用实时工具结果回复。
 - `persona.store.full` / `persona.store.error`：人物画像按群成员分组落盘时成员数超限或写入失败。
 - `persona.analysis.request` / `persona.analysis.fallback`：人物画像上游大模型分析请求或失败后回落本地统计。
 - `morning.briefing.fail`：定时新闻早报生成失败，继续发送普通问好。

@@ -328,7 +328,6 @@ public final class BotConfig {
     public final boolean enableLover;
     public final boolean enableMorningGreeting;
     public final boolean enableShutupCooldown;
-    public final boolean enableFinance;
     public final boolean enableSports;
     public final boolean enableNews;
     public final boolean enableWeather;
@@ -430,7 +429,6 @@ public final class BotConfig {
         enableLover = prefs.getBoolean("enableLover", true);
         enableMorningGreeting = prefs.getBoolean("enableMorningGreeting", true);
         enableShutupCooldown = prefs.getBoolean("enableShutupCooldown", true);
-        enableFinance = prefs.getBoolean("enableFinance", true);
         enableSports = prefs.getBoolean("enableSports", true);
         enableNews = prefs.getBoolean("enableNews", true);
         enableWeather = prefs.getBoolean("enableWeather", true);

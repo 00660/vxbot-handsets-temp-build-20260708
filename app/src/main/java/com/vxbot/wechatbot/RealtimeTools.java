@@ -37,9 +37,6 @@ public final class RealtimeTools {
             if (kind == MessageRouter.Kind.NEWS) {
                 return news(text);
             }
-            if (kind == MessageRouter.Kind.FINANCE) {
-                return finance(text);
-            }
             if (kind == MessageRouter.Kind.SPORTS) {
                 return sports(text);
             }

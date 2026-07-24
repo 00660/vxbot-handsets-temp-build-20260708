@@ -157,7 +157,6 @@ public final class MainActivity extends Activity {
     private Switch enableLover;
     private Switch enableMorningGreeting;
     private Switch enableShutupCooldown;
-    private Switch enableFinance;
     private Switch enableSports;
     private Switch enableNews;
     private Switch enableWeather;
@@ -435,7 +434,6 @@ public final class MainActivity extends Activity {
         enableLover = switchRow(featuresPage, "恋人模式");
         enableMorningGreeting = switchRow(featuresPage, "每天早安问好");
         enableShutupCooldown = switchRow(featuresPage, "闭嘴后本群 30 分钟忽略");
-        enableFinance = switchRow(featuresPage, "金融/股票/虚拟币查询");
         enableSports = switchRow(featuresPage, "体育赛事/比分/赛程查询");
         enableNews = switchRow(featuresPage, "新闻/微博热点");
         enableWeather = switchRow(featuresPage, "天气查询");
@@ -900,7 +898,6 @@ public final class MainActivity extends Activity {
             enableLover.setChecked(config.enableLover);
             enableMorningGreeting.setChecked(config.enableMorningGreeting);
             enableShutupCooldown.setChecked(config.enableShutupCooldown);
-            enableFinance.setChecked(config.enableFinance);
             enableSports.setChecked(config.enableSports);
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
@@ -1003,7 +1000,6 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableLover", enableLover.isChecked());
         e.putBoolean("enableMorningGreeting", enableMorningGreeting.isChecked());
         e.putBoolean("enableShutupCooldown", enableShutupCooldown.isChecked());
-        e.putBoolean("enableFinance", enableFinance.isChecked());
         e.putBoolean("enableSports", enableSports.isChecked());
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());

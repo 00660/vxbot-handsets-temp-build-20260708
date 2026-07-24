@@ -53,7 +53,10 @@ public final class ChatClient {
             throw new IllegalStateException("chatEndpoint 未配置");
         }
         Exception last = null;
-        String toolContext = RealtimeTools.buildContext(context, message.text, route.kind);
+        String userText = MessageRouter.stripBotMention(message.text, config);
+        String toolContext = route.kind == MessageRouter.Kind.SEARCH
+                ? RealtimeTools.webSearch(context, userText)
+                : RealtimeTools.buildContext(context, message.text, route.kind);
         if (route.kind == MessageRouter.Kind.TEXT && isBlank(toolContext)) {
             toolContext = GroupKnowledgeStore.context(context, message.sessionName, message.text);
         }
@@ -143,7 +146,6 @@ public final class ChatClient {
             return false;
         }
         return kind == MessageRouter.Kind.NEWS
-                || kind == MessageRouter.Kind.FINANCE
                 || kind == MessageRouter.Kind.WEATHER
                 || kind == MessageRouter.Kind.SPORTS
                 || kind == MessageRouter.Kind.UTILITY;
@@ -154,9 +156,6 @@ public final class ChatClient {
         if (text.startsWith("实时工具失败：")) {
             if (kind == MessageRouter.Kind.NEWS) {
                 return "热点这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
-            }
-            if (kind == MessageRouter.Kind.FINANCE) {
-                return "行情这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();
             }
             if (kind == MessageRouter.Kind.WEATHER) {
                 return "天气这会儿没取到，接口在抽风：" + text.substring("实时工具失败：".length()).trim();

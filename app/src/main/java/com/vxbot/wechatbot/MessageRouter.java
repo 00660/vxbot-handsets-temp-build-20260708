@@ -13,9 +13,9 @@ public final class MessageRouter {
         TROLL,
         LOVER,
         CODEX,
+        SEARCH,
         LICENSE,
         GXAZ_MACHINE_ACTIVATION,
-        FINANCE,
         SPORTS,
         UTILITY,
         NEWS,
@@ -143,8 +143,8 @@ public final class MessageRouter {
         if (config.enableImage && looksLikeImageRequest(command)) {
             return new Route(Kind.IMAGE, "图片请求：APK 内部组装提示词并直接请求图片上游，不走 3001。");
         }
-        if (config.enableFinance && looksLikeFinanceRequest(command)) {
-            return new Route(Kind.FINANCE, "金融查询：给出简洁结果和必要风险提示，不编造实时行情。");
+        if (looksLikeFinanceRequest(command)) {
+            return new Route(Kind.SEARCH, "金融、股票和虚拟币问题：使用网页搜索获取实时信息，再基于搜索结果回答。");
         }
         if (config.enableSports && looksLikeSportsRequest(command)) {
             return new Route(Kind.SPORTS, "体育赛事查询/分析：查询比赛赛程、比分和状态；分析类问题基于实时赛事结果给上游判断。");
@@ -230,7 +230,7 @@ public final class MessageRouter {
         if ((config.enableImageAnalysis && looksLikeImageAnalysis(command)) || (config.enableImage && looksLikeImageRequest(command))) {
             return true;
         }
-        if (config.enableFinance && looksLikeFinanceRequest(command)) {
+        if (looksLikeFinanceRequest(command)) {
             return true;
         }
         if (config.enableSports && looksLikeSportsRequest(command)) {

@@ -720,7 +720,7 @@ public final class BotService extends Service {
         return route.kind == MessageRouter.Kind.TEXT
                 || route.kind == MessageRouter.Kind.TROLL
                 || route.kind == MessageRouter.Kind.LOVER
-                || route.kind == MessageRouter.Kind.FINANCE
+                || route.kind == MessageRouter.Kind.SEARCH
                 || route.kind == MessageRouter.Kind.SPORTS
                 || route.kind == MessageRouter.Kind.UTILITY
                 || route.kind == MessageRouter.Kind.WEATHER
