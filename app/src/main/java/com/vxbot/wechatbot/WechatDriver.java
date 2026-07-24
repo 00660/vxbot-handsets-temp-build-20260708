@@ -1030,6 +1030,9 @@ public final class WechatDriver {
             if (matchScore == 0) {
                 continue;
             }
+            if (matchScore < 4 && !hasMentionPreviewOnConversationRow(screen, item)) {
+                continue;
+            }
             int score = item.rect.top + Math.abs(item.centerX - Math.round(screen.width * 0.28f));
             if (matchScore > bestMatchScore || (matchScore == bestMatchScore && score < bestScore)) {
                 best = item;
@@ -1040,12 +1043,26 @@ public final class WechatDriver {
         return best;
     }
 
+    private static boolean hasMentionPreviewOnConversationRow(OcrHelper.Screen screen, OcrHelper.OcrItem title) {
+        int maxOffset = Math.max(title.rect.height() * 3, Math.round(screen.height * 0.07f));
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item == title || item.centerY <= title.centerY || item.centerY - title.centerY > maxOffset) {
+                continue;
+            }
+            String text = item.text == null ? "" : item.text;
+            if (text.contains("@") || text.contains("有人我")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static int conversationTitleMatchScore(String rawText, String value, String target) {
         if (value == null || target == null || value.isEmpty() || target.isEmpty()) {
             return 0;
         }
         if (value.equals(target)) {
-            return 3;
+            return 5;
         }
         if (target.length() <= 2) {
             return 0;
@@ -1058,18 +1075,44 @@ public final class WechatDriver {
             return 0;
         }
         if (value.contains(target) || target.contains(value)) {
-            return 2;
+            return 4;
         }
-        if (value.length() != target.length() || target.length() < 4) {
+        int longest = Math.max(value.length(), target.length());
+        if (longest < 4) {
             return 0;
         }
-        int mismatches = 0;
-        for (int i = 0; i < target.length(); i++) {
-            if (value.charAt(i) != target.charAt(i) && ++mismatches > 1) {
-                return 0;
-            }
+        int maxEdits = Math.max(1, (int) Math.ceil(longest * 0.25d));
+        if (Math.abs(value.length() - target.length()) > maxEdits) {
+            return 0;
         }
-        return mismatches == 1 ? 1 : 0;
+        int distance = limitedEditDistance(value, target, maxEdits);
+        return distance <= maxEdits ? maxEdits - distance + 1 : 0;
+    }
+
+    private static int limitedEditDistance(String left, String right, int maxDistance) {
+        int[] previous = new int[right.length() + 1];
+        int[] current = new int[right.length() + 1];
+        for (int j = 0; j <= right.length(); j++) {
+            previous[j] = j;
+        }
+        for (int i = 1; i <= left.length(); i++) {
+            current[0] = i;
+            int rowMin = current[0];
+            for (int j = 1; j <= right.length(); j++) {
+                int replace = previous[j - 1] + (left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1);
+                int insert = current[j - 1] + 1;
+                int delete = previous[j] + 1;
+                current[j] = Math.min(replace, Math.min(insert, delete));
+                rowMin = Math.min(rowMin, current[j]);
+            }
+            if (rowMin > maxDistance) {
+                return maxDistance + 1;
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+        return previous[right.length()];
     }
 
     private boolean waitWechatChatByOcr(Context context, BotConfig config, long timeoutMs) {
