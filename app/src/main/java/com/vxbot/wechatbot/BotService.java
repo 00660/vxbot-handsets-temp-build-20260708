@@ -99,6 +99,7 @@ public final class BotService extends Service {
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
         worker.execute(() -> VmicInjector.resetMtkState(this, "bot-service-create"));
+        worker.execute(this::resumePendingReply);
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
         ReminderManager.rescheduleAll(this);
     }
@@ -121,6 +122,7 @@ public final class BotService extends Service {
         if (ACTION_STOP.equals(action)) {
             BotConfig config = BotConfig.load(this);
             KeepAliveScheduler.cancel(this);
+            PendingReplyStore.clear(this);
             operationActive = false;
             botStartedOnce = false;
             if (logOverlay != null) {
@@ -274,7 +276,7 @@ public final class BotService extends Service {
     }
 
     private void handleMessage(WxMessage message) {
-        handleMessage(message, false);
+        handleMessage(message, false, false);
     }
 
     private void handleForegroundCodexMessage(WxMessage message) {
@@ -282,10 +284,14 @@ public final class BotService extends Service {
             BotLog.i(this, "codex.foreground.ocr.skip_bot_reply", "跳过 OCR 捕获到的机器人自身回复 " + message.display());
             return;
         }
-        handleMessage(message, true);
+        handleMessage(message, true, false);
     }
 
     private void handleMessage(WxMessage message, boolean foregroundCodexOcr) {
+        handleMessage(message, foregroundCodexOcr, false);
+    }
+
+    private void handleMessage(WxMessage message, boolean foregroundCodexOcr, boolean recovered) {
         BotConfig config = BotConfig.load(this);
         if (message == null || (message.text.isEmpty() && message.rawContent.isEmpty())) {
             return;
@@ -302,7 +308,7 @@ public final class BotService extends Service {
             }
         }
         BotLog.i(this, foregroundCodexOcr ? "codex.foreground.raw" : "notice.raw", message.display());
-        if (!foregroundCodexOcr && isStaleStartupNotification(message)) {
+        if (!foregroundCodexOcr && !recovered && isStaleStartupNotification(message)) {
             BotLog.i(this, "notice.skip.stale", "忽略服务启动前残留旧通知 " + message.display()
                     + " postTime=" + message.postTime
                     + " serviceStartedAt=" + serviceStartedAtMs);
@@ -355,7 +361,34 @@ public final class BotService extends Service {
         if (route.kind == MessageRouter.Kind.SHUTUP) {
             sessionStore.muteFor(message.sessionName, 30 * 60 * 1000L);
         }
+        if (isRestartRecoverable(route)) {
+            PendingReplyStore.save(this, message);
+        }
         workerReply(config, message, route);
+    }
+
+    private void resumePendingReply() {
+        WxMessage message = PendingReplyStore.load(this);
+        if (message == null) {
+            return;
+        }
+        BotLog.i(this, "reply.recovery.start", "服务重启后恢复未完成回复 " + message.display());
+        handleMessage(message, false, true);
+    }
+
+    private static boolean isRestartRecoverable(MessageRouter.Route route) {
+        if (route == null) {
+            return false;
+        }
+        return route.kind == MessageRouter.Kind.TEXT
+                || route.kind == MessageRouter.Kind.TROLL
+                || route.kind == MessageRouter.Kind.LOVER
+                || route.kind == MessageRouter.Kind.SEARCH
+                || route.kind == MessageRouter.Kind.SPORTS
+                || route.kind == MessageRouter.Kind.UTILITY
+                || route.kind == MessageRouter.Kind.WEATHER
+                || route.kind == MessageRouter.Kind.REPORT
+                || route.kind == MessageRouter.Kind.SHUTUP;
     }
 
     private boolean isStaleStartupNotification(WxMessage message) {
@@ -696,6 +729,9 @@ public final class BotService extends Service {
         } catch (Exception e) {
             BotLog.e(this, "reply.error", "回复失败: " + e.getMessage());
         } finally {
+            if (isRestartRecoverable(route)) {
+                PendingReplyStore.clearIfMatches(this, message);
+            }
             parallel.shutdownNow();
             resumeLogOverlayAfterOperation();
         }

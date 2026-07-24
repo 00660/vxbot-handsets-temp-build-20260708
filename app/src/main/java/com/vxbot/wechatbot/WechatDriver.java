@@ -465,6 +465,11 @@ public final class WechatDriver {
                     + message.sessionName);
             return openTargetChatFromConversationList(context, config, message, "debug-injected");
         }
+        if (message.notificationKey.startsWith("recovery-")) {
+            BotLog.i(context, "reply.recovery.open.list", "恢复未完成回复，直接从会话列表打开 sessionName="
+                    + message.sessionName);
+            return openTargetChatFromConversationList(context, config, message, "reply-recovery");
+        }
         boolean openedByShade = openNoticeFromShade(context, config, message);
         if (!openedByShade) {
             BotLog.w(context, "notice.open.list_fallback", "通知栏没有打开目标通知，改走微信会话列表 OCR sessionName="
