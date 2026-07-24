@@ -540,8 +540,6 @@ public final class VoiceDemoService extends Service {
         }
         MediaPlayer player = new MediaPlayer();
         PressHandle press = null;
-        Thread nativePress = null;
-        int nativeHoldMs = 0;
         try {
             player.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -558,80 +556,27 @@ public final class VoiceDemoService extends Service {
             BotLog.i(this, "voice.demo.file.ready", path + " size=" + file.length()
                     + " durationMs=" + Math.max(0, player.getDuration()));
             int durationMs = Math.max(0, player.getDuration());
-            int vmicTimeoutMs = vmicPlaybackTimeoutMs(intent, durationMs);
-            if (RootAccessChecker.hasRootPermission()) {
-                int[] point = resolvePressPoint(intent);
-                if (point == null) {
-                    throw new IllegalStateException("WeChat voice press point not confirmed");
-                }
-                int prePlaybackMs = Math.max(0, intExtra(intent, "prePlaybackPressMs", 500));
-                int releaseAfterPlaybackMs = adaptiveReleaseAfterPlaybackMs(intent, durationMs);
-                nativeHoldMs = Math.max(1000, prePlaybackMs + durationMs + releaseAfterPlaybackMs);
-                BotLog.i(this, "voice.demo.press.timing", "reason=" + reason
-                        + " durationMs=" + durationMs
-                        + " prePlaybackMs=" + prePlaybackMs
-                        + " releaseAfterPlaybackMs=" + releaseAfterPlaybackMs
-                        + " holdMs=" + nativeHoldMs
-                        + " vmicTimeoutMs=" + vmicTimeoutMs);
-                nativePress = startNativeLongPress(point[0], point[1], nativeHoldMs, reason);
-                SystemClock.sleep(120);
-                if (!nativePress.isAlive()) {
-                    throw new IllegalStateException("native WeChat voice press failed");
-                }
-            } else {
-                press = pressDown(intent, reason);
-                if (press == null) {
-                    throw new IllegalStateException("WeChat voice press point not confirmed");
-                }
+            int vmicTimeoutMs = vmicPlaybackTimeoutMs(durationMs);
+            BotLog.i(this, "voice.demo.press.timing", "reason=" + reason
+                    + " durationMs=" + durationMs
+                    + " vmicTimeoutMs=" + vmicTimeoutMs);
+            press = pressDown(intent, reason);
+            if (press == null) {
+                throw new IllegalStateException("WeChat voice press point not confirmed");
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            if (VmicInjector.injectFile(this, file, vmicTimeoutMs, reason)) {
-                BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
-            } else {
-                BotLog.w(this, "voice.demo.file.vmic.fallback", path + " durationMs=" + durationMs);
-                player.start();
-                while (player.isPlaying()) {
-                    SystemClock.sleep(80);
-                }
+            if (!VmicInjector.injectFile(this, file, vmicTimeoutMs, reason)) {
+                throw new IllegalStateException("virtual mic injection failed");
             }
+            BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
-            if (nativePress != null) {
-                waitForNativeLongPress(nativePress, nativeHoldMs, reason);
-            } else {
-                delayBeforeRelease(intent, reason);
-                releasePress(press, reason);
-            }
+            releasePress(press, reason);
             player.release();
             if (audioManager != null && oldVolume >= 0 && boolExtra(intent, "restoreVolume", true)) {
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, oldVolume, 0);
             }
-        }
-    }
-
-    private Thread startNativeLongPress(int x, int y, int holdMs, String reason) {
-        String command = String.format(Locale.US, "input swipe %d %d %d %d %d", x, y, x, y, holdMs);
-        Thread thread = new Thread(() -> {
-            BotLog.i(this, "voice.demo.press.native.start", "reason=" + reason
-                    + " x=" + x + " y=" + y + " holdMs=" + holdMs);
-            runRootCommand(command);
-            BotLog.i(this, "voice.demo.press.native.done", "reason=" + reason
-                    + " x=" + x + " y=" + y + " holdMs=" + holdMs);
-        }, "wechat-native-press");
-        thread.start();
-        return thread;
-    }
-
-    private void waitForNativeLongPress(Thread thread, int holdMs, String reason) {
-        try {
-            thread.join(Math.max(5000L, holdMs + 5000L));
-            if (thread.isAlive()) {
-                BotLog.w(this, "voice.demo.press.native.timeout", "reason=" + reason + " holdMs=" + holdMs);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            BotLog.w(this, "voice.demo.press.native.interrupted", "reason=" + reason);
         }
     }
 
@@ -653,18 +598,9 @@ public final class VoiceDemoService extends Service {
         SystemClock.sleep(delayMs);
     }
 
-    private static int adaptiveReleaseAfterPlaybackMs(Intent intent, int durationMs) {
-        int baseMs = Math.max(0, intExtra(intent, "releaseAfterPlaybackMs", 2000));
-        if (durationMs <= 5000) {
-            return baseMs;
-        }
-        int consumeLagMs = Math.round((durationMs - 5000) * 0.30f);
-        return Math.min(14000, baseMs + 1000 + consumeLagMs);
-    }
-
-    private static int vmicPlaybackTimeoutMs(Intent intent, int durationMs) {
-        int releaseMs = adaptiveReleaseAfterPlaybackMs(intent, durationMs);
-        return Math.max(8000, durationMs + releaseMs + 2000);
+    private static int vmicPlaybackTimeoutMs(int durationMs) {
+        int completionAllowanceMs = Math.max(5000, Math.min(14000, durationMs / 2 + 3000));
+        return Math.max(8000, Math.min(58000, durationMs + completionAllowanceMs));
     }
 
     private static final class PressHandle {

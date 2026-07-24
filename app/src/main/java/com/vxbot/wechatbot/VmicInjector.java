@@ -27,6 +27,7 @@ final class VmicInjector {
     private static final int MTK_PROC_TARGET_PEAK = 10000;
     private static final int MTK_PROC_STATUS_POLL_MS = 100;
     private static final int MTK_PROC_TAIL_MS = 800;
+    private static final int MTK_PROC_CONSUMPTION_START_TIMEOUT_MS = 4000;
     private static final int MAX_DECODED_PCM_BYTES = 64 * 1024 * 1024;
     private static final Object INJECT_LOCK = new Object();
 
@@ -40,8 +41,8 @@ final class VmicInjector {
                 return false;
             }
             Helper procHelper = findMtkProcHelper(context);
-            if (!procHelper.path.isEmpty() && injectMtkProc(context, file, timeoutMs, reason)) {
-                return true;
+            if (!procHelper.path.isEmpty()) {
+                return injectMtkProc(context, file, timeoutMs, reason);
             }
             Helper helper = findLegacyHelper(context);
             if (helper.path.isEmpty()) {
@@ -171,7 +172,10 @@ final class VmicInjector {
             if (consumption.completed) {
                 SystemClock.sleep(MTK_PROC_TAIL_MS);
             } else {
-                BotLog.w(context, "vmic.inject.proc.consume.timeout", "reason=" + reason
+                String event = consumption.sourceReadFrame > 0
+                        ? "vmic.inject.proc.consume.timeout"
+                        : "vmic.inject.proc.consume.not_started";
+                BotLog.w(context, event, "reason=" + reason
                         + " sourceFrames=" + consumption.sourceFrames
                         + " sourceReadFrame=" + consumption.sourceReadFrame
                         + " waitMs=" + waitMs
@@ -194,7 +198,7 @@ final class VmicInjector {
                     + " elapsedMs=" + elapsed
                     + " stopCode=" + stopped.code
                     + " out=" + trim(stopped.output));
-            return true;
+            return consumption.completed;
         } catch (Exception e) {
             runRoot("echo enable 0 > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true; "
                     + "echo clear > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true", 4000);
@@ -210,7 +214,9 @@ final class VmicInjector {
 
     private static ProcConsumption waitForMtkProcConsumption(String statusPath, int timeoutMs) {
         long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
+        long startDeadline = Math.min(deadline, SystemClock.uptimeMillis() + MTK_PROC_CONSUMPTION_START_TIMEOUT_MS);
         ProcConsumption last = new ProcConsumption(false, -1, -1, "");
+        boolean consumptionStarted = false;
         while (SystemClock.uptimeMillis() < deadline) {
             ShellResult status = runRoot("cat " + statusPath + " 2>/dev/null || true", 2000);
             long sourceFrames = statusValue(status.output, "source_frames");
@@ -221,6 +227,10 @@ final class VmicInjector {
                 if (last.completed) {
                     return last;
                 }
+                consumptionStarted |= sourceReadFrame > 0;
+            }
+            if (!consumptionStarted && SystemClock.uptimeMillis() >= startDeadline) {
+                return last;
             }
             long remainingMs = deadline - SystemClock.uptimeMillis();
             if (remainingMs > 0) {
