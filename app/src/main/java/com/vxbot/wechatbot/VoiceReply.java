@@ -17,9 +17,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 final class VoiceReply {
-    private static final int VOICE_SEGMENT_TARGET_MS = 40000;
-    private static final int VOICE_SEGMENT_MAX_MS = 42000;
-    private static final int VOICE_SEGMENT_RETRY_TARGET_MS = 38000;
+    private static final int VOICE_SEGMENT_TARGET_MS = 6000;
+    private static final int VOICE_SEGMENT_MAX_MS = 7000;
+    private static final int VOICE_SEGMENT_RETRY_TARGET_MS = 5500;
     private static final int VOICE_SEGMENT_GAP_MS = 800;
     private static final int PRE_PLAYBACK_PRESS_MS = 500;
 
@@ -310,7 +310,7 @@ final class VoiceReply {
     private static int maxSegmentChars(float speechRate) {
         float speed = BotConfig.normalizeTtsSpeed(speechRate);
         int max = Math.round((VOICE_SEGMENT_TARGET_MS * speed - 1800) / 260.0f);
-        return Math.max(80, Math.min(220, max));
+        return Math.max(20, Math.min(220, max));
     }
 
     private static int findSplitPoint(String payload, int start, int end) {
