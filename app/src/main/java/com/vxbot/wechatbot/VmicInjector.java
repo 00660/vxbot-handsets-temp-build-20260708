@@ -357,7 +357,7 @@ final class VmicInjector {
     }
 
     private static int mtkProcControlRate(int sampleRate) {
-        return Math.max(8000, Math.min(192000, sampleRate * 2));
+        return Math.max(8000, Math.min(192000, sampleRate));
     }
 
     private static WavData readWav(File file) throws IOException {
