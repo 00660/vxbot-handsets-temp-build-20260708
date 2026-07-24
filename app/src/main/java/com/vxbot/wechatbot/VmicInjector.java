@@ -99,10 +99,51 @@ final class VmicInjector {
         }
         synchronized (INJECT_LOCK) {
             try {
-                return injectMtkProc(context, prepared.sourceFile, prepared.audio, timeoutMs, reason);
+                return injectMtkProc(context, prepared.sourceFile, prepared.audio, timeoutMs, reason,
+                        prepared.preloaded);
             } finally {
+                prepared.preloaded = false;
                 deleteProcAudio(context, prepared.audio);
             }
+        }
+    }
+
+    static boolean preloadPreparedMtkProc(Context context, PreparedMtkProc prepared, String reason) {
+        if (prepared == null) {
+            return false;
+        }
+        synchronized (INJECT_LOCK) {
+            if (prepared.preloaded) {
+                return true;
+            }
+            String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
+            String pcm = shellQuote(MTK_VIRTUAL_MIC_PCM);
+            String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
+            String raw = shellQuote(prepared.audio.file.getAbsolutePath());
+            String command = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                    + "echo interp 1 > " + ctl + "; "
+                    + "echo copy 1 > " + ctl + "; "
+                    + "echo dma 0 > " + ctl + "; "
+                    + "echo rate " + prepared.audio.controlRate + " > " + ctl + "; "
+                    + "echo loop 0 > " + ctl + " 2>/dev/null || true; "
+                    + "cat " + raw + " > " + pcm + "; rc=$?; "
+                    + "cat " + status + " 2>/dev/null || true; "
+                    + "exit $rc";
+            ShellResult result = runRoot(command, 12000);
+            if (result.code != 0) {
+                BotLog.w(context, "vmic.inject.proc.preload.fail", "reason=" + reason
+                        + " code=" + result.code
+                        + " elapsedMs=" + result.elapsedMs
+                        + " out=" + trim(result.output));
+                return false;
+            }
+            prepared.preloaded = true;
+            BotLog.i(context, "vmic.inject.proc.preload", "reason=" + reason
+                    + " pcm=" + prepared.audio.file.getAbsolutePath()
+                    + " bytes=" + prepared.audio.file.length()
+                    + " elapsedMs=" + result.elapsedMs
+                    + " out=" + trim(result.output));
+            return true;
         }
     }
 
@@ -111,6 +152,12 @@ final class VmicInjector {
             return;
         }
         synchronized (INJECT_LOCK) {
+            if (prepared.preloaded) {
+                String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
+                runRoot("echo enable 0 > " + ctl + " 2>/dev/null || true; "
+                        + "echo clear > " + ctl + " 2>/dev/null || true", 4000);
+                prepared.preloaded = false;
+            }
             deleteProcAudio(context, prepared.audio);
         }
     }
@@ -192,12 +239,21 @@ final class VmicInjector {
 
     private static boolean injectMtkProc(Context context, File file, ProcAudio audio,
                                          int timeoutMs, String reason) {
+        return injectMtkProc(context, file, audio, timeoutMs, reason, false);
+    }
+
+    private static boolean injectMtkProc(Context context, File file, ProcAudio audio,
+                                         int timeoutMs, String reason, boolean preloaded) {
         try {
             String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
             String pcm = shellQuote(MTK_VIRTUAL_MIC_PCM);
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
             String raw = shellQuote(audio.file.getAbsolutePath());
-            String startCommand = "echo enable 0 > " + ctl + " 2>/dev/null || true; "
+            String startCommand = preloaded
+                    ? "echo enable 1 > " + ctl + "; rc=$?; "
+                    + "cat " + status + " 2>/dev/null || true; "
+                    + "exit $rc"
+                    : "echo enable 0 > " + ctl + " 2>/dev/null || true; "
                     + "echo interp 1 > " + ctl + "; "
                     + "echo copy 1 > " + ctl + "; "
                     + "echo dma 0 > " + ctl + "; "
@@ -689,6 +745,7 @@ final class VmicInjector {
     static final class PreparedMtkProc {
         final File sourceFile;
         final ProcAudio audio;
+        boolean preloaded;
 
         PreparedMtkProc(File sourceFile, ProcAudio audio) {
             this.sourceFile = sourceFile;

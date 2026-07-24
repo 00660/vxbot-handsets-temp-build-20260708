@@ -562,6 +562,10 @@ public final class VoiceDemoService extends Service {
                     + " durationMs=" + durationMs
                     + " vmicTimeoutMs=" + vmicTimeoutMs);
             preparedMtkProc = VmicInjector.prepareMtkProc(this, file, reason);
+            if (preparedMtkProc != null
+                    && !VmicInjector.preloadPreparedMtkProc(this, preparedMtkProc, reason)) {
+                throw new IllegalStateException("virtual mic preload failed");
+            }
             press = pressDown(intent, reason);
             if (press == null) {
                 throw new IllegalStateException("WeChat voice press point not confirmed");
