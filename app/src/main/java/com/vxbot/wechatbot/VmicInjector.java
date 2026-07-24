@@ -71,6 +71,50 @@ final class VmicInjector {
         }
     }
 
+    static PreparedMtkProc prepareMtkProc(Context context, File file, String reason) {
+        synchronized (INJECT_LOCK) {
+            if (file == null || !file.isFile() || file.length() <= 44
+                    || findMtkProcHelper(context).path.isEmpty()) {
+                return null;
+            }
+            try {
+                ProcAudio audio = prepareMtkProcAudio(context, file);
+                BotLog.i(context, "vmic.inject.proc.prepared", "reason=" + reason
+                        + " file=" + file.getAbsolutePath()
+                        + " pcm=" + audio.file.getAbsolutePath()
+                        + " durationMs=" + audio.durationMs);
+                return new PreparedMtkProc(file, audio);
+            } catch (Exception e) {
+                BotLog.w(context, "vmic.inject.proc.prepare.fail", "reason=" + reason + " "
+                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+                return null;
+            }
+        }
+    }
+
+    static boolean injectPreparedMtkProc(Context context, PreparedMtkProc prepared,
+                                         int timeoutMs, String reason) {
+        if (prepared == null) {
+            return false;
+        }
+        synchronized (INJECT_LOCK) {
+            try {
+                return injectMtkProc(context, prepared.sourceFile, prepared.audio, timeoutMs, reason);
+            } finally {
+                deleteProcAudio(context, prepared.audio);
+            }
+        }
+    }
+
+    static void discardPreparedMtkProc(Context context, PreparedMtkProc prepared) {
+        if (prepared == null) {
+            return;
+        }
+        synchronized (INJECT_LOCK) {
+            deleteProcAudio(context, prepared.audio);
+        }
+    }
+
     static boolean helperPresent(Context context) {
         return !findMtkProcHelper(context).path.isEmpty() || !findLegacyHelper(context).path.isEmpty();
     }
@@ -134,6 +178,21 @@ final class VmicInjector {
         ProcAudio audio = null;
         try {
             audio = prepareMtkProcAudio(context, file);
+            return injectMtkProc(context, file, audio, timeoutMs, reason);
+        } catch (Exception e) {
+            runRoot("echo enable 0 > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true; "
+                    + "echo clear > " + shellQuote(MTK_VIRTUAL_MIC_CTL) + " 2>/dev/null || true", 4000);
+            BotLog.w(context, "vmic.inject.proc.error", "reason=" + reason + " "
+                    + e.getClass().getSimpleName() + ": " + e.getMessage());
+            return false;
+        } finally {
+            deleteProcAudio(context, audio);
+        }
+    }
+
+    private static boolean injectMtkProc(Context context, File file, ProcAudio audio,
+                                         int timeoutMs, String reason) {
+        try {
             String ctl = shellQuote(MTK_VIRTUAL_MIC_CTL);
             String pcm = shellQuote(MTK_VIRTUAL_MIC_PCM);
             String status = shellQuote(MTK_VIRTUAL_MIC_STATUS);
@@ -205,10 +264,12 @@ final class VmicInjector {
             BotLog.w(context, "vmic.inject.proc.error", "reason=" + reason + " "
                     + e.getClass().getSimpleName() + ": " + e.getMessage());
             return false;
-        } finally {
-            if (audio != null && audio.file != null && audio.file.delete()) {
-                BotLog.i(context, "vmic.inject.proc.deleted", audio.file.getAbsolutePath());
-            }
+        }
+    }
+
+    private static void deleteProcAudio(Context context, ProcAudio audio) {
+        if (audio != null && audio.file != null && audio.file.delete()) {
+            BotLog.i(context, "vmic.inject.proc.deleted", audio.file.getAbsolutePath());
         }
     }
 
@@ -296,7 +357,7 @@ final class VmicInjector {
     }
 
     private static int mtkProcControlRate(int sampleRate) {
-        return Math.max(8000, Math.min(192000, sampleRate));
+        return Math.max(8000, Math.min(192000, sampleRate * 2));
     }
 
     private static WavData readWav(File file) throws IOException {
@@ -623,6 +684,16 @@ final class VmicInjector {
         }
         String oneLine = value.replace('\r', ' ').replace('\n', ' ').trim();
         return oneLine.length() <= 600 ? oneLine : oneLine.substring(0, 600);
+    }
+
+    static final class PreparedMtkProc {
+        final File sourceFile;
+        final ProcAudio audio;
+
+        PreparedMtkProc(File sourceFile, ProcAudio audio) {
+            this.sourceFile = sourceFile;
+            this.audio = audio;
+        }
     }
 
     private static final class ProcAudio {

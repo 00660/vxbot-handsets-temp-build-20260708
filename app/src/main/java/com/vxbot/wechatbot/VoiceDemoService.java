@@ -540,6 +540,7 @@ public final class VoiceDemoService extends Service {
         }
         MediaPlayer player = new MediaPlayer();
         PressHandle press = null;
+        VmicInjector.PreparedMtkProc preparedMtkProc = null;
         try {
             player.setAudioAttributes(new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -560,19 +561,24 @@ public final class VoiceDemoService extends Service {
             BotLog.i(this, "voice.demo.press.timing", "reason=" + reason
                     + " durationMs=" + durationMs
                     + " vmicTimeoutMs=" + vmicTimeoutMs);
+            preparedMtkProc = VmicInjector.prepareMtkProc(this, file, reason);
             press = pressDown(intent, reason);
             if (press == null) {
                 throw new IllegalStateException("WeChat voice press point not confirmed");
             }
             delayAfterPressBeforePlayback(intent, reason);
             BotLog.i(this, "voice.demo.file.start", path + " size=" + file.length() + " pressSynced=true");
-            if (!VmicInjector.injectFile(this, file, vmicTimeoutMs, reason)) {
+            boolean injected = preparedMtkProc != null
+                    ? VmicInjector.injectPreparedMtkProc(this, preparedMtkProc, vmicTimeoutMs, reason)
+                    : VmicInjector.injectFile(this, file, vmicTimeoutMs, reason);
+            if (!injected) {
                 throw new IllegalStateException("virtual mic injection failed");
             }
             BotLog.i(this, "voice.demo.file.vmic.done", path + " durationMs=" + durationMs);
             BotLog.i(this, "voice.demo.file.done", path);
         } finally {
             releasePress(press, reason);
+            VmicInjector.discardPreparedMtkProc(this, preparedMtkProc);
             player.release();
             if (audioManager != null && oldVolume >= 0 && boolExtra(intent, "restoreVolume", true)) {
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, oldVolume, 0);
