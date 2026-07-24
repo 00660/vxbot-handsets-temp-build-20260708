@@ -46,6 +46,7 @@ public final class BotService extends Service {
     private final HsDaemonManager daemonManager = new HsDaemonManager();
     private long serviceStartedAtMs;
     private boolean startupForegroundCleaned;
+    private boolean pendingRecoveryAttempted;
     private volatile boolean botStartedOnce;
     private volatile boolean operationActive;
     private LogOverlayWindow logOverlay;
@@ -99,7 +100,6 @@ public final class BotService extends Service {
         BotLog.i(this, "bot.service.create", "BotService onCreate pid=" + Process.myPid());
         BotLog.i(this, "payment.guard.start", "支付监听独立线程已启动");
         worker.execute(() -> VmicInjector.resetMtkState(this, "bot-service-create"));
-        worker.execute(this::resumePendingReply);
         paymentWorker.execute(() -> new PaymentNoticeFlow().flushPending(this, BotConfig.load(this)));
         ReminderManager.rescheduleAll(this);
     }
@@ -199,6 +199,7 @@ public final class BotService extends Service {
                         ok
                                 ? (restartRecover ? "系统重启服务，已恢复守护检查，不执行启动清场" : "服务已运行，守护检查通过")
                                 : (restartRecover ? "系统重启服务后恢复失败" : "服务守护检查失败"));
+                resumePendingReplyIfReady(ok);
                 return;
             }
             syncLogOverlay(config);
@@ -212,6 +213,7 @@ public final class BotService extends Service {
             }
             ScreenControl.syncForConfig(this, config, "bot-start");
             BotLog.write(this, ok ? "INFO" : "ERROR", "bot.start", ok ? "机器人已启动" : "机器人启动失败");
+            resumePendingReplyIfReady(ok);
         });
         return START_STICKY;
     }
@@ -374,6 +376,14 @@ public final class BotService extends Service {
         }
         BotLog.i(this, "reply.recovery.start", "服务重启后恢复未完成回复 " + message.display());
         handleMessage(message, false, true);
+    }
+
+    private void resumePendingReplyIfReady(boolean hsReady) {
+        if (!hsReady || pendingRecoveryAttempted) {
+            return;
+        }
+        pendingRecoveryAttempted = true;
+        resumePendingReply();
     }
 
     private static boolean isRestartRecoverable(MessageRouter.Route route) {
