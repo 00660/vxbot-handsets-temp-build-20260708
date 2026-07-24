@@ -7,11 +7,13 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class Server {
 
     private static final int MAX_CMD = 256;
+    private static final String WECHAT_PACKAGE = "com.tencent.mm";
 
     /** Bag of handler classes wired up in {@link Main}; lets the constructor
      *  stay legible as we grow the command surface. */
@@ -43,6 +45,7 @@ public final class Server {
     private final Handlers h;
     private final int port;
     private final AtomicBoolean running = new AtomicBoolean(true);
+    private final CommandAudit audit = new CommandAudit();
 
     public Server(Handlers h, int port) {
         this.h = h;
@@ -92,6 +95,9 @@ public final class Server {
                 String head = cmd;
                 int sp = cmd.indexOf(' ');
                 if (sp >= 0) head = cmd.substring(0, sp);
+                if (!"audit".equals(head)) {
+                    audit.record(s, cmd);
+                }
                 switch (head) {
                     case "ping":
                         resp = "pong".getBytes(StandardCharsets.UTF_8);
@@ -161,6 +167,9 @@ public final class Server {
                         break;
                     case "am_kill":
                         resp = runAmKill(cmd);
+                        break;
+                    case "audit":
+                        resp = utf8(audit.snapshot((int) longArg(cmd, "limit", 64)));
                         break;
                     case "am_broadcast":
                         resp = runAmBroadcast(cmd);
@@ -610,12 +619,18 @@ public final class Server {
     private byte[] runAmForceStop(String cmd) {
         String pkg = positional(cmd);
         if (pkg == null) return errBytes("am_force_stop-needs-pkg");
+        if (isProtectedWechatPackage(pkg)) {
+            return errBytes("BLOCKED:protected-package:" + WECHAT_PACKAGE);
+        }
         return h.am.forceStop(pkg);
     }
 
     private byte[] runAmKill(String cmd) {
         String pkg = positional(cmd);
         if (pkg == null) return errBytes("am_kill-needs-pkg");
+        if (isProtectedWechatPackage(pkg)) {
+            return errBytes("BLOCKED:protected-package:" + WECHAT_PACKAGE);
+        }
         return h.am.kill(pkg);
     }
 
@@ -799,9 +814,65 @@ public final class Server {
             writeErrAndTerminator(out, "shell-needs-argv");
             return;
         }
+        if (isProtectedWechatLifecycleShell(tail)) {
+            writeErrAndTerminator(out, "BLOCKED:protected-package:" + WECHAT_PACKAGE);
+            return;
+        }
         java.util.List<String> argv = new java.util.ArrayList<>();
         for (String t : tail.split("\\s+")) argv.add(t);
         h.shellExec.run(argv, out);
+    }
+
+    private static boolean isProtectedWechatPackage(String pkg) {
+        return WECHAT_PACKAGE.equals(pkg.trim());
+    }
+
+    private static boolean isProtectedWechatLifecycleShell(String command) {
+        String value = command.toLowerCase(Locale.ROOT);
+        if (!value.contains(WECHAT_PACKAGE)) {
+            return false;
+        }
+        return value.contains("force-stop")
+                || value.contains("force_stop")
+                || value.contains("am kill")
+                || value.contains("cmd activity kill")
+                || value.contains("killall")
+                || value.contains("pkill")
+                || value.contains("kill ");
+    }
+
+    private static final class CommandAudit {
+        private static final int MAX_ENTRIES = 128;
+        private final java.util.ArrayDeque<String> entries = new java.util.ArrayDeque<>();
+
+        synchronized void record(Socket socket, String cmd) {
+            String peer = String.valueOf(socket.getRemoteSocketAddress());
+            String line = "ts=" + System.currentTimeMillis()
+                    + " peer=" + peer
+                    + " cmd=" + cmd.replace('\r', ' ').replace('\n', ' ');
+            while (entries.size() >= MAX_ENTRIES) {
+                entries.removeFirst();
+            }
+            entries.addLast(line);
+            android.util.Log.i("HsCommandAudit", line);
+        }
+
+        synchronized String snapshot(int requestedLimit) {
+            int limit = Math.max(1, Math.min(MAX_ENTRIES, requestedLimit));
+            int skip = Math.max(0, entries.size() - limit);
+            StringBuilder out = new StringBuilder();
+            int index = 0;
+            for (String line : entries) {
+                if (index++ < skip) {
+                    continue;
+                }
+                if (out.length() > 0) {
+                    out.append('\n');
+                }
+                out.append(line);
+            }
+            return out.length() == 0 ? "audit-empty" : out.toString();
+        }
     }
 
     private byte[] runWmRotation(String cmd) {
