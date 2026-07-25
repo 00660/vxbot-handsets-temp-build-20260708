@@ -145,7 +145,7 @@ public final class BotService extends Service {
             syncLogOverlay(BotConfig.load(this));
             WxMessage message = fromIntent(intent);
             worker.execute(() -> handleMessage(message));
-            return START_REDELIVER_INTENT;
+            return START_NOT_STICKY;
         }
         if (ACTION_TEST_OCR.equals(action)) {
             String target = intent == null ? "发送" : intent.getStringExtra("target");
