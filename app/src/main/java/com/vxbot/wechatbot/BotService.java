@@ -368,6 +368,7 @@ public final class BotService extends Service {
         }
         if (isRestartRecoverable(route)) {
             PendingReplyStore.save(this, message);
+            BotLog.i(this, "reply.pending.save", "已写入待处理回复 " + message.display());
         }
         workerReply(config, message, route);
     }
@@ -416,7 +417,8 @@ public final class BotService extends Service {
                 || route.kind == MessageRouter.Kind.UTILITY
                 || route.kind == MessageRouter.Kind.WEATHER
                 || route.kind == MessageRouter.Kind.REPORT
-                || route.kind == MessageRouter.Kind.SHUTUP;
+                || route.kind == MessageRouter.Kind.SHUTUP
+                || route.kind == MessageRouter.Kind.TTS;
     }
 
     private boolean isStaleStartupNotification(WxMessage message) {
@@ -733,6 +735,7 @@ public final class BotService extends Service {
                 boolean ok = startTtsVoiceInCurrentChat(config, driver, message, route.instruction,
                         "tts-command", preparedVoiceFuture);
                 if (ok) {
+                    clearPendingReplyAfterSend(route, message);
                     sessionStore.rememberBot(message.sessionName, config.primaryBotName(), route.instruction);
                 }
                 return;
@@ -743,12 +746,14 @@ public final class BotService extends Service {
                 boolean sent = startTtsVoiceInCurrentChat(config, driver, message, reply,
                         "reply-voice-" + route.kind.name().toLowerCase(), preparedVoiceFuture);
                 if (sent) {
+                    clearPendingReplyAfterSend(route, message);
                     sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
                 }
                 return;
             }
             boolean sent = driver.sendTextInCurrentChat(this, config, message.sessionName, reply, keepForeground);
             if (sent) {
+                clearPendingReplyAfterSend(route, message);
                 sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
                 if (keepForeground) {
                     startCodexForegroundWatcher(config, message);
@@ -757,12 +762,17 @@ public final class BotService extends Service {
         } catch (Exception e) {
             BotLog.e(this, "reply.error", "回复失败: " + e.getMessage());
         } finally {
-            if (isRestartRecoverable(route)) {
-                PendingReplyStore.clearIfMatches(this, message);
-            }
             parallel.shutdownNow();
             resumeLogOverlayAfterOperation();
         }
+    }
+
+    private void clearPendingReplyAfterSend(MessageRouter.Route route, WxMessage message) {
+        if (!isRestartRecoverable(route)) {
+            return;
+        }
+        PendingReplyStore.clearIfMatches(this, message);
+        BotLog.i(this, "reply.pending.clear", "回复发送成功，已清除待处理标记 " + message.display());
     }
 
     private String prefixTarget(MessageRouter.Route route, String reply) {

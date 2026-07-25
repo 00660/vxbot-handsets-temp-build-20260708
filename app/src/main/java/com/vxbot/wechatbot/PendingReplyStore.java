@@ -13,8 +13,6 @@ final class PendingReplyStore {
     private static final String KEY_NOTIFICATION = "notification";
     private static final String KEY_POST_TIME = "post_time";
     private static final String KEY_SAVED_AT = "saved_at";
-    private static final long MAX_AGE_MS = 5 * 60 * 1000L;
-
     private PendingReplyStore() {
     }
 
@@ -41,10 +39,6 @@ final class PendingReplyStore {
         SharedPreferences prefs = prefs(context);
         long savedAt = prefs.getLong(KEY_SAVED_AT, 0L);
         if (savedAt <= 0L) {
-            return null;
-        }
-        if (System.currentTimeMillis() - savedAt > MAX_AGE_MS) {
-            clear(context);
             return null;
         }
         String session = prefs.getString(KEY_SESSION, "");
