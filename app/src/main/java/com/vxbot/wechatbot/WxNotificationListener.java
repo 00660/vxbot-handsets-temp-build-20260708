@@ -9,6 +9,18 @@ import android.service.notification.StatusBarNotification;
 
 public final class WxNotificationListener extends NotificationListenerService {
     @Override
+    public void onListenerConnected() {
+        super.onListenerConnected();
+        if (BotService.isRunning()) {
+            return;
+        }
+        BotConfig config = BotConfig.load(this);
+        new Thread(() -> new WechatDriver(config.hsPort)
+                .leaveWechatIfForeground(this, "notification-listener-recreate"),
+                "notification-listener-background").start();
+    }
+
+    @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
         if (sbn == null || !"com.tencent.mm".equals(sbn.getPackageName())) {
             return;
