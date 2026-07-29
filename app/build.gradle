@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 233
-        versionName "0.1.233-pending-reply-recovery"
+        versionCode 234
+        versionName "0.1.234-return-home-after-morning-broadcast"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

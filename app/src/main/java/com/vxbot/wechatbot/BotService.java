@@ -1116,6 +1116,7 @@ public final class BotService extends Service {
         } catch (Exception e) {
             BotLog.e(this, "morning.briefing.fail", "新闻早报图片生成或发送失败: " + e.getMessage());
         } finally {
+            new WechatDriver(config.hsPort).leaveWechatIfForeground(this, "morning-broadcast-finished");
             resumeLogOverlayAfterOperation();
         }
     }
