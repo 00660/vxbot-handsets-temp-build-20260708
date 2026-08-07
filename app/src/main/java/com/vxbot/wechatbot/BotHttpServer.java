@@ -33,6 +33,8 @@ final class BotHttpServer {
     private static final String KEY_PANEL_URL = "robotPushPanelUrl";
     private static final int DEFAULT_HTTP_PORT = 18234;
     private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
+    private static final int APP_VERSION_CODE = 234;
+    private static final String APP_VERSION_NAME = "0.1.234-return-home-after-morning-broadcast";
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int READ_TIMEOUT_MS = 130000;
@@ -223,8 +225,8 @@ final class BotHttpServer {
         return new JSONObject()
                 .put("success", true)
                 .put("botId", botId)
-                .put("versionCode", BuildConfig.VERSION_CODE)
-                .put("versionName", BuildConfig.VERSION_NAME)
+                .put("versionCode", APP_VERSION_CODE)
+                .put("versionName", APP_VERSION_NAME)
                 .put("httpPort", httpPort)
                 .put("capabilities", capabilities)
                 .put("uptimeMs", SystemClock.elapsedRealtime());
@@ -262,8 +264,8 @@ final class BotHttpServer {
                     .put("botId", botId)
                     .put("authToken", authToken)
                     .put("httpPort", httpPort)
-                    .put("versionCode", BuildConfig.VERSION_CODE)
-                    .put("versionName", BuildConfig.VERSION_NAME)
+                    .put("versionCode", APP_VERSION_CODE)
+                    .put("versionName", APP_VERSION_NAME)
                     .put("capabilities", new JSONArray().put("text").put("group").put("person"));
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(bytes.length);
