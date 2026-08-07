@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public final class BotService extends Service {
     public static final String ACTION_START = "com.vxbot.wechatbot.START";
@@ -51,6 +52,7 @@ public final class BotService extends Service {
     private volatile boolean operationActive;
     private LogOverlayWindow logOverlay;
     private ControlOverlayWindow controlOverlay;
+    private BotHttpServer robotHttpServer;
     private final SharedPreferences.OnSharedPreferenceChangeListener configListener = (prefs, key) -> {
         if (key == null || "enableLogOverlay".equals(key) || "keepLogOverlayDuringOperation".equals(key)) {
             syncLogOverlay(BotConfig.load(this));
@@ -90,6 +92,8 @@ public final class BotService extends Service {
         logOverlay = new LogOverlayWindow(this);
         BotConfig.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
         BotConfig initialConfig = BotConfig.load(this);
+        robotHttpServer = new BotHttpServer(this, this::sendRobotHttpMessage);
+        robotHttpServer.start();
         syncLogOverlay(initialConfig);
         ScreenControl.syncForConfig(this, initialConfig, "service-create");
         if (initialConfig.syncInputModeFromVoiceSwitch) {
@@ -234,6 +238,10 @@ public final class BotService extends Service {
         }
         if (logOverlay != null) {
             logOverlay.hide();
+        }
+        if (robotHttpServer != null) {
+            robotHttpServer.stop();
+            robotHttpServer = null;
         }
         BotConfig.prefs(this).unregisterOnSharedPreferenceChangeListener(configListener);
         codexForegroundWatcher.shutdown(this);
@@ -1038,6 +1046,41 @@ public final class BotService extends Service {
 
     private void runBroadcastText(String rawText) {
         runBroadcastText(rawText, "manual");
+    }
+
+    private boolean sendRobotHttpMessage(String targetType, String target, String text, String requestId) {
+        try {
+            Future<Boolean> future = worker.submit(() -> runRobotHttpMessage(targetType, target, text, requestId));
+            return future.get(2, TimeUnit.MINUTES);
+        } catch (Exception error) {
+            BotLog.e(this, "robot.http.message.fail", "HTTP 推送等待发送结果失败 target=" + target + " error=" + error.getMessage());
+            return false;
+        }
+    }
+
+    private boolean runRobotHttpMessage(String targetType, String target, String text, String requestId) {
+        BotConfig config = BotConfig.load(this);
+        if (target == null || target.trim().isEmpty() || text == null || text.trim().isEmpty()) {
+            BotLog.e(this, "robot.http.message.abort", "HTTP 推送目标或文本为空 requestId=" + requestId);
+            return false;
+        }
+        if (!daemonManager.ensureRunning(this, config)) {
+            BotLog.e(this, "robot.http.message.abort", "HTTP 推送前 hs daemon 未就绪 target=" + target);
+            return false;
+        }
+        pauseLogOverlayForOperation(config);
+        try {
+            boolean sent = new WechatDriver(config.hsPort).sendBroadcastTextToSession(this, config, target.trim(), text.trim());
+            BotLog.write(this, sent ? "SUCCESS" : "ERROR", "robot.http.message.sent",
+                    (sent ? "HTTP 推送已发送" : "HTTP 推送发送失败")
+                            + " targetType=" + targetType + " target=" + target + " requestId=" + requestId);
+            if (sent) {
+                sessionStore.rememberBot(target.trim(), config.primaryBotName(), text.trim());
+            }
+            return sent;
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
     }
 
     private void runBroadcastText(String rawText, String source) {

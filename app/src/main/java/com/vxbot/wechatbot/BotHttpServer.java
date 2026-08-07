@@ -1,0 +1,320 @@
+package com.vxbot.wechatbot;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.SystemClock;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+/** 内网推送桥：面板注册机器人后，通过 HTTP 投递文本到微信目标会话。 */
+final class BotHttpServer {
+    private static final String PREFS = "bot_config";
+    private static final String KEY_BOT_ID = "robotPushBotId";
+    private static final String KEY_AUTH_TOKEN = "robotPushAuthToken";
+    private static final String KEY_HTTP_PORT = "robotPushHttpPort";
+    private static final String KEY_PANEL_URL = "robotPushPanelUrl";
+    private static final int DEFAULT_HTTP_PORT = 18234;
+    private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
+    private static final int MAX_BODY_BYTES = 64 * 1024;
+    private static final int CONNECT_TIMEOUT_MS = 5000;
+    private static final int READ_TIMEOUT_MS = 130000;
+    private static final int REGISTER_READ_TIMEOUT_MS = 8000;
+    private static final long REGISTER_INTERVAL_MS = 60 * 1000L;
+
+    interface MessageHandler {
+        boolean send(String targetType, String target, String text, String requestId);
+    }
+
+    private final Context context;
+    private final MessageHandler messageHandler;
+    private final SharedPreferences prefs;
+    private final ExecutorService acceptExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService requestExecutor = Executors.newCachedThreadPool();
+    private final ScheduledExecutorService registrationExecutor = Executors.newSingleThreadScheduledExecutor();
+    private volatile boolean running;
+    private ServerSocket serverSocket;
+    private String botId;
+    private String authToken;
+    private int httpPort;
+    private String panelUrl;
+
+    BotHttpServer(Context context, MessageHandler messageHandler) {
+        this.context = context.getApplicationContext();
+        this.messageHandler = messageHandler;
+        this.prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    synchronized void start() {
+        if (running) return;
+        botId = persistedOrCreate(KEY_BOT_ID, false);
+        authToken = persistedOrCreate(KEY_AUTH_TOKEN, true);
+        httpPort = clampPort(prefs.getInt(KEY_HTTP_PORT, DEFAULT_HTTP_PORT));
+        panelUrl = normalizeUrl(prefs.getString(KEY_PANEL_URL, DEFAULT_PANEL_URL));
+        try {
+            serverSocket = new ServerSocket(httpPort);
+            running = true;
+            acceptExecutor.execute(this::acceptLoop);
+            registrationExecutor.scheduleWithFixedDelay(this::registerWithPanel, 1000L, REGISTER_INTERVAL_MS, TimeUnit.MILLISECONDS);
+            BotLog.i(context, "robot.http.start", "机器人 HTTP 服务已启动 port=" + httpPort + " panel=" + panelUrl);
+        } catch (IOException error) {
+            BotLog.e(context, "robot.http.start.fail", "机器人 HTTP 服务启动失败 port=" + httpPort + " error=" + error.getMessage());
+            closeServer();
+        }
+    }
+
+    synchronized void stop() {
+        running = false;
+        closeServer();
+        registrationExecutor.shutdownNow();
+        requestExecutor.shutdownNow();
+        acceptExecutor.shutdownNow();
+        BotLog.i(context, "robot.http.stop", "机器人 HTTP 服务已停止");
+    }
+
+    int port() {
+        return httpPort;
+    }
+
+    private void acceptLoop() {
+        while (running) {
+            try {
+                Socket socket = serverSocket.accept();
+                requestExecutor.execute(() -> handle(socket));
+            } catch (IOException error) {
+                if (running) BotLog.w(context, "robot.http.accept.fail", error.getMessage());
+                return;
+            }
+        }
+    }
+
+    private void handle(Socket socket) {
+        try (Socket client = socket) {
+            client.setSoTimeout(READ_TIMEOUT_MS);
+            InputStream input = client.getInputStream();
+            String headerText = readHeaders(input);
+            if (headerText.isEmpty()) return;
+            String[] headerLines = headerText.split("\\r\\n");
+            String requestLine = headerLines[0];
+            String[] requestParts = requestLine.split("\\s+", 3);
+            if (requestParts.length < 2) {
+                writeJson(client, 400, jsonError("invalid_request"));
+                return;
+            }
+            String method = requestParts[0].toUpperCase(Locale.ROOT);
+            String path = requestParts[1];
+            String token = "";
+            int contentLength = 0;
+            for (int i = 1; i < headerLines.length; i++) {
+                String header = headerLines[i];
+                int colon = header.indexOf(':');
+                if (colon <= 0) continue;
+                String key = header.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                String value = header.substring(colon + 1).trim();
+                if ("content-length".equals(key)) {
+                    try {
+                        contentLength = Integer.parseInt(value);
+                    } catch (NumberFormatException ignored) {
+                        contentLength = -1;
+                    }
+                } else if ("x-vxbot-token".equals(key)) {
+                    token = value;
+                }
+            }
+            if ("GET".equals(method) && "/vxbot/v1/health".equals(new URI(path).getPath())) {
+                writeJson(client, 200, healthJson());
+                return;
+            }
+            if (!"POST".equals(method) || !"/vxbot/v1/messages".equals(new URI(path).getPath())) {
+                writeJson(client, 404, jsonError("not_found"));
+                return;
+            }
+            if (!authToken.equals(token)) {
+                writeJson(client, 401, jsonError("robot_auth_failed"));
+                return;
+            }
+            if (contentLength < 0 || contentLength > MAX_BODY_BYTES) {
+                writeJson(client, 413, jsonError("request_body_too_large"));
+                return;
+            }
+            String body = readBody(input, contentLength);
+            JSONObject payload;
+            try {
+                payload = new JSONObject(body);
+            } catch (Exception error) {
+                writeJson(client, 400, jsonError("invalid_json"));
+                return;
+            }
+            String targetType = payload.optString("targetType", "group").trim().toLowerCase(Locale.ROOT);
+            String target = payload.optString("target", "").trim();
+            String text = payload.optString("text", "").trim();
+            String requestId = payload.optString("requestId", "").trim();
+            if (!("group".equals(targetType) || "person".equals(targetType))) {
+                writeJson(client, 400, jsonError("robot_target_type_invalid"));
+                return;
+            }
+            if (target.isEmpty() || target.length() > 200 || text.isEmpty() || text.length() > 5000) {
+                writeJson(client, 400, jsonError("robot_message_invalid"));
+                return;
+            }
+            boolean sent = messageHandler != null && messageHandler.send(targetType, target, text, requestId);
+            if (!sent) {
+                writeJson(client, 502, jsonError("robot_message_send_failed"));
+                return;
+            }
+            writeJson(client, 200, new JSONObject().put("success", true).put("requestId", requestId));
+        } catch (Exception error) {
+            BotLog.w(context, "robot.http.request.fail", error.getMessage());
+        }
+    }
+
+    private String readHeaders(InputStream input) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        int previous = -1;
+        int current;
+        while ((current = input.read()) >= 0) {
+            output.write(current);
+            if (output.size() > 16 * 1024) throw new IOException("request_headers_too_large");
+            if (previous == '\r' && current == '\n') {
+                byte[] bytes = output.toByteArray();
+                int length = bytes.length;
+                if (length >= 4 && bytes[length - 4] == '\r' && bytes[length - 3] == '\n'
+                        && bytes[length - 2] == '\r' && bytes[length - 1] == '\n') {
+                    return new String(bytes, 0, length - 4, StandardCharsets.US_ASCII);
+                }
+            }
+            previous = current;
+        }
+        return "";
+    }
+
+    private String readBody(InputStream input, int contentLength) throws IOException {
+        if (contentLength == 0) return "";
+        byte[] bytes = new byte[contentLength];
+        int offset = 0;
+        while (offset < bytes.length) {
+            int read = input.read(bytes, offset, bytes.length - offset);
+            if (read < 0) break;
+            offset += read;
+        }
+        if (offset != bytes.length) throw new IOException("request_body_incomplete");
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private JSONObject healthJson() throws Exception {
+        JSONArray capabilities = new JSONArray().put("text").put("group").put("person");
+        return new JSONObject()
+                .put("success", true)
+                .put("botId", botId)
+                .put("versionCode", BuildConfig.VERSION_CODE)
+                .put("versionName", BuildConfig.VERSION_NAME)
+                .put("httpPort", httpPort)
+                .put("capabilities", capabilities)
+                .put("uptimeMs", SystemClock.elapsedRealtime());
+    }
+
+    private JSONObject jsonError(String message) throws Exception {
+        return new JSONObject().put("success", false).put("message", message);
+    }
+
+    private void writeJson(Socket socket, int status, JSONObject body) throws IOException {
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        OutputStream output = socket.getOutputStream();
+        String reason = status == 200 ? "OK" : status == 401 ? "Unauthorized" : status == 404 ? "Not Found" : "Error";
+        String headers = "HTTP/1.1 " + status + " " + reason + "\r\n"
+                + "Content-Type: application/json; charset=utf-8\r\n"
+                + "Content-Length: " + payload.length + "\r\n"
+                + "Connection: close\r\n\r\n";
+        output.write(headers.getBytes(StandardCharsets.US_ASCII));
+        output.write(payload);
+        output.flush();
+    }
+
+    private void registerWithPanel() {
+        if (!running || panelUrl.isEmpty()) return;
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(panelUrl + "/api/ibox/v304/robots/register");
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(REGISTER_READ_TIMEOUT_MS);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            JSONObject body = new JSONObject()
+                    .put("botId", botId)
+                    .put("authToken", authToken)
+                    .put("httpPort", httpPort)
+                    .put("versionCode", BuildConfig.VERSION_CODE)
+                    .put("versionName", BuildConfig.VERSION_NAME)
+                    .put("capabilities", new JSONArray().put("text").put("group").put("person"));
+            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(bytes.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(bytes);
+            }
+            int status = connection.getResponseCode();
+            if (status >= 200 && status < 300) {
+                BotLog.i(context, "robot.http.register", "机器人已向面板注册 botId=" + botId + " http=" + httpPort);
+            } else {
+                BotLog.w(context, "robot.http.register.fail", "面板注册失败 http=" + status);
+            }
+        } catch (Exception error) {
+            BotLog.w(context, "robot.http.register.fail", "面板注册请求失败: " + error.getMessage());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String persistedOrCreate(String key, boolean secret) {
+        String current = prefs.getString(key, "").trim();
+        if (!current.isEmpty()) return current;
+        String generated = secret ? randomHex(32) : java.util.UUID.randomUUID().toString();
+        prefs.edit().putString(key, generated).apply();
+        return generated;
+    }
+
+    private static String randomHex(int length) {
+        byte[] bytes = new byte[(length + 1) / 2];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder result = new StringBuilder(length);
+        for (byte value : bytes) result.append(String.format(Locale.US, "%02x", value));
+        return result.substring(0, length);
+    }
+
+    private static int clampPort(int value) {
+        return value >= 1024 && value <= 65535 ? value : DEFAULT_HTTP_PORT;
+    }
+
+    private static String normalizeUrl(String value) {
+        String result = value == null ? "" : value.trim();
+        while (result.endsWith("/")) result = result.substring(0, result.length() - 1);
+        return result.isEmpty() ? DEFAULT_PANEL_URL : result;
+    }
+
+    private synchronized void closeServer() {
+        if (serverSocket == null) return;
+        try {
+            serverSocket.close();
+        } catch (IOException ignored) {
+        }
+        serverSocket = null;
+    }
+}
