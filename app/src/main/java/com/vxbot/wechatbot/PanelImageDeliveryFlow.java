@@ -16,8 +16,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
 
 /** 面板图片投递专用流程。其它图片、视频和群发链路不复用这里的目标选择逻辑。 */
 public final class PanelImageDeliveryFlow {
@@ -40,16 +38,6 @@ public final class PanelImageDeliveryFlow {
         }
     }
 
-    private static final class TargetHit {
-        final String text;
-        final Rect rect;
-
-        TargetHit(String text, Rect rect) {
-            this.text = text == null ? "" : text;
-            this.rect = new Rect(rect);
-        }
-    }
-
     public boolean shareExistingImage(Context context, BotConfig config, File file, String target) {
         long started = SystemClock.uptimeMillis();
         HsClient hs = new HsClient(config == null ? 9010 : config.hsPort);
@@ -69,12 +57,12 @@ public final class PanelImageDeliveryFlow {
                 BotLog.e(context, "panel.share.select.timeout", "面板分享页未就绪 target=" + target);
                 return false;
             }
-            if (!selectTargetBySearch(context, config, hs, target.trim())) {
-                BotLog.e(context, "panel.share.target.failed", "分享页搜索目标失败 target=" + target);
+            if (!selectTargetByDirectOcr(context, config, hs, target.trim())) {
+                BotLog.e(context, "panel.share.target.failed", "分享页目标 OCR 失败 target=" + target);
                 return false;
             }
             if (!waitConfirmPage(context, config, hs, CONFIRM_TIMEOUT_MS, target.trim())) {
-                BotLog.e(context, "panel.share.confirm.failed", "点击搜索结果后未确认目标 target=" + target);
+                BotLog.e(context, "panel.share.confirm.failed", "点击目标后未确认 target=" + target);
                 return false;
             }
             sent = clickSendAndWait(context, config, hs, target.trim());
@@ -102,7 +90,7 @@ public final class PanelImageDeliveryFlow {
             intent.putExtra(ShareProxyActivity.EXTRA_MIME, asset.mime);
             intent.putExtra(ShareProxyActivity.EXTRA_FILE_NAME, asset.fileName);
             intent.putExtra(ShareProxyActivity.EXTRA_DIRECT, true);
-            intent.putExtra(ShareProxyActivity.EXTRA_PREFIX, "PanelSearch");
+            intent.putExtra(ShareProxyActivity.EXTRA_PREFIX, "PanelDirectOcr");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION
                     | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             if ("content".equals(asset.contentUri.getScheme())) {
@@ -139,137 +127,50 @@ public final class PanelImageDeliveryFlow {
         }, 0f, 1f, 0f, 0.35f) != null;
     }
 
-    private boolean selectTargetBySearch(Context context, BotConfig config, HsClient hs, String target) throws Exception {
+    private boolean selectTargetByDirectOcr(Context context, BotConfig config, HsClient hs, String target) throws Exception {
         long deadline = SystemClock.uptimeMillis() + TARGET_TIMEOUT_MS;
-        TargetHit previous = null;
-        int stable = 0;
-        boolean pasted = false;
+        int attempt = 0;
         while (SystemClock.uptimeMillis() < deadline) {
+            attempt++;
             OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
             if (screen == null) {
                 SystemClock.sleep(selectPoll(config));
                 continue;
             }
-            if (!pasted) {
-                OcrHelper.OcrItem search = findShareSearchBox(screen);
-                if (search == null) {
-                    BotLog.i(context, "panel.share.search.wait", "等待分享页顶部搜索框 target=" + target);
-                    SystemClock.sleep(selectPoll(config));
+            OcrHelper.OcrItem recent = find(screen, text -> "最近聊天".equals(clean(text)),
+                    0f, 1f, 0.10f, 0.60f);
+            int minY = recent == null ? Math.round(screen.height * 0.30f) : recent.rect.bottom + 20;
+            OcrHelper.OcrItem candidate = null;
+            boolean ambiguous = false;
+            for (OcrHelper.OcrItem item : screen.items) {
+                if (item.centerY < minY || item.centerY > screen.height - 80
+                        || !matchesTarget(item.text, target)) {
                     continue;
                 }
-                BotLog.i(context, "panel.share.search.input.tap", "点击分享页顶部搜索框"
-                        + " text=" + search.text + " x=" + search.centerX + " y=" + search.centerY);
-                hs.tap(search.centerX, search.centerY);
-                SystemClock.sleep(Math.max(1500L, selectPoll(config) * 5));
-                String clip = hs.clipSet(target);
-                if (isError(clip)) {
-                    BotLog.e(context, "panel.share.search.clip.fail", clip);
-                    return false;
+                if (candidate == null) {
+                    candidate = item;
+                } else if (Math.abs(candidate.centerY - item.centerY) > 28) {
+                    ambiguous = true;
+                    break;
+                } else if (item.rect.width() > candidate.rect.width()) {
+                    candidate = item;
                 }
-                String paste = hs.keyCode(279);
-                if (isError(paste)) {
-                    BotLog.e(context, "panel.share.search.paste.fail", paste);
-                    return false;
-                }
-                pasted = true;
-                BotLog.i(context, "panel.share.search.paste", "已粘贴分享页搜索目标 target=" + target
-                        + " x=" + search.centerX + " y=" + search.centerY);
-                SystemClock.sleep(Math.max(500L, selectPoll(config) * 2));
+            }
+            if (candidate == null || ambiguous) {
+                BotLog.i(context, "panel.share.target.wait", "等待唯一目标 OCR target=" + target
+                        + " attempt=" + attempt + " ambiguous=" + ambiguous
+                        + " snippets=" + screen.snippets);
+                SystemClock.sleep(Math.max(450L, confirmPoll(config)));
                 continue;
             }
-
-            TargetHit hit = findSearchResult(screen, target);
-            if (hit == null) {
-                stable = 0;
-                previous = null;
-                SystemClock.sleep(selectPoll(config));
-                continue;
-            }
-            if (sameHit(previous, hit)) {
-                stable++;
-            } else {
-                stable = 1;
-            }
-            previous = hit;
-            if (stable < 3) {
-                SystemClock.sleep(Math.max(350L, selectPoll(config)));
-                continue;
-            }
-            hs.tap(hit.rect.centerX(), hit.rect.centerY());
-            BotLog.i(context, "panel.share.search.result.tap", "点击分享页搜索结果 target=" + target
-                    + " text=" + hit.text + " x=" + hit.rect.centerX() + " y=" + hit.rect.centerY());
+            hs.tap(candidate.centerX, candidate.centerY);
+            BotLog.i(context, "panel.share.target.tap", "点击分享页目标 target=" + target
+                    + " text=" + candidate.text + " x=" + candidate.centerX + " y=" + candidate.centerY
+                    + " attempt=" + attempt);
             return true;
         }
-        BotLog.e(context, "panel.share.search.timeout", "分享页搜索结果超时 target=" + target);
+        BotLog.e(context, "panel.share.target.timeout", "分享页目标 OCR 超时 target=" + target);
         return false;
-    }
-
-    private TargetHit findSearchResult(OcrHelper.Screen screen, String target) {
-        if (screen == null) {
-            return null;
-        }
-        OcrHelper.OcrItem search = findShareSearchBox(screen);
-        OcrHelper.OcrItem groupHeader = find(screen, text -> "群聊".equals(clean(text)),
-                0f, 1f, 0.12f, 0.55f);
-        int minY = Math.round(screen.height * 0.16f);
-        if (search != null) {
-            minY = Math.max(minY, search.rect.bottom + 12);
-        }
-        if (groupHeader != null) {
-            minY = Math.max(minY, groupHeader.rect.bottom + 8);
-        }
-        List<OcrHelper.OcrItem> matches = new ArrayList<>();
-        for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < minY || item.centerY > screen.height * 0.86f) {
-                continue;
-            }
-            if (!matchesTarget(item.text, target)) {
-                continue;
-            }
-            matches.add(item);
-        }
-        if (matches.isEmpty()) {
-            return null;
-        }
-        List<TargetHit> rows = new ArrayList<>();
-        for (OcrHelper.OcrItem item : matches) {
-            TargetHit hit = new TargetHit(item.text, item.rect);
-            int row = -1;
-            for (int i = 0; i < rows.size(); i++) {
-                if (Math.abs(rows.get(i).rect.centerY() - hit.rect.centerY()) <= 58
-                        && Math.abs(rows.get(i).rect.centerX() - hit.rect.centerX()) <= screen.width * 0.20f) {
-                    row = i;
-                    break;
-                }
-            }
-            if (row < 0) {
-                rows.add(hit);
-            } else if (hit.rect.top < rows.get(row).rect.top || hit.rect.width() > rows.get(row).rect.width()) {
-                rows.set(row, hit);
-            }
-        }
-        if (rows.size() != 1) {
-            return null;
-        }
-        return rows.get(0);
-    }
-
-    private OcrHelper.OcrItem findShareSearchBox(OcrHelper.Screen screen) {
-        if (screen == null) {
-            return null;
-        }
-        OcrHelper.OcrItem best = null;
-        for (OcrHelper.OcrItem item : screen.items) {
-            String value = clean(item.text);
-            if (item.centerY < screen.height * 0.06f || item.centerY > screen.height * 0.24f
-                    || !value.contains("搜索")) {
-                continue;
-            }
-            if (best == null || item.rect.width() > best.rect.width()) {
-                best = item;
-            }
-        }
-        return best;
     }
 
     private boolean waitConfirmPage(Context context, BotConfig config, HsClient hs,
@@ -376,15 +277,6 @@ public final class PanelImageDeliveryFlow {
 
     private String clean(String text) {
         return normalize(text).replace("Q", "").replace("q", "");
-    }
-
-    private boolean sameHit(TargetHit a, TargetHit b) {
-        return a != null && b != null && Math.abs(a.rect.centerX() - b.rect.centerX()) <= 18
-                && Math.abs(a.rect.centerY() - b.rect.centerY()) <= 24;
-    }
-
-    private boolean isError(String value) {
-        return value != null && value.startsWith("ERR:");
     }
 
     private long selectPoll(BotConfig config) {
