@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 236
-        versionName "0.1.236-recent-chats-delivery"
+        versionCode 237
+        versionName "0.1.237-recent-chats-ocr-anchor"
         multiDexKeepProguard file("multidex-keep.pro")
     }
 

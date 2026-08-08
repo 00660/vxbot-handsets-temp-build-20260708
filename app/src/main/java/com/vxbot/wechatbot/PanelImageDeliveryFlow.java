@@ -137,16 +137,31 @@ public final class PanelImageDeliveryFlow {
                 SystemClock.sleep(selectPoll(config));
                 continue;
             }
-            OcrHelper.OcrItem recentChats = find(screen,
-                    text -> clean(text).contains("最近聊天"),
-                    0f, 1f, 0.20f, 0.70f);
+            OcrHelper.OcrItem recentChats = null;
+            for (OcrHelper.OcrItem item : screen.items) {
+                if (item.centerY < screen.height * 0.20f || item.centerY > screen.height * 0.70f
+                        || !clean(item.text).contains("最近聊天")) {
+                    continue;
+                }
+                long itemArea = (long) item.rect.width() * item.rect.height();
+                long bestArea = recentChats == null
+                        ? Long.MAX_VALUE
+                        : (long) recentChats.rect.width() * recentChats.rect.height();
+                if (recentChats == null || itemArea < bestArea) {
+                    recentChats = item;
+                }
+            }
             if (recentChats == null) {
                 BotLog.i(context, "panel.share.recent_chats.wait",
                         "等待最近聊天列表 target=" + target + " attempt=" + attempt);
                 SystemClock.sleep(Math.max(450L, confirmPoll(config)));
                 continue;
             }
-            int minY = recentChats.rect.bottom + 12;
+            int minY = recentChats.rect.bottom + Math.max(8, Math.round(screen.height * 0.005f));
+            if (attempt == 1) {
+                BotLog.i(context, "panel.share.recent_chats.anchor",
+                        "最近聊天边界 rect=" + recentChats.rect.flattenToString() + " minY=" + minY);
+            }
             String wanted = normalize(target);
             OcrHelper.OcrItem exact = null;
             OcrHelper.OcrItem fuzzy = null;
