@@ -345,7 +345,7 @@ public final class PanelImageDeliveryFlow {
             return false;
         }
         for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < screen.height * 0.50f || item.centerY > screen.height * 0.82f) {
+            if (item.centerY < screen.height * 0.15f || item.centerY > screen.height * 0.82f) {
                 continue;
             }
             if (matchesTarget(item.text, target)) {
