@@ -1078,7 +1078,7 @@ public final class BotService extends Service {
             }
             pauseLogOverlayForOperation(config);
             image = RobotDeliveryImage.create(this, task.title, task.text, task.event, task.deliveryId);
-            sent = new ImageFlow().shareExistingImage(this, config, image, task.target.trim());
+            sent = new PanelImageDeliveryFlow().shareExistingImage(this, config, image, task.target.trim());
             detail = sent ? "image_shared" : "image_share_failed";
             BotLog.write(this, sent ? "SUCCESS" : "ERROR", "robot.http.delivery.sent",
                     (sent ? "图片任务已发送" : "图片任务发送失败")
