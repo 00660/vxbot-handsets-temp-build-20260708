@@ -48,7 +48,8 @@ public final class ImageFlow {
     private static final long QUOTED_IMAGE_OPEN_SETTLE_MS = 800L;
     private static final long QUOTED_IMAGE_AFTER_CAPTURE_WAIT_MS = 300L;
     private static final long SHARE_SELECT_RENDER_WAIT_MS = 2000L;
-    private static final long SHARE_OCR_TIMEOUT_MS = 15000L;
+    private static final long SHARE_TARGET_OCR_TIMEOUT_MS = 30000L;
+    private static final long SHARE_CONFIRM_OCR_TIMEOUT_MS = 15000L;
     private static final Map<String, ImageMemory> IMAGE_CONTEXTS = new HashMap<>();
 
     public boolean handle(Context context, BotConfig config, WxMessage message, SessionStore store, WechatDriver driver) {
@@ -735,7 +736,7 @@ public final class ImageFlow {
     }
 
     private boolean clickShareTargetByOcr(Context context, BotConfig config, HsClient hs, String sessionName) throws Exception {
-        long deadline = SystemClock.uptimeMillis() + SHARE_OCR_TIMEOUT_MS;
+        long deadline = SystemClock.uptimeMillis() + SHARE_TARGET_OCR_TIMEOUT_MS;
         int attempt = 0;
         while (SystemClock.uptimeMillis() < deadline) {
             attempt++;
@@ -765,7 +766,7 @@ public final class ImageFlow {
                 BotLog.w(context, "image.share.target.missing", "OCR 未找到分享目标会话 target=" + sessionName
                         + " attempt=" + attempt
                         + " snippets=" + (screen == null ? "" : screen.snippets));
-                SystemClock.sleep(shareConfirmPoll(config));
+                SystemClock.sleep(Math.max(500L, shareConfirmPoll(config)));
                 continue;
             }
             int targetX = candidate.centerX;
@@ -782,7 +783,7 @@ public final class ImageFlow {
             SystemClock.sleep(Math.max(350L, shareConfirmPoll(config)));
         }
         BotLog.w(context, "image.share.target.timeout", "分享目标 OCR 超时，退出扫描 target=" + sessionName
-                + " timeoutMs=" + SHARE_OCR_TIMEOUT_MS);
+                + " timeoutMs=" + SHARE_TARGET_OCR_TIMEOUT_MS);
         dumpShareOcrItems(context, hs, "target-not-found");
         return false;
     }
@@ -799,7 +800,7 @@ public final class ImageFlow {
     }
 
     private boolean clickShareSendByOcr(Context context, BotConfig config, HsClient hs, String sessionName, String prefix) throws Exception {
-        long deadline = SystemClock.uptimeMillis() + SHARE_OCR_TIMEOUT_MS;
+        long deadline = SystemClock.uptimeMillis() + SHARE_CONFIRM_OCR_TIMEOUT_MS;
         int attempt = 0;
         while (SystemClock.uptimeMillis() < deadline) {
             attempt++;
@@ -1141,6 +1142,15 @@ public final class ImageFlow {
                 || value.length() < Math.max(4, target.length() - 3)
                 || value.charAt(value.length() - 1) != target.charAt(target.length() - 1)) {
             return false;
+        }
+        if (value.length() == target.length()) {
+            int different = 0;
+            for (int i = 0; i < target.length(); i++) {
+                if (value.charAt(i) != target.charAt(i) && ++different > 1) {
+                    return false;
+                }
+            }
+            return different == 1;
         }
         int cursor = 0;
         int run = 0;
