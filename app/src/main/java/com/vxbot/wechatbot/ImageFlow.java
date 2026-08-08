@@ -1341,6 +1341,9 @@ public final class ImageFlow {
             if (other == item || other.centerY < top || other.centerY > bottom) {
                 continue;
             }
+            if (Math.abs(item.centerX - other.centerX) > Math.round(screen.width * 0.06f)) {
+                continue;
+            }
             String otherValue = normalizeShareTargetName(other.text);
             if (otherValue.length() <= target.length() || !otherValue.contains(value)) {
                 continue;
