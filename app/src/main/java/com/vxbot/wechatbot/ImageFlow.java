@@ -47,6 +47,8 @@ public final class ImageFlow {
     private static final int MAX_BATCH_SELFIES = 7;
     private static final long QUOTED_IMAGE_OPEN_SETTLE_MS = 800L;
     private static final long QUOTED_IMAGE_AFTER_CAPTURE_WAIT_MS = 300L;
+    private static final long SHARE_SELECT_RENDER_WAIT_MS = 2000L;
+    private static final long SHARE_OCR_TIMEOUT_MS = 15000L;
     private static final Map<String, ImageMemory> IMAGE_CONTEXTS = new HashMap<>();
 
     public boolean handle(Context context, BotConfig config, WxMessage message, SessionStore store, WechatDriver driver) {
@@ -612,7 +614,7 @@ public final class ImageFlow {
     private boolean openWechatSendFriendEntry(Context context, BotConfig config, HsClient hs, int maxAttempts) throws Exception {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             if (waitShareSelect(context, hs, 900, shareSelectPoll(config))) {
-                SystemClock.sleep(Math.max(250L, shareSelectPoll(config)));
+                SystemClock.sleep(Math.max(SHARE_SELECT_RENDER_WAIT_MS, shareSelectPoll(config) * 6));
                 return true;
             }
             boolean clickedFriend = clickShareOcrItem(context, config, hs, this::matchShareFriendEntryText,
@@ -624,7 +626,7 @@ public final class ImageFlow {
             clickShareOcrItem(context, config, hs, text -> normalizeShareTargetName(text).contains("仅此一次"),
                     "仅此一次", 0f, 1f, 0f, 1f);
             if (waitShareSelect(context, hs, 5000, shareSelectPoll(config))) {
-                SystemClock.sleep(Math.max(250L, shareSelectPoll(config)));
+                SystemClock.sleep(Math.max(SHARE_SELECT_RENDER_WAIT_MS, shareSelectPoll(config) * 6));
                 return true;
             }
             BotLog.w(context, "image.share.select.wait.retry", "微信选择聊天页未就绪，重试 attempt=" + attempt);
@@ -733,32 +735,45 @@ public final class ImageFlow {
     }
 
     private boolean clickShareTargetByOcr(Context context, BotConfig config, HsClient hs, String sessionName) throws Exception {
-        for (int attempt = 1; attempt <= 8; attempt++) {
-            ShareTargetOcr.Hit candidate = ShareTargetOcr.findVisibleTarget(context, hs, sessionName);
-            if (candidate == null) {
-                OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-                OcrHelper.OcrItem exact = findShareOcrText(screen,
-                        text -> NameNormalizer.sameName(text, sessionName),
-                        0f, 1f, 0.32f, 1f);
-                candidate = ShareTargetOcr.Hit.from(exact);
-                if (candidate != null) {
-                    BotLog.i(context, "image.share.target.legacy.hit", "通用 OCR 精确回退命中分享目标 target=" + sessionName
-                            + " text=" + candidate.text + " rect=" + candidate.rect.flattenToString());
+        long deadline = SystemClock.uptimeMillis() + SHARE_OCR_TIMEOUT_MS;
+        int attempt = 0;
+        while (SystemClock.uptimeMillis() < deadline) {
+            attempt++;
+            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+            OcrHelper.OcrItem recent = findShareOcrText(screen, text -> normalizeShareTargetName(text).contains("最近聊天"),
+                    0f, 1f, 0f, 1f);
+            int minY = recent == null ? Math.round((screen == null ? 1600 : screen.height) * 0.32f) : recent.rect.bottom + 20;
+            OcrHelper.OcrItem fallback = null;
+            OcrHelper.OcrItem candidate = null;
+            if (screen != null) {
+                for (OcrHelper.OcrItem item : screen.items) {
+                    if (!matchShareTargetName(item.text, sessionName)
+                            || isNestedShareTargetItem(screen, item, sessionName)) {
+                        continue;
+                    }
+                    if (fallback == null) {
+                        fallback = item;
+                    }
+                    if (item.centerY >= minY && item.centerY < screen.height - 80) {
+                        candidate = item;
+                        break;
+                    }
                 }
             }
+            candidate = candidate == null ? fallback : candidate;
             if (candidate == null) {
-                BotLog.w(context, "image.share.target.missing", "专用 OCR 未找到分享目标会话 target=" + sessionName
-                        + " attempt=" + attempt);
+                BotLog.w(context, "image.share.target.missing", "OCR 未找到分享目标会话 target=" + sessionName
+                        + " attempt=" + attempt
+                        + " snippets=" + (screen == null ? "" : screen.snippets));
                 SystemClock.sleep(shareConfirmPoll(config));
                 continue;
             }
-            int targetX = candidate.rect.centerX();
-            int targetY = candidate.rect.centerY();
-            hs.tap(targetX, targetY);
-            BotLog.i(context, "image.share.target.found", "专用 OCR 找到分享目标会话 target=" + sessionName
-                    + " text=" + candidate.text + " x=" + targetX + " y=" + targetY
+            int targetX = candidate.centerX;
+            hs.tap(targetX, candidate.centerY);
+            BotLog.i(context, "image.share.target.found", "OCR 找到分享目标会话 target=" + sessionName
+                    + " text=" + candidate.text + " x=" + targetX + " y=" + candidate.centerY
                     + " attempt=" + attempt);
-            if (waitShareConfirmPage(context, config, hs, 2500)) {
+            if (waitShareConfirmPage(context, config, hs, 7000)) {
                 BotLog.i(context, "image.share.confirm.ready", "分享确认页已出现 target=" + sessionName);
                 return true;
             }
@@ -766,6 +781,8 @@ public final class ImageFlow {
                     + " attempt=" + attempt);
             SystemClock.sleep(Math.max(350L, shareConfirmPoll(config)));
         }
+        BotLog.w(context, "image.share.target.timeout", "分享目标 OCR 超时，退出扫描 target=" + sessionName
+                + " timeoutMs=" + SHARE_OCR_TIMEOUT_MS);
         dumpShareOcrItems(context, hs, "target-not-found");
         return false;
     }
@@ -782,7 +799,10 @@ public final class ImageFlow {
     }
 
     private boolean clickShareSendByOcr(Context context, BotConfig config, HsClient hs, String sessionName, String prefix) throws Exception {
-        for (int attempt = 1; attempt <= 8; attempt++) {
+        long deadline = SystemClock.uptimeMillis() + SHARE_OCR_TIMEOUT_MS;
+        int attempt = 0;
+        while (SystemClock.uptimeMillis() < deadline) {
+            attempt++;
             OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
             if (!isShareConfirmPage(screen)) {
                 BotLog.w(context, "image.share.confirm.missing", "当前未识别到分享确认页，等待发送按钮 target=" + sessionName
@@ -791,8 +811,7 @@ public final class ImageFlow {
                 SystemClock.sleep(Math.max(350L, shareConfirmPoll(config)));
                 continue;
             }
-            boolean targetConfirmed = ShareTargetOcr.findVisibleTarget(context, hs, sessionName) != null
-                    || confirmPageContainsTarget(screen, sessionName);
+            boolean targetConfirmed = confirmPageContainsTarget(screen, sessionName);
             if (!targetConfirmed) {
                 BotLog.e(context, "image.share.confirm.target_miss", "确认页目标群 OCR 未完整确认，取消发送 target=" + sessionName
                         + " attempt=" + attempt
@@ -1022,10 +1041,11 @@ public final class ImageFlow {
             return false;
         }
         for (OcrHelper.OcrItem item : screen.items) {
-            String value = normalizeShareTargetName(item.text);
-            if (value.equals(target)
-                    || (value.startsWith("发送给") && value.substring("发送给".length()).equals(target))
-                    || (value.startsWith("发送到") && value.substring("发送到".length()).equals(target))) {
+            if (item.centerY < screen.height * 0.50f || item.centerY > screen.height * 0.80f) {
+                continue;
+            }
+            if (matchShareTargetName(item.text, sessionName)
+                    && !isNestedShareTargetItem(screen, item, sessionName)) {
                 return true;
             }
         }
@@ -1105,8 +1125,73 @@ public final class ImageFlow {
         return value.contains("发") || value.contains("送") || value.contains("递") || value.contains("给");
     }
 
+    private boolean matchShareTargetName(String text, String name) {
+        String value = normalizeShareTargetName(text);
+        if (value.startsWith("发送给") || value.startsWith("发送到")) {
+            value = value.substring(3);
+        }
+        String target = normalizeShareTargetName(name);
+        if (value.isEmpty() || target.isEmpty()) {
+            return false;
+        }
+        if (value.equals(target)) {
+            return true;
+        }
+        if (value.length() > target.length()
+                || value.length() < Math.max(4, target.length() - 3)
+                || value.charAt(value.length() - 1) != target.charAt(target.length() - 1)) {
+            return false;
+        }
+        int cursor = 0;
+        int run = 0;
+        int bestRun = 0;
+        for (int i = 0; i < target.length() && cursor < value.length(); i++) {
+            if (target.charAt(i) == value.charAt(cursor)) {
+                cursor++;
+                run++;
+                bestRun = Math.max(bestRun, run);
+            } else {
+                run = 0;
+            }
+        }
+        return cursor == value.length() && bestRun >= 2;
+    }
+
+    private boolean isNestedShareTargetItem(OcrHelper.Screen screen, OcrHelper.OcrItem item, String target) {
+        if (screen == null || item == null) {
+            return false;
+        }
+        String value = normalizeShareTargetName(item.text);
+        String targetValue = normalizeShareTargetName(target);
+        if (value.isEmpty() || targetValue.isEmpty()) {
+            return false;
+        }
+        for (OcrHelper.OcrItem other : screen.items) {
+            if (other == item || other.rect.width() <= item.rect.width()
+                    || other.rect.height() >= item.rect.height() * 2) {
+                continue;
+            }
+            int overlap = Math.min(item.rect.bottom, other.rect.bottom)
+                    - Math.max(item.rect.top, other.rect.top);
+            if (overlap < Math.max(1, Math.min(item.rect.height(), other.rect.height()) / 2)) {
+                continue;
+            }
+            String otherValue = normalizeShareTargetName(other.text);
+            if (otherValue.length() > targetValue.length() && otherValue.contains(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String normalizeShareTargetName(String value) {
-        return NameNormalizer.nameKey(value);
+        if (value == null) {
+            return "";
+        }
+        String withoutMemberCount = value
+                .replaceAll("[（(]\\d+\\s*(?:人|[Aa])?[）)]", "")
+                .replaceAll("[（(]\\d+(?:人|[Aa])?[）)]$", "");
+        return NameNormalizer.nameKey(withoutMemberCount);
     }
 
     private OcrHelper.OcrItem findText(OcrHelper.Screen screen, String text, float minX, float maxX, float minY, float maxY) {
