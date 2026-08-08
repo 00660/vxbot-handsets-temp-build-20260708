@@ -193,6 +193,46 @@ public final class OcrHelper {
         }
     }
 
+    /** 对半透明分享弹层区域使用同一个 ML Kit 识别器重新识别。 */
+    public static Screen inspectRegion(Context context, HsClient hs, Rect region) {
+        Bitmap bitmap = null;
+        Bitmap crop = null;
+        try {
+            bitmap = screenshotBitmap(context, hs);
+            if (bitmap == null || region == null) {
+                return null;
+            }
+            Rect bounds = new Rect(region);
+            if (!bounds.intersect(0, 0, bitmap.getWidth(), bitmap.getHeight())
+                    || bounds.width() <= 0 || bounds.height() <= 0) {
+                return null;
+            }
+            crop = Bitmap.createBitmap(bitmap, bounds.left, bounds.top, bounds.width(), bounds.height());
+            Text text = recognize(crop);
+            if (text == null) {
+                BotLog.w(context, "ocr.region.timeout", "OCR 局部区域超时 rect=" + bounds.flattenToString());
+                return null;
+            }
+            List<OcrItem> translated = new ArrayList<>();
+            for (OcrItem item : collectItems(text)) {
+                Rect rect = new Rect(item.rect);
+                rect.offset(bounds.left, bounds.top);
+                translated.add(new OcrItem(item.text, rect));
+            }
+            return new Screen(bitmap.getWidth(), bitmap.getHeight(), translated, null);
+        } catch (Exception e) {
+            BotLog.w(context, "ocr.region.error", e.getMessage());
+            return null;
+        } finally {
+            if (crop != null && crop != bitmap) {
+                crop.recycle();
+            }
+            if (bitmap != null) {
+                bitmap.recycle();
+            }
+        }
+    }
+
     public static Rect findBottomRightText(Context context, HsClient hs, String target) {
         Screen screen = inspect(context, hs);
         if (screen == null) {

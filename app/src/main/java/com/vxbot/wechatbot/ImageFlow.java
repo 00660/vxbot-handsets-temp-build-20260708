@@ -52,6 +52,16 @@ public final class ImageFlow {
     private static final long SHARE_CONFIRM_OCR_TIMEOUT_MS = 15000L;
     private static final Map<String, ImageMemory> IMAGE_CONTEXTS = new HashMap<>();
 
+    private static final class ShareTargetHit {
+        final String text;
+        final Rect rect;
+
+        ShareTargetHit(String text, Rect rect) {
+            this.text = text == null ? "" : text;
+            this.rect = rect == null ? new Rect() : new Rect(rect);
+        }
+    }
+
     public boolean handle(Context context, BotConfig config, WxMessage message, SessionStore store, WechatDriver driver) {
         ExecutorService ttsPreparer = null;
         Future<VoiceReply.PreparedVoice> afterVoiceFuture = null;
@@ -744,35 +754,55 @@ public final class ImageFlow {
             OcrHelper.OcrItem recent = findShareOcrText(screen, text -> normalizeShareTargetName(text).contains("最近聊天"),
                     0f, 1f, 0f, 1f);
             int minY = recent == null ? Math.round((screen == null ? 1600 : screen.height) * 0.32f) : recent.rect.bottom + 20;
-            OcrHelper.OcrItem fallback = null;
-            OcrHelper.OcrItem candidate = null;
+            OcrHelper.OcrItem exactCandidate = null;
+            OcrHelper.OcrItem fuzzyCandidate = null;
+            boolean exactAmbiguous = false;
+            boolean fuzzyAmbiguous = false;
+            String targetName = normalizeShareTargetName(sessionName);
             if (screen != null) {
                 for (OcrHelper.OcrItem item : screen.items) {
                     if (!matchShareTargetName(item.text, sessionName)
                             || isNestedShareTargetItem(screen, item, sessionName)) {
                         continue;
                     }
-                    if (fallback == null) {
-                        fallback = item;
+                    if (item.centerY < minY || item.centerY >= screen.height - 80) {
+                        continue;
                     }
-                    if (item.centerY >= minY && item.centerY < screen.height - 80) {
-                        candidate = item;
-                        break;
+                    if (targetName.equals(normalizeShareTargetName(item.text))) {
+                        if (exactCandidate == null) {
+                            exactCandidate = item;
+                        } else if (!sameShareCandidateRow(exactCandidate, item)) {
+                            exactAmbiguous = true;
+                        }
+                    } else if (fuzzyCandidate == null) {
+                        fuzzyCandidate = item;
+                    } else if (!sameShareCandidateRow(fuzzyCandidate, item)) {
+                        fuzzyAmbiguous = true;
                     }
                 }
             }
-            candidate = candidate == null ? fallback : candidate;
-            if (candidate == null) {
-                BotLog.w(context, "image.share.target.missing", "OCR 未找到分享目标会话 target=" + sessionName
+            ShareTargetHit hit = !exactAmbiguous && exactCandidate != null
+                    ? new ShareTargetHit(exactCandidate.text, exactCandidate.rect)
+                    : null;
+            if (hit == null && !exactAmbiguous) {
+                hit = findMergedRecentForwardTarget(screen, sessionName);
+            }
+            if (hit == null && !exactAmbiguous && !fuzzyAmbiguous && fuzzyCandidate != null) {
+                hit = new ShareTargetHit(fuzzyCandidate.text, fuzzyCandidate.rect);
+            }
+            if (hit == null) {
+                BotLog.w(context, "image.share.target.missing", "OCR 未找到唯一分享目标会话 target=" + sessionName
                         + " attempt=" + attempt
+                        + " exactAmbiguous=" + exactAmbiguous
+                        + " fuzzyAmbiguous=" + fuzzyAmbiguous
                         + " snippets=" + (screen == null ? "" : screen.snippets));
                 SystemClock.sleep(Math.max(500L, shareConfirmPoll(config)));
                 continue;
             }
-            int targetX = candidate.centerX;
-            hs.tap(targetX, candidate.centerY);
+            int targetX = hit.rect.centerX();
+            hs.tap(targetX, hit.rect.centerY());
             BotLog.i(context, "image.share.target.found", "OCR 找到分享目标会话 target=" + sessionName
-                    + " text=" + candidate.text + " x=" + targetX + " y=" + candidate.centerY
+                    + " text=" + hit.text + " x=" + targetX + " y=" + hit.rect.centerY()
                     + " attempt=" + attempt);
             if (waitShareConfirmPage(context, config, hs, 7000)) {
                 BotLog.i(context, "image.share.confirm.ready", "分享确认页已出现 target=" + sessionName);
@@ -812,13 +842,13 @@ public final class ImageFlow {
                 SystemClock.sleep(Math.max(350L, shareConfirmPoll(config)));
                 continue;
             }
-            boolean targetConfirmed = confirmPageContainsTarget(screen, sessionName);
+            boolean targetConfirmed = confirmPageContainsTarget(context, hs, screen, sessionName);
             if (!targetConfirmed) {
-                BotLog.e(context, "image.share.confirm.target_miss", "确认页目标群 OCR 未完整确认，取消发送 target=" + sessionName
+                BotLog.w(context, "image.share.confirm.target_miss", "确认页目标群 OCR 暂未确认，继续等待 target=" + sessionName
                         + " attempt=" + attempt
                         + " snippets=" + screen.snippets);
-                dumpShareOcrItems(context, hs, "confirm-target-miss");
-                return false;
+                SystemClock.sleep(Math.max(450L, shareConfirmPoll(config)));
+                continue;
             }
             Rect greenSend = waitStableShareGreenSendButton(context, config, hs, attempt == 1 ? 1400 : 900);
             if (greenSend != null) {
@@ -1037,16 +1067,46 @@ public final class ImageFlow {
         if (screen == null || !isShareConfirmPage(screen)) {
             return false;
         }
+        return confirmPageItemsContainTarget(screen, sessionName);
+    }
+
+    private boolean confirmPageContainsTarget(Context context, HsClient hs, OcrHelper.Screen screen, String sessionName) {
+        if (confirmPageContainsTarget(screen, sessionName)) {
+            return true;
+        }
+        Rect region = confirmTargetRegion(screen);
+        if (region == null) {
+            return false;
+        }
+        OcrHelper.Screen focused = OcrHelper.inspectRegion(context, hs, region);
+        boolean pageReady = isShareConfirmPage(focused);
+        boolean hit = pageReady && confirmPageItemsContainTarget(focused, sessionName);
+        BotLog.i(context, "image.share.confirm.target.crop",
+                "确认页弹层局部 OCR target=" + sessionName
+                        + " pageReady=" + pageReady
+                        + " hit=" + hit
+                        + " rect=" + region.flattenToString()
+                        + " snippets=" + (focused == null ? "" : focused.snippets));
+        return hit;
+    }
+
+    private boolean confirmPageItemsContainTarget(OcrHelper.Screen screen, String sessionName) {
+        if (screen == null) {
+            return false;
+        }
         String target = normalizeShareTargetName(sessionName);
         if (target.isEmpty()) {
             return false;
         }
         for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < screen.height * 0.50f || item.centerY > screen.height * 0.80f) {
+            if (item.centerY < screen.height * 0.55f || item.centerY > screen.height * 0.80f) {
                 continue;
             }
-            if (matchShareTargetName(item.text, sessionName)
-                    && !isNestedShareTargetItem(screen, item, sessionName)) {
+            String value = normalizeShareTargetName(item.text);
+            if (value.startsWith("发送给") || value.startsWith("发送到")) {
+                value = value.substring(3);
+            }
+            if (target.equals(value) && !isNestedShareTargetItem(screen, item, sessionName)) {
                 return true;
             }
         }
@@ -1176,22 +1236,173 @@ public final class ImageFlow {
         if (value.isEmpty() || targetValue.isEmpty()) {
             return false;
         }
-        for (OcrHelper.OcrItem other : screen.items) {
-            if (other == item || other.rect.width() <= item.rect.width()
-                    || other.rect.height() >= item.rect.height() * 2) {
+        return hasLongerContainingShareItem(screen, item, targetValue, Integer.MIN_VALUE, Integer.MAX_VALUE);
+    }
+
+    private boolean sameShareCandidateRow(OcrHelper.OcrItem first, OcrHelper.OcrItem second) {
+        return Math.abs(first.centerY - second.centerY) <= 20;
+    }
+
+    private ShareTargetHit findMergedRecentForwardTarget(OcrHelper.Screen screen, String sessionName) {
+        if (screen == null) {
+            return null;
+        }
+        String target = normalizeShareTargetName(sessionName);
+        if (target.length() < 4) {
+            return null;
+        }
+        OcrHelper.OcrItem forward = findShareOcrText(screen,
+                text -> "最近转发".equals(normalizeShareTargetName(text)),
+                0f, 1f, 0f, 0.35f);
+        OcrHelper.OcrItem recent = findShareOcrText(screen,
+                text -> "最近聊天".equals(normalizeShareTargetName(text)),
+                0f, 1f, 0.20f, 0.55f);
+        int top = forward == null ? Math.round(screen.height * 0.18f) : forward.rect.bottom + 8;
+        int bottom = recent == null ? Math.round(screen.height * 0.34f) : recent.rect.top - 8;
+        if (bottom <= top) {
+            return null;
+        }
+
+        ShareTargetHit direct = null;
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < top || item.centerY > bottom
+                    || !target.equals(normalizeShareTargetName(item.text))
+                    || isNestedShareTargetItem(screen, item, sessionName)) {
                 continue;
             }
-            int overlap = Math.min(item.rect.bottom, other.rect.bottom)
-                    - Math.max(item.rect.top, other.rect.top);
-            if (overlap < Math.max(1, Math.min(item.rect.height(), other.rect.height()) / 2)) {
+            ShareTargetHit current = new ShareTargetHit(item.text, item.rect);
+            if (direct != null
+                    && (Math.abs(direct.rect.centerX() - current.rect.centerX()) > 12
+                    || Math.abs(direct.rect.centerY() - current.rect.centerY()) > 12)) {
+                return null;
+            }
+            direct = current;
+        }
+        if (direct != null) {
+            return direct;
+        }
+
+        List<OcrHelper.OcrItem> fragments = new ArrayList<>();
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < top || item.centerY > bottom) {
+                continue;
+            }
+            String value = normalizeShareTargetName(item.text);
+            if (value.length() < 2 || value.length() >= target.length() || !target.contains(value)) {
+                continue;
+            }
+            if (hasLongerContainingShareItem(screen, item, target, top, bottom)) {
+                continue;
+            }
+            fragments.add(item);
+        }
+
+        List<ShareTargetHit> hits = new ArrayList<>();
+        for (int i = 0; i < fragments.size(); i++) {
+            for (int j = i + 1; j < fragments.size(); j++) {
+                OcrHelper.OcrItem first = fragments.get(i);
+                OcrHelper.OcrItem second = fragments.get(j);
+                if (first.centerY > second.centerY) {
+                    OcrHelper.OcrItem swap = first;
+                    first = second;
+                    second = swap;
+                }
+                if (!canMergeShareFragments(screen, first, second)) {
+                    continue;
+                }
+                String combined = normalizeShareTargetName(first.text)
+                        + normalizeShareTargetName(second.text);
+                if (!target.equals(combined)) {
+                    continue;
+                }
+                Rect union = new Rect(first.rect);
+                union.union(second.rect);
+                addUniqueShareHit(hits, new ShareTargetHit(combined, union));
+            }
+        }
+        if (hits.isEmpty()) {
+            return null;
+        }
+        ShareTargetHit result = hits.get(0);
+        for (int i = 1; i < hits.size(); i++) {
+            ShareTargetHit other = hits.get(i);
+            if (Math.abs(result.rect.centerX() - other.rect.centerX()) > 12
+                    || Math.abs(result.rect.centerY() - other.rect.centerY()) > 12) {
+                return null;
+            }
+        }
+        return result;
+    }
+
+    private boolean hasLongerContainingShareItem(OcrHelper.Screen screen, OcrHelper.OcrItem item,
+                                                  String target, int top, int bottom) {
+        String value = normalizeShareTargetName(item.text);
+        for (OcrHelper.OcrItem other : screen.items) {
+            if (other == item || other.centerY < top || other.centerY > bottom) {
                 continue;
             }
             String otherValue = normalizeShareTargetName(other.text);
-            if (otherValue.length() > targetValue.length() && otherValue.contains(value)) {
+            if (otherValue.length() <= target.length() || !otherValue.contains(value)) {
+                continue;
+            }
+            int xOverlap = Math.min(item.rect.right, other.rect.right)
+                    - Math.max(item.rect.left, other.rect.left);
+            int yOverlap = Math.min(item.rect.bottom, other.rect.bottom)
+                    - Math.max(item.rect.top, other.rect.top);
+            if (xOverlap >= Math.max(1, Math.min(item.rect.width(), other.rect.width()) / 3)
+                    && yOverlap >= Math.max(1, Math.min(item.rect.height(), other.rect.height()) / 2)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void addUniqueShareHit(List<ShareTargetHit> hits, ShareTargetHit hit) {
+        for (ShareTargetHit existing : hits) {
+            if (Math.abs(existing.rect.centerX() - hit.rect.centerX()) <= 12
+                    && Math.abs(existing.rect.centerY() - hit.rect.centerY()) <= 12) {
+                return;
+            }
+        }
+        hits.add(hit);
+    }
+
+    private boolean canMergeShareFragments(OcrHelper.Screen screen, OcrHelper.OcrItem first,
+                                           OcrHelper.OcrItem second) {
+        int xOverlap = Math.min(first.rect.right, second.rect.right)
+                - Math.max(first.rect.left, second.rect.left);
+        int minWidth = Math.min(first.rect.width(), second.rect.width());
+        if (xOverlap < Math.max(1, minWidth / 3)
+                || Math.abs(first.centerX - second.centerX) > Math.round(screen.width * 0.08f)) {
+            return false;
+        }
+        int gap = second.rect.top - first.rect.bottom;
+        int minGap = -Math.max(1, Math.min(first.rect.height(), second.rect.height()) / 3);
+        int maxGap = Math.max(18, Math.round(screen.height * 0.025f));
+        return gap >= minGap && gap <= maxGap;
+    }
+
+    private Rect confirmTargetRegion(OcrHelper.Screen screen) {
+        if (screen == null) {
+            return null;
+        }
+        OcrHelper.OcrItem header = findShareOcrText(screen,
+                text -> normalizeShareTargetName(text).contains("发送给")
+                        || normalizeShareTargetName(text).contains("发送到"),
+                0f, 1f, 0.45f, 0.75f);
+        OcrHelper.OcrItem cancel = findShareOcrText(screen,
+                text -> "取消".equals(normalizeShareTargetName(text)),
+                0f, 1f, 0.75f, 1f);
+        int top = header == null
+                ? Math.round(screen.height * 0.54f)
+                : Math.max(0, header.rect.top - 30);
+        int bottom = cancel == null
+                ? Math.round(screen.height * 0.92f)
+                : Math.min(screen.height, cancel.rect.bottom + 25);
+        if (bottom <= top) {
+            return null;
+        }
+        return new Rect(0, top, screen.width, bottom);
     }
 
     private static String normalizeShareTargetName(String value) {
