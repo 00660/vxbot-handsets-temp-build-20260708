@@ -90,7 +90,7 @@ public final class PanelImageDeliveryFlow {
             intent.putExtra(ShareProxyActivity.EXTRA_MIME, asset.mime);
             intent.putExtra(ShareProxyActivity.EXTRA_FILE_NAME, asset.fileName);
             intent.putExtra(ShareProxyActivity.EXTRA_DIRECT, true);
-            intent.putExtra(ShareProxyActivity.EXTRA_PREFIX, "PanelDirectOcr");
+            intent.putExtra(ShareProxyActivity.EXTRA_PREFIX, "PanelRecentChats");
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION
                     | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             if ("content".equals(asset.contentUri.getScheme())) {
@@ -123,7 +123,7 @@ public final class PanelImageDeliveryFlow {
         return find(screen, text -> {
             String value = clean(text);
             return value.contains("选择聊天") || value.contains("选择一个聊天")
-                    || value.contains("最近聊天") || value.contains("最近转发");
+                    || value.contains("最近聊天");
         }, 0f, 1f, 0f, 0.35f) != null;
     }
 
@@ -137,7 +137,16 @@ public final class PanelImageDeliveryFlow {
                 SystemClock.sleep(selectPoll(config));
                 continue;
             }
-            int minY = Math.round(screen.height * 0.20f);
+            OcrHelper.OcrItem recentChats = find(screen,
+                    text -> clean(text).contains("最近聊天"),
+                    0f, 1f, 0.20f, 0.70f);
+            if (recentChats == null) {
+                BotLog.i(context, "panel.share.recent_chats.wait",
+                        "等待最近聊天列表 target=" + target + " attempt=" + attempt);
+                SystemClock.sleep(Math.max(450L, confirmPoll(config)));
+                continue;
+            }
+            int minY = recentChats.rect.bottom + 12;
             String wanted = normalize(target);
             OcrHelper.OcrItem exact = null;
             OcrHelper.OcrItem fuzzy = null;
