@@ -19,8 +19,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 public final class BotService extends Service {
     public static final String ACTION_START = "com.vxbot.wechatbot.START";
@@ -92,7 +90,7 @@ public final class BotService extends Service {
         logOverlay = new LogOverlayWindow(this);
         BotConfig.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
         BotConfig initialConfig = BotConfig.load(this);
-        robotHttpServer = new BotHttpServer(this, this::sendRobotHttpMessage);
+        robotHttpServer = new BotHttpServer(this, this::enqueueRobotHttpDelivery);
         robotHttpServer.start();
         syncLogOverlay(initialConfig);
         ScreenControl.syncForConfig(this, initialConfig, "service-create");
@@ -1048,38 +1046,55 @@ public final class BotService extends Service {
         runBroadcastText(rawText, "manual");
     }
 
-    private boolean sendRobotHttpMessage(String targetType, String target, String text, String requestId) {
+    private boolean enqueueRobotHttpDelivery(BotHttpServer.DeliveryTask task) {
+        if (task == null) {
+            return false;
+        }
         try {
-            Future<Boolean> future = worker.submit(() -> runRobotHttpMessage(targetType, target, text, requestId));
-            return future.get(2, TimeUnit.MINUTES);
-        } catch (Exception error) {
-            BotLog.e(this, "robot.http.message.fail", "HTTP 推送等待发送结果失败 target=" + target + " error=" + error.getMessage());
+            worker.execute(() -> runRobotHttpDelivery(task));
+            return true;
+        } catch (RuntimeException error) {
+            BotLog.e(this, "robot.http.delivery.enqueue.fail", "图片任务入队失败 deliveryId=" + task.deliveryId + " error=" + error.getMessage());
             return false;
         }
     }
 
-    private boolean runRobotHttpMessage(String targetType, String target, String text, String requestId) {
+    private void runRobotHttpDelivery(BotHttpServer.DeliveryTask task) {
         BotConfig config = BotConfig.load(this);
-        if (target == null || target.trim().isEmpty() || text == null || text.trim().isEmpty()) {
-            BotLog.e(this, "robot.http.message.abort", "HTTP 推送目标或文本为空 requestId=" + requestId);
-            return false;
-        }
-        if (!daemonManager.ensureRunning(this, config)) {
-            BotLog.e(this, "robot.http.message.abort", "HTTP 推送前 hs daemon 未就绪 target=" + target);
-            return false;
-        }
-        pauseLogOverlayForOperation(config);
+        File image = null;
+        boolean sent = false;
+        String detail = "image_delivery_failed";
         try {
-            boolean sent = new WechatDriver(config.hsPort).sendBroadcastTextToSession(this, config, target.trim(), text.trim());
-            BotLog.write(this, sent ? "SUCCESS" : "ERROR", "robot.http.message.sent",
-                    (sent ? "HTTP 推送已发送" : "HTTP 推送发送失败")
-                            + " targetType=" + targetType + " target=" + target + " requestId=" + requestId);
-            if (sent) {
-                sessionStore.rememberBot(target.trim(), config.primaryBotName(), text.trim());
+            if (task.target == null || task.target.trim().isEmpty()) {
+                detail = "delivery_target_missing";
+                BotLog.e(this, "robot.http.delivery.abort", "图片任务目标为空 deliveryId=" + task.deliveryId);
+                return;
             }
-            return sent;
+            if (!daemonManager.ensureRunning(this, config)) {
+                detail = "hs_daemon_unavailable";
+                BotLog.e(this, "robot.http.delivery.abort", "图片任务前 hs daemon 未就绪 deliveryId=" + task.deliveryId);
+                return;
+            }
+            pauseLogOverlayForOperation(config);
+            image = RobotDeliveryImage.create(this, task.title, task.text, task.event, task.deliveryId);
+            sent = new ImageFlow().shareExistingImage(this, config, image, task.target.trim());
+            detail = sent ? "image_shared" : "image_share_failed";
+            BotLog.write(this, sent ? "SUCCESS" : "ERROR", "robot.http.delivery.sent",
+                    (sent ? "图片任务已发送" : "图片任务发送失败")
+                            + " targetType=" + task.targetType + " target=" + task.target
+                            + " deliveryId=" + task.deliveryId);
+        } catch (Exception error) {
+            detail = "image_delivery_error";
+            BotLog.e(this, "robot.http.delivery.error", "图片任务异常 deliveryId=" + task.deliveryId + " error=" + error.getMessage());
         } finally {
+            if (image != null && image.exists() && !image.delete()) {
+                BotLog.w(this, "robot.http.delivery.cleanup", "图片任务临时文件清理失败 deliveryId=" + task.deliveryId);
+            }
             resumeLogOverlayAfterOperation();
+            BotHttpServer server = robotHttpServer;
+            if (server != null) {
+                server.complete(task, sent, detail);
+            }
         }
     }
 

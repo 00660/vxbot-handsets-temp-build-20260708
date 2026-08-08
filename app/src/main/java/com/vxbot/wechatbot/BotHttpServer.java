@@ -18,13 +18,15 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/** 内网推送桥：面板注册机器人后，通过 HTTP 投递文本到微信目标会话。 */
+/** 内网图片投递桥。面板只投递图片任务，机器人分别回传接收与微信发送终态。 */
 final class BotHttpServer {
     private static final String PREFS = "bot_config";
     private static final String KEY_BOT_ID = "robotPushBotId";
@@ -33,24 +35,59 @@ final class BotHttpServer {
     private static final String KEY_PANEL_URL = "robotPushPanelUrl";
     private static final int DEFAULT_HTTP_PORT = 18234;
     private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
-    private static final int APP_VERSION_CODE = 234;
-    private static final String APP_VERSION_NAME = "0.1.234-return-home-after-morning-broadcast";
+    private static final int APP_VERSION_CODE = BuildConfig.VERSION_CODE;
+    private static final String APP_VERSION_NAME = BuildConfig.VERSION_NAME;
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 5000;
-    private static final int READ_TIMEOUT_MS = 130000;
     private static final int REGISTER_READ_TIMEOUT_MS = 8000;
+    private static final int RECEIPT_READ_TIMEOUT_MS = 8000;
     private static final long REGISTER_INTERVAL_MS = 60 * 1000L;
+    private static final long RECEIPT_RETRY_DELAY_MS = 4000L;
+    private static final int RECEIPT_MAX_ATTEMPTS = 3;
+    private static final int DELIVERY_CACHE_LIMIT = 200;
 
-    interface MessageHandler {
-        boolean send(String targetType, String target, String text, String requestId);
+    interface DeliveryHandler {
+        boolean enqueue(DeliveryTask task);
+    }
+
+    static final class DeliveryTask {
+        final String deliveryId;
+        final String targetType;
+        final String target;
+        final String title;
+        final String text;
+        final String event;
+
+        DeliveryTask(String deliveryId, String targetType, String target, String title, String text, String event) {
+            this.deliveryId = deliveryId;
+            this.targetType = targetType;
+            this.target = target;
+            this.title = title;
+            this.text = text;
+            this.event = event;
+        }
+    }
+
+    private static final class DeliveryRecord {
+        final DeliveryTask task;
+        String status;
+        String detail;
+
+        DeliveryRecord(DeliveryTask task, String status, String detail) {
+            this.task = task;
+            this.status = status;
+            this.detail = detail;
+        }
     }
 
     private final Context context;
-    private final MessageHandler messageHandler;
+    private final DeliveryHandler deliveryHandler;
     private final SharedPreferences prefs;
     private final ExecutorService acceptExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService requestExecutor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService registrationExecutor = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService receiptExecutor = Executors.newSingleThreadScheduledExecutor();
+    private final Map<String, DeliveryRecord> deliveries = new LinkedHashMap<>();
     private volatile boolean running;
     private ServerSocket serverSocket;
     private String botId;
@@ -58,9 +95,9 @@ final class BotHttpServer {
     private int httpPort;
     private String panelUrl;
 
-    BotHttpServer(Context context, MessageHandler messageHandler) {
+    BotHttpServer(Context context, DeliveryHandler deliveryHandler) {
         this.context = context.getApplicationContext();
-        this.messageHandler = messageHandler;
+        this.deliveryHandler = deliveryHandler;
         this.prefs = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
@@ -75,7 +112,7 @@ final class BotHttpServer {
             running = true;
             acceptExecutor.execute(this::acceptLoop);
             registrationExecutor.scheduleWithFixedDelay(this::registerWithPanel, 1000L, REGISTER_INTERVAL_MS, TimeUnit.MILLISECONDS);
-            BotLog.i(context, "robot.http.start", "机器人 HTTP 服务已启动 port=" + httpPort + " panel=" + panelUrl);
+            BotLog.i(context, "robot.http.start", "机器人图片投递服务已启动 port=" + httpPort + " panel=" + panelUrl);
         } catch (IOException error) {
             BotLog.e(context, "robot.http.start.fail", "机器人 HTTP 服务启动失败 port=" + httpPort + " error=" + error.getMessage());
             closeServer();
@@ -86,13 +123,15 @@ final class BotHttpServer {
         running = false;
         closeServer();
         registrationExecutor.shutdownNow();
+        receiptExecutor.shutdownNow();
         requestExecutor.shutdownNow();
         acceptExecutor.shutdownNow();
         BotLog.i(context, "robot.http.stop", "机器人 HTTP 服务已停止");
     }
 
-    int port() {
-        return httpPort;
+    void complete(DeliveryTask task, boolean sent, String detail) {
+        if (task == null || task.deliveryId.isEmpty()) return;
+        reportReceipt(task.deliveryId, sent ? "sent" : "failed", detail, 1);
     }
 
     private void acceptLoop() {
@@ -109,13 +148,12 @@ final class BotHttpServer {
 
     private void handle(Socket socket) {
         try (Socket client = socket) {
-            client.setSoTimeout(READ_TIMEOUT_MS);
+            client.setSoTimeout(RECEIPT_READ_TIMEOUT_MS);
             InputStream input = client.getInputStream();
             String headerText = readHeaders(input);
             if (headerText.isEmpty()) return;
             String[] headerLines = headerText.split("\\r\\n");
-            String requestLine = headerLines[0];
-            String[] requestParts = requestLine.split("\\s+", 3);
+            String[] requestParts = headerLines[0].split("\\s+", 3);
             if (requestParts.length < 2) {
                 writeJson(client, 400, jsonError("invalid_request"));
                 return;
@@ -125,11 +163,10 @@ final class BotHttpServer {
             String token = "";
             int contentLength = 0;
             for (int i = 1; i < headerLines.length; i++) {
-                String header = headerLines[i];
-                int colon = header.indexOf(':');
+                int colon = headerLines[i].indexOf(':');
                 if (colon <= 0) continue;
-                String key = header.substring(0, colon).trim().toLowerCase(Locale.ROOT);
-                String value = header.substring(colon + 1).trim();
+                String key = headerLines[i].substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                String value = headerLines[i].substring(colon + 1).trim();
                 if ("content-length".equals(key)) {
                     try {
                         contentLength = Integer.parseInt(value);
@@ -140,11 +177,12 @@ final class BotHttpServer {
                     token = value;
                 }
             }
-            if ("GET".equals(method) && "/vxbot/v1/health".equals(new URI(path).getPath())) {
+            String route = new URI(path).getPath();
+            if ("GET".equals(method) && "/vxbot/v1/health".equals(route)) {
                 writeJson(client, 200, healthJson());
                 return;
             }
-            if (!"POST".equals(method) || !"/vxbot/v1/messages".equals(new URI(path).getPath())) {
+            if (!"POST".equals(method) || !"/vxbot/v1/messages".equals(route)) {
                 writeJson(client, 404, jsonError("not_found"));
                 return;
             }
@@ -156,34 +194,113 @@ final class BotHttpServer {
                 writeJson(client, 413, jsonError("request_body_too_large"));
                 return;
             }
-            String body = readBody(input, contentLength);
             JSONObject payload;
             try {
-                payload = new JSONObject(body);
+                payload = new JSONObject(readBody(input, contentLength));
             } catch (Exception error) {
                 writeJson(client, 400, jsonError("invalid_json"));
                 return;
             }
+            String kind = payload.optString("kind", "").trim().toLowerCase(Locale.ROOT);
             String targetType = payload.optString("targetType", "group").trim().toLowerCase(Locale.ROOT);
             String target = payload.optString("target", "").trim();
+            String title = payload.optString("title", "iBox 提醒").trim();
             String text = payload.optString("text", "").trim();
-            String requestId = payload.optString("requestId", "").trim();
+            String event = payload.optString("event", "").trim();
+            String deliveryId = payload.optString("deliveryId", payload.optString("requestId", "")).trim();
+            if (!"image".equals(kind)) {
+                writeJson(client, 409, jsonError("robot_image_delivery_required"));
+                return;
+            }
             if (!("group".equals(targetType) || "person".equals(targetType))) {
                 writeJson(client, 400, jsonError("robot_target_type_invalid"));
                 return;
             }
-            if (target.isEmpty() || target.length() > 200 || text.isEmpty() || text.length() > 5000) {
-                writeJson(client, 400, jsonError("robot_message_invalid"));
+            if (target.isEmpty() || target.length() > 200 || text.isEmpty() || text.length() > 5000 || title.length() > 120 || !validDeliveryId(deliveryId)) {
+                writeJson(client, 400, jsonError("robot_image_delivery_invalid"));
                 return;
             }
-            boolean sent = messageHandler != null && messageHandler.send(targetType, target, text, requestId);
-            if (!sent) {
-                writeJson(client, 502, jsonError("robot_message_send_failed"));
+            DeliveryTask task = new DeliveryTask(deliveryId, targetType, target, title, text, event);
+            DeliveryRecord existing = rememberAccepted(task);
+            if (existing != null) {
+                reportReceipt(existing.task.deliveryId, existing.status, existing.detail, 1);
+                writeJson(client, 202, new JSONObject().put("success", true).put("deliveryId", existing.task.deliveryId).put("status", existing.status));
                 return;
             }
-            writeJson(client, 200, new JSONObject().put("success", true).put("requestId", requestId));
+            reportReceipt(deliveryId, "accepted", "", 1);
+            boolean queued = deliveryHandler != null && deliveryHandler.enqueue(task);
+            if (!queued) {
+                complete(task, false, "delivery_queue_rejected");
+                writeJson(client, 503, jsonError("robot_delivery_queue_rejected"));
+                return;
+            }
+            writeJson(client, 202, new JSONObject().put("success", true).put("deliveryId", deliveryId).put("status", "accepted"));
         } catch (Exception error) {
             BotLog.w(context, "robot.http.request.fail", error.getMessage());
+        }
+    }
+
+    private synchronized DeliveryRecord rememberAccepted(DeliveryTask task) {
+        DeliveryRecord previous = deliveries.get(task.deliveryId);
+        if (previous != null) return previous;
+        deliveries.put(task.deliveryId, new DeliveryRecord(task, "accepted", ""));
+        while (deliveries.size() > DELIVERY_CACHE_LIMIT) {
+            String oldest = deliveries.keySet().iterator().next();
+            deliveries.remove(oldest);
+        }
+        return null;
+    }
+
+    private synchronized void rememberReceipt(String deliveryId, String status, String detail) {
+        DeliveryRecord record = deliveries.get(deliveryId);
+        if (record == null) return;
+        if ("sent".equals(record.status) || "failed".equals(record.status)) return;
+        record.status = status;
+        record.detail = detail == null ? "" : detail;
+    }
+
+    private void reportReceipt(String deliveryId, String status, String detail, int attempt) {
+        rememberReceipt(deliveryId, status, detail);
+        try {
+            postReceipt(deliveryId, status, detail);
+            BotLog.i(context, "robot.http.receipt", "任务回执已上报 deliveryId=" + deliveryId + " status=" + status);
+        } catch (Exception error) {
+            BotLog.w(context, "robot.http.receipt.fail", "任务回执上报失败 deliveryId=" + deliveryId + " status=" + status + " attempt=" + attempt + " error=" + error.getMessage());
+            if (attempt < RECEIPT_MAX_ATTEMPTS && running && !receiptExecutor.isShutdown()) {
+                receiptExecutor.schedule(() -> reportReceipt(deliveryId, status, detail, attempt + 1),
+                        RECEIPT_RETRY_DELAY_MS * attempt, TimeUnit.MILLISECONDS);
+            }
+        }
+    }
+
+    private void postReceipt(String deliveryId, String status, String detail) throws Exception {
+        if (panelUrl.isEmpty()) throw new IOException("panel_url_missing");
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(panelUrl + "/api/ibox/v304/robots/deliveries/" + deliveryId + "/receipt");
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(RECEIPT_READ_TIMEOUT_MS);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("X-VXBot-Token", authToken);
+            JSONObject body = new JSONObject()
+                    .put("botId", botId)
+                    .put("deliveryId", deliveryId)
+                    .put("status", status)
+                    .put("detail", detail == null ? "" : detail);
+            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(bytes.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(bytes);
+            }
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                throw new IOException("panel_receipt_http_" + responseCode);
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
         }
     }
 
@@ -221,7 +338,7 @@ final class BotHttpServer {
     }
 
     private JSONObject healthJson() throws Exception {
-        JSONArray capabilities = new JSONArray().put("text").put("group").put("person");
+        JSONArray capabilities = new JSONArray().put("image").put("group").put("person").put("receipt");
         return new JSONObject()
                 .put("success", true)
                 .put("botId", botId)
@@ -239,7 +356,7 @@ final class BotHttpServer {
     private void writeJson(Socket socket, int status, JSONObject body) throws IOException {
         byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
         OutputStream output = socket.getOutputStream();
-        String reason = status == 200 ? "OK" : status == 401 ? "Unauthorized" : status == 404 ? "Not Found" : "Error";
+        String reason = status == 200 ? "OK" : status == 202 ? "Accepted" : status == 401 ? "Unauthorized" : status == 404 ? "Not Found" : "Error";
         String headers = "HTTP/1.1 " + status + " " + reason + "\r\n"
                 + "Content-Type: application/json; charset=utf-8\r\n"
                 + "Content-Length: " + payload.length + "\r\n"
@@ -266,7 +383,7 @@ final class BotHttpServer {
                     .put("httpPort", httpPort)
                     .put("versionCode", APP_VERSION_CODE)
                     .put("versionName", APP_VERSION_NAME)
-                    .put("capabilities", new JSONArray().put("text").put("group").put("person"));
+                    .put("capabilities", new JSONArray().put("image").put("group").put("person").put("receipt"));
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(bytes.length);
             try (OutputStream output = connection.getOutputStream()) {
@@ -299,6 +416,10 @@ final class BotHttpServer {
         StringBuilder result = new StringBuilder(length);
         for (byte value : bytes) result.append(String.format(Locale.US, "%02x", value));
         return result.substring(0, length);
+    }
+
+    private static boolean validDeliveryId(String value) {
+        return value != null && value.matches("[A-Za-z0-9._:-]{1,128}");
     }
 
     private static int clampPort(int value) {
