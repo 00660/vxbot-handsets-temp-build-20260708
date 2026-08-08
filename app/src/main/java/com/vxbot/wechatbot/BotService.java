@@ -19,6 +19,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 public final class BotService extends Service {
     public static final String ACTION_START = "com.vxbot.wechatbot.START";

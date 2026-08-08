@@ -35,8 +35,8 @@ final class BotHttpServer {
     private static final String KEY_PANEL_URL = "robotPushPanelUrl";
     private static final int DEFAULT_HTTP_PORT = 18234;
     private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
-    private static final int APP_VERSION_CODE = BuildConfig.VERSION_CODE;
-    private static final String APP_VERSION_NAME = BuildConfig.VERSION_NAME;
+    private static final int APP_VERSION_CODE = 235;
+    private static final String APP_VERSION_NAME = "0.1.235-image-delivery-receipts";
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int REGISTER_READ_TIMEOUT_MS = 8000;
