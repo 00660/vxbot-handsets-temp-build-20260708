@@ -1091,6 +1091,8 @@ public final class BotService extends Service {
             if (image != null && image.exists() && !image.delete()) {
                 BotLog.w(this, "robot.http.delivery.cleanup", "图片任务临时文件清理失败 deliveryId=" + task.deliveryId);
             }
+            new WechatDriver(config.hsPort).leaveWechatIfForeground(this,
+                    sent ? "robot-http-delivery-sent" : "robot-http-delivery-finished");
             resumeLogOverlayAfterOperation();
             BotHttpServer server = robotHttpServer;
             if (server != null) {

@@ -802,9 +802,11 @@ public final class ImageFlow {
             }
             boolean targetConfirmed = confirmPageContainsTarget(screen, sessionName);
             if (!targetConfirmed) {
-                BotLog.w(context, "image.share.confirm.target_miss", "确认页目标群 OCR 未确认，继续优先尝试绿色发送按钮 target=" + sessionName
+                BotLog.e(context, "image.share.confirm.target_miss", "确认页目标群 OCR 未完整确认，取消发送 target=" + sessionName
                         + " attempt=" + attempt
                         + " snippets=" + screen.snippets);
+                dumpShareOcrItems(context, hs, "confirm-target-miss");
+                return false;
             }
             Rect greenSend = waitStableShareGreenSendButton(context, config, hs, attempt == 1 ? 1400 : 900);
             if (greenSend != null) {
@@ -1024,13 +1026,14 @@ public final class ImageFlow {
             return false;
         }
         String target = normalizeShareTargetName(sessionName);
-        String snippets = normalizeShareTargetName(screen.snippets);
-        if (snippets.contains(target)) {
-            return true;
+        if (target.isEmpty()) {
+            return false;
         }
         for (OcrHelper.OcrItem item : screen.items) {
             String value = normalizeShareTargetName(item.text);
-            if (value.equals(target) || value.contains(target)) {
+            if (value.equals(target)
+                    || (value.startsWith("发送给") && value.substring("发送给".length()).equals(target))
+                    || (value.startsWith("发送到") && value.substring("发送到".length()).equals(target))) {
                 return true;
             }
         }
@@ -1111,9 +1114,7 @@ public final class ImageFlow {
     }
 
     private boolean matchShareTargetName(String text, String name) {
-        String a = normalizeShareTargetName(text);
-        String b = normalizeShareTargetName(name);
-        return !a.isEmpty() && !b.isEmpty() && (a.equals(b) || a.contains(b) || b.contains(a));
+        return NameNormalizer.sameName(text, name);
     }
 
     private static String normalizeShareTargetName(String value) {
