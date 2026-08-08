@@ -734,38 +734,29 @@ public final class ImageFlow {
 
     private boolean clickShareTargetByOcr(Context context, BotConfig config, HsClient hs, String sessionName) throws Exception {
         for (int attempt = 1; attempt <= 8; attempt++) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            OcrHelper.OcrItem recent = findShareOcrText(screen, text -> normalizeShareTargetName(text).contains("最近聊天"),
-                    0f, 1f, 0f, 1f);
-            int minY = recent == null ? Math.round((screen == null ? 1600 : screen.height) * 0.32f) : recent.rect.bottom + 20;
-            OcrHelper.OcrItem fallback = null;
-            OcrHelper.OcrItem candidate = null;
-            if (screen != null) {
-                for (OcrHelper.OcrItem item : screen.items) {
-                    if (!matchShareTargetName(item.text, sessionName)) {
-                        continue;
-                    }
-                    if (fallback == null) {
-                        fallback = item;
-                    }
-                    if (item.centerY >= minY && item.centerY < screen.height - 80) {
-                        candidate = item;
-                        break;
-                    }
+            ShareTargetOcr.Hit candidate = ShareTargetOcr.findVisibleTarget(context, hs, sessionName);
+            if (candidate == null) {
+                OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+                OcrHelper.OcrItem exact = findShareOcrText(screen,
+                        text -> NameNormalizer.sameName(text, sessionName),
+                        0f, 1f, 0.32f, 1f);
+                candidate = ShareTargetOcr.Hit.from(exact);
+                if (candidate != null) {
+                    BotLog.i(context, "image.share.target.legacy.hit", "通用 OCR 精确回退命中分享目标 target=" + sessionName
+                            + " text=" + candidate.text + " rect=" + candidate.rect.flattenToString());
                 }
             }
-            candidate = candidate == null ? fallback : candidate;
             if (candidate == null) {
-                BotLog.w(context, "image.share.target.missing", "OCR 未找到分享目标会话 target=" + sessionName
-                        + " attempt=" + attempt
-                        + " snippets=" + (screen == null ? "" : screen.snippets));
+                BotLog.w(context, "image.share.target.missing", "专用 OCR 未找到分享目标会话 target=" + sessionName
+                        + " attempt=" + attempt);
                 SystemClock.sleep(shareConfirmPoll(config));
                 continue;
             }
-            int targetX = candidate.centerX;
-            hs.tap(targetX, candidate.centerY);
-            BotLog.i(context, "image.share.target.found", "OCR 找到分享目标会话 target=" + sessionName
-                    + " text=" + candidate.text + " x=" + targetX + " y=" + candidate.centerY
+            int targetX = candidate.rect.centerX();
+            int targetY = candidate.rect.centerY();
+            hs.tap(targetX, targetY);
+            BotLog.i(context, "image.share.target.found", "专用 OCR 找到分享目标会话 target=" + sessionName
+                    + " text=" + candidate.text + " x=" + targetX + " y=" + targetY
                     + " attempt=" + attempt);
             if (waitShareConfirmPage(context, config, hs, 2500)) {
                 BotLog.i(context, "image.share.confirm.ready", "分享确认页已出现 target=" + sessionName);
@@ -800,7 +791,8 @@ public final class ImageFlow {
                 SystemClock.sleep(Math.max(350L, shareConfirmPoll(config)));
                 continue;
             }
-            boolean targetConfirmed = confirmPageContainsTarget(screen, sessionName);
+            boolean targetConfirmed = ShareTargetOcr.findVisibleTarget(context, hs, sessionName) != null
+                    || confirmPageContainsTarget(screen, sessionName);
             if (!targetConfirmed) {
                 BotLog.e(context, "image.share.confirm.target_miss", "确认页目标群 OCR 未完整确认，取消发送 target=" + sessionName
                         + " attempt=" + attempt
@@ -1111,10 +1103,6 @@ public final class ImageFlow {
             return false;
         }
         return value.contains("发") || value.contains("送") || value.contains("递") || value.contains("给");
-    }
-
-    private boolean matchShareTargetName(String text, String name) {
-        return NameNormalizer.sameName(text, name);
     }
 
     private static String normalizeShareTargetName(String value) {
