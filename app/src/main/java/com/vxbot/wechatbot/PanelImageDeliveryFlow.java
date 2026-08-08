@@ -137,28 +137,41 @@ public final class PanelImageDeliveryFlow {
                 SystemClock.sleep(selectPoll(config));
                 continue;
             }
-            OcrHelper.OcrItem recent = find(screen, text -> "最近聊天".equals(clean(text)),
-                    0f, 1f, 0.10f, 0.60f);
-            int minY = recent == null ? Math.round(screen.height * 0.30f) : recent.rect.bottom + 20;
-            OcrHelper.OcrItem candidate = null;
-            boolean ambiguous = false;
+            int minY = Math.round(screen.height * 0.20f);
+            String wanted = normalize(target);
+            OcrHelper.OcrItem exact = null;
+            OcrHelper.OcrItem fuzzy = null;
+            boolean exactAmbiguous = false;
+            boolean fuzzyAmbiguous = false;
             for (OcrHelper.OcrItem item : screen.items) {
                 if (item.centerY < minY || item.centerY > screen.height - 80
                         || !matchesTarget(item.text, target)) {
                     continue;
                 }
-                if (candidate == null) {
-                    candidate = item;
-                } else if (Math.abs(candidate.centerY - item.centerY) > 28) {
-                    ambiguous = true;
-                    break;
-                } else if (item.rect.width() > candidate.rect.width()) {
-                    candidate = item;
+                String value = normalize(item.text);
+                if (wanted.equals(value)) {
+                    if (exact == null) {
+                        exact = item;
+                    } else if (!sameRow(exact, item)) {
+                        exactAmbiguous = true;
+                    } else if (item.rect.width() > exact.rect.width()) {
+                        exact = item;
+                    }
+                } else if (fuzzy == null) {
+                    fuzzy = item;
+                } else if (!sameRow(fuzzy, item)) {
+                    fuzzyAmbiguous = true;
+                } else if (item.rect.width() > fuzzy.rect.width()) {
+                    fuzzy = item;
                 }
             }
-            if (candidate == null || ambiguous) {
+            OcrHelper.OcrItem candidate = !exactAmbiguous && exact != null
+                    ? exact
+                    : (!exactAmbiguous && !fuzzyAmbiguous ? fuzzy : null);
+            if (candidate == null) {
                 BotLog.i(context, "panel.share.target.wait", "等待唯一目标 OCR target=" + target
-                        + " attempt=" + attempt + " ambiguous=" + ambiguous
+                        + " attempt=" + attempt + " exactAmbiguous=" + exactAmbiguous
+                        + " fuzzyAmbiguous=" + fuzzyAmbiguous
                         + " snippets=" + screen.snippets);
                 SystemClock.sleep(Math.max(450L, confirmPoll(config)));
                 continue;
@@ -171,6 +184,12 @@ public final class PanelImageDeliveryFlow {
         }
         BotLog.e(context, "panel.share.target.timeout", "分享页目标 OCR 超时 target=" + target);
         return false;
+    }
+
+    private boolean sameRow(OcrHelper.OcrItem first, OcrHelper.OcrItem second) {
+        return first != null && second != null
+                && Math.abs(first.centerY - second.centerY) <= 36
+                && Math.abs(first.centerX - second.centerX) <= 120;
     }
 
     private boolean waitConfirmPage(Context context, BotConfig config, HsClient hs,
