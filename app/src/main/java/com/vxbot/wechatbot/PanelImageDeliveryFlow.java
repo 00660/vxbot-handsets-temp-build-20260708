@@ -22,7 +22,6 @@ import java.util.List;
 /** 面板图片投递专用流程。其它图片、视频和群发链路不复用这里的目标选择逻辑。 */
 public final class PanelImageDeliveryFlow {
     private static final long SELECT_TIMEOUT_MS = 15000L;
-    private static final long SEARCH_INPUT_TIMEOUT_MS = 6000L;
     private static final long TARGET_TIMEOUT_MS = 30000L;
     private static final long CONFIRM_TIMEOUT_MS = 15000L;
     private static final long SUBMIT_TIMEOUT_MS = 7000L;
@@ -158,11 +157,10 @@ public final class PanelImageDeliveryFlow {
                     SystemClock.sleep(selectPoll(config));
                     continue;
                 }
+                BotLog.i(context, "panel.share.search.input.tap", "点击分享页顶部搜索框"
+                        + " text=" + search.text + " x=" + search.centerX + " y=" + search.centerY);
                 hs.tap(search.centerX, search.centerY);
-                if (!waitSearchInputReady(context, config, hs)) {
-                    BotLog.e(context, "panel.share.search.input.timeout", "分享页搜索输入框未就绪");
-                    return false;
-                }
+                SystemClock.sleep(Math.max(1500L, selectPoll(config) * 5));
                 String clip = hs.clipSet(target);
                 if (isError(clip)) {
                     BotLog.e(context, "panel.share.search.clip.fail", clip);
@@ -203,22 +201,6 @@ public final class PanelImageDeliveryFlow {
             return true;
         }
         BotLog.e(context, "panel.share.search.timeout", "分享页搜索结果超时 target=" + target);
-        return false;
-    }
-
-    private boolean waitSearchInputReady(Context context, BotConfig config, HsClient hs) {
-        long deadline = SystemClock.uptimeMillis() + SEARCH_INPUT_TIMEOUT_MS;
-        while (SystemClock.uptimeMillis() < deadline) {
-            try {
-                String active = hs.dumpActive();
-                if (active != null && (active.contains("MMEditText") || active.contains("k13")
-                        || active.contains("EditText"))) {
-                    return true;
-                }
-            } catch (Exception ignored) {
-            }
-            SystemClock.sleep(Math.max(250L, selectPoll(config)));
-        }
         return false;
     }
 
