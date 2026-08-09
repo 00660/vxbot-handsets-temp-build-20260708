@@ -90,15 +90,14 @@ public final class MainActivity extends Activity {
         preferences = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         engine = new NativeEngine(this);
         selectedPhone = engine.store().getSelectedPhone();
+        accounts = engine.store().getAccounts();
         io = Executors.newFixedThreadPool(3);
         getWindow().setStatusBarColor(background);
         getWindow().setNavigationBarColor(background);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        if (engine.store().getAccounts().length() == 0) showConnection();
-        else {
-            setAppShell();
-            loadAccounts();
-        }
+        setAppShell();
+        showAccounts();
+        loadAccounts();
         requestNotificationPermission();
         if (engine.store().getAccounts().length() > 0 && backgroundSyncEnabled()) startPanelSyncService();
     }
@@ -127,42 +126,6 @@ public final class MainActivity extends Activity {
 
     private boolean backgroundSyncEnabled() {
         return preferences.getBoolean("backgroundSync", true);
-    }
-
-    private void showConnection() {
-        LinearLayout root = vertical(background);
-        root.setPadding(dp(22), dp(30), dp(22), dp(28));
-        LinearLayout center = vertical(Color.TRANSPARENT);
-        center.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.addView(center, new LinearLayout.LayoutParams(-1, 0, 1));
-
-        TextView brand = text("iBox", 30, ink, Typeface.BOLD);
-        brand.setGravity(Gravity.CENTER);
-        center.addView(brand, marginParams(-1, -2, 0, dp(8), 0, 0));
-        TextView headline = text("独立原生面板", 22, ink, Typeface.BOLD);
-        headline.setGravity(Gravity.CENTER);
-        center.addView(headline, marginParams(-1, -2, 0, 0, 0, dp(20)));
-
-        LinearLayout card = card();
-        card.addView(text("本机运行", 17, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
-        TextView hint = text("账号、任务和通知配置仅保存在此 APK；行情与交易直接访问 iBox 官方服务。", 13, muted, Typeface.NORMAL);
-        card.addView(hint, marginParams(-1, -2, 0, 0, 0, dp(14)));
-        Button connect = button("进入本机面板", true);
-        card.addView(connect, new LinearLayout.LayoutParams(-1, dp(48)));
-        connect.setOnClickListener(v -> {
-            setAppShell();
-            loadAccounts();
-        });
-        center.addView(card, marginParams(-1, -2, 0, 0, 0, dp(16)));
-
-        Button addAccount = button("短信登录 / 添加账号", false);
-        addAccount.setOnClickListener(v -> showLoginDialog());
-        center.addView(addAccount, marginParams(-1, dp(46), 0, dp(8), 0, 0));
-
-        TextView footer = text("iBox Native · 本机 Java 引擎", 11, muted, Typeface.NORMAL);
-        footer.setGravity(Gravity.CENTER);
-        root.addView(footer, new LinearLayout.LayoutParams(-1, dp(28)));
-        setContentView(root);
     }
 
     private void showLoginDialog() {
@@ -375,6 +338,11 @@ public final class MainActivity extends Activity {
 
     private void showAccounts() {
         content.removeAllViews();
+        if (accounts.length() == 0) {
+            renderFirstRunWorkspace();
+            return;
+        }
+        pageTitle.setText("资产总览");
         addPageHeading("资产概览", "账号与数字资产");
         LinearLayout welcome = horizontal(0xffe9f7ef);
         welcome.setGravity(Gravity.CENTER_VERTICAL);
@@ -396,12 +364,95 @@ public final class MainActivity extends Activity {
         Button add = button("短信登录 / 添加账号", true);
         add.setOnClickListener(v -> showLoginDialog());
         content.addView(add, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-        if (accounts.length() == 0) {
-            content.addView(empty("暂无已登录账号"), new LinearLayout.LayoutParams(-1, -2));
-            loadAccounts();
-            return;
-        }
         renderAccountCards();
+    }
+
+    private void renderFirstRunWorkspace() {
+        pageTitle.setText("工作台");
+        LinearLayout account = card();
+        LinearLayout accountHeader = horizontal(Color.TRANSPARENT);
+        accountHeader.setGravity(Gravity.CENTER_VERTICAL);
+        accountHeader.addView(text("账号", 16, ink, Typeface.BOLD), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView state = text("未登录", 11, amber, Typeface.BOLD);
+        state.setGravity(Gravity.CENTER);
+        state.setPadding(dp(10), 0, dp(10), 0);
+        state.setBackground(shape(0xfffff6dd, 0xfff0d99a, 14));
+        accountHeader.addView(state, new LinearLayout.LayoutParams(-2, dp(28)));
+        account.addView(accountHeader, new LinearLayout.LayoutParams(-1, -2));
+        account.addView(text("未登录 iBox 账号", 21, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(12), 0, dp(14)));
+        Button addAccount = button("短信登录", true);
+        addAccount.setContentDescription("短信登录并添加账号");
+        addAccount.setOnClickListener(v -> showLoginDialog());
+        account.addView(addAccount, new LinearLayout.LayoutParams(-1, dp(48)));
+        content.addView(account, marginParams(-1, -2, 0, 0, 0, dp(18)));
+
+        int watchCount = engine.store().getMarketWatches().length();
+        int quantCount = engine.store().getQuantStrategies().length();
+        int tradeCount = engine.store().getTradeTasks().length();
+        int scheduledCount = engine.store().getSynthesisTasks().length()
+                + engine.store().getLotteryTasks().length()
+                + engine.store().getFirstSaleTasks().length();
+        addSectionTitle("运行状态");
+        LinearLayout firstRow = horizontal(Color.TRANSPARENT);
+        addHomeMetric(firstRow, "行情监控", String.valueOf(watchCount), 0xffedf5fc, 0);
+        addHomeMetric(firstRow, "量化策略", String.valueOf(quantCount), 0xffeef8f1, dp(8));
+        content.addView(firstRow, marginParams(-1, dp(72), 0, 0, 0, dp(8)));
+
+        LinearLayout secondRow = horizontal(Color.TRANSPARENT);
+        addHomeMetric(secondRow, "交易任务", String.valueOf(tradeCount), 0xfffff4e8, 0);
+        addHomeMetric(secondRow, "定时任务", String.valueOf(scheduledCount), 0xfffff0f2, dp(8));
+        content.addView(secondRow, marginParams(-1, dp(72), 0, 0, 0, dp(18)));
+
+        addSectionTitle("快捷入口");
+        addHomeFeatureRow("行情监控", watchCount + " 个监控", "market", infoBlue, "量化策略", quantCount + " 个策略", "quant", primaryDark);
+        addHomeFeatureRow("交易执行", tradeCount + " 个任务", "trade", amber, "首发抢购", engine.store().getFirstSaleTasks().length() + " 个任务", "first-sale", danger);
+        addHomeFeatureRow("自动抽奖", engine.store().getLotteryTasks().length() + " 个任务", "lottery", 0xff8064bd, "合成任务", engine.store().getSynthesisTasks().length() + " 个任务", "synthesis", 0xff3f9a9e);
+        addHomeFeatureRow("资产总览", "未登录", "accounts", 0xff398b96, "设置", backgroundSyncEnabled() ? "后台已开启" : "后台已关闭", "settings", 0xff65707c);
+    }
+
+    private void addHomeFeatureRow(String leftTitle, String leftState, String leftPage, int leftAccent, String rightTitle, String rightState, String rightPage, int rightAccent) {
+        LinearLayout row = horizontal(Color.TRANSPARENT);
+        row.addView(homeFeature(leftTitle, leftState, leftPage, leftAccent), new LinearLayout.LayoutParams(0, dp(92), 1));
+        LinearLayout.LayoutParams rightParams = new LinearLayout.LayoutParams(0, dp(92), 1);
+        rightParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(homeFeature(rightTitle, rightState, rightPage, rightAccent), rightParams);
+        content.addView(row, marginParams(-1, dp(92), 0, 0, 0, dp(8)));
+    }
+
+    private void addHomeMetric(LinearLayout row, String label, String value, int fill, int leftMargin) {
+        LinearLayout item = vertical(fill);
+        item.setPadding(dp(12), dp(10), dp(12), dp(9));
+        item.setBackground(shape(fill, 0xffdce8e4, 12));
+        item.addView(text(label, 11, muted, Typeface.BOLD));
+        item.addView(text(value, 21, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
+        params.setMargins(leftMargin, 0, 0, 0);
+        row.addView(item, params);
+    }
+
+    private LinearLayout homeFeature(String title, String subtitle, String page, int accent) {
+        LinearLayout feature = card();
+        feature.setPadding(dp(14), dp(12), dp(14), dp(11));
+        feature.setGravity(Gravity.CENTER_VERTICAL);
+        feature.setClickable(true);
+        feature.setFocusable(true);
+        feature.setContentDescription("打开" + title);
+        feature.setOnClickListener(v -> selectPage(page));
+
+        LinearLayout heading = horizontal(Color.TRANSPARENT);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView marker = new TextView(this);
+        marker.setBackground(shape(accent, 0, 6));
+        heading.addView(marker, new LinearLayout.LayoutParams(dp(9), dp(9)));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        titleParams.setMargins(dp(8), 0, 0, 0);
+        heading.addView(text(title, 15, ink, Typeface.BOLD), titleParams);
+        TextView arrow = text(">", 16, accent, Typeface.BOLD);
+        arrow.setGravity(Gravity.CENTER);
+        heading.addView(arrow, new LinearLayout.LayoutParams(dp(24), dp(28)));
+        feature.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        feature.addView(text(subtitle, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
+        return feature;
     }
 
     private void loadAccounts() {
@@ -1304,7 +1355,7 @@ public final class MainActivity extends Activity {
     private EditText passwordInput(String hint) { EditText input = input(hint); input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); return input; }
     private EditText input(String hint) { EditText input = new EditText(this); input.setHint(hint); input.setHintTextColor(0xff8795a0); input.setTextColor(ink); input.setTextSize(14); input.setSingleLine(true); input.setPadding(dp(13), 0, dp(13), 0); input.setBackground(shape(surface, 0xffdbe7e4, 12)); return input; }
 
-    private LinearLayout card() { LinearLayout card = vertical(surface); card.setPadding(dp(17), dp(16), dp(17), dp(16)); card.setBackground(shape(surface, 0xffe5eeeb, 18)); card.setElevation(dp(2)); return card; }
+    private LinearLayout card() { LinearLayout card = vertical(surface); card.setPadding(dp(17), dp(16), dp(17), dp(16)); card.setBackground(shape(surface, 0xffe5eeeb, 12)); card.setElevation(dp(2)); return card; }
     private LinearLayout vertical(int color) { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); view.setBackgroundColor(color); return view; }
     private LinearLayout horizontal(int color) { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.HORIZONTAL); view.setBackgroundColor(color); return view; }
     private TextView empty(String value) { TextView view = text(value, 13, muted, Typeface.NORMAL); view.setGravity(Gravity.CENTER); view.setPadding(dp(12), dp(24), dp(12), dp(24)); view.setBackground(shape(surface, 0xffe5eeeb, 16)); return view; }
