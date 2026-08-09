@@ -5,22 +5,11 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 
-import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.text.Text;
-import com.google.mlkit.vision.text.TextRecognition;
-import com.google.mlkit.vision.text.TextRecognizer;
-import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 public final class OcrHelper {
-    private static final TextRecognizer RECOGNIZER =
-            TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build());
-
     private OcrHelper() {
     }
 
@@ -177,12 +166,12 @@ public final class OcrHelper {
                 BotLog.w(context, "ocr.screenshot.decode.fail", "截图解码失败 bytes=" + bytes.length);
                 return null;
             }
-            Text text = recognize(bitmap);
-            if (text == null) {
+            List<PaddleOcrEngine.Result> results = recognize(context, bitmap);
+            if (results == null) {
                 BotLog.w(context, "ocr.timeout", "OCR 超时");
                 return null;
             }
-            return new Screen(bitmap.getWidth(), bitmap.getHeight(), collectItems(text), chatBottomFeature(bitmap));
+            return new Screen(bitmap.getWidth(), bitmap.getHeight(), collectItems(results), chatBottomFeature(bitmap));
         } catch (Exception e) {
             BotLog.w(context, "ocr.error", e.getMessage());
             return null;
@@ -253,8 +242,8 @@ public final class OcrHelper {
         try {
             int width = bitmap.getWidth();
             int height = bitmap.getHeight();
-            Text text = recognize(bitmap);
-            List<OcrItem> items = text == null ? Collections.emptyList() : collectItems(text);
+            List<PaddleOcrEngine.Result> results = recognize(context, bitmap);
+            List<OcrItem> items = results == null ? Collections.emptyList() : collectItems(results);
             String snippets = snippets(items);
             Rect pressTalkRect = findPressTalkTextRect(items, width, height);
             Rect visualInput = findTextInputBlock(bitmap);
@@ -478,26 +467,8 @@ public final class OcrHelper {
         return tail + 1;
     }
 
-    private static Text recognize(Bitmap bitmap) throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-        final Text[] result = new Text[1];
-        final Exception[] error = new Exception[1];
-        RECOGNIZER.process(InputImage.fromBitmap(bitmap, 0))
-                .addOnSuccessListener(text -> {
-                    result[0] = text;
-                    latch.countDown();
-                })
-                .addOnFailureListener(e -> {
-                    error[0] = e;
-                    latch.countDown();
-                });
-        if (!latch.await(8000L, TimeUnit.MILLISECONDS)) {
-            return null;
-        }
-        if (error[0] != null) {
-            throw new IllegalStateException(error[0].getMessage(), error[0]);
-        }
-        return result[0];
+    private static List<PaddleOcrEngine.Result> recognize(Context context, Bitmap bitmap) throws Exception {
+        return PaddleOcrEngine.get(context).recognize(bitmap);
     }
 
     private static Bitmap screenshotBitmap(Context context, HsClient hs) {
@@ -519,16 +490,10 @@ public final class OcrHelper {
         }
     }
 
-    private static List<OcrItem> collectItems(Text text) {
+    private static List<OcrItem> collectItems(List<PaddleOcrEngine.Result> results) {
         List<OcrItem> items = new ArrayList<>();
-        for (Text.TextBlock block : text.getTextBlocks()) {
-            addItem(items, block.getText(), block.getBoundingBox());
-            for (Text.Line line : block.getLines()) {
-                addItem(items, line.getText(), line.getBoundingBox());
-                for (Text.Element element : line.getElements()) {
-                    addItem(items, element.getText(), element.getBoundingBox());
-                }
-            }
+        for (PaddleOcrEngine.Result result : results) {
+            addItem(items, result.text, result.rect);
         }
         return items;
     }

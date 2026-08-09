@@ -1,6 +1,8 @@
 .gradle/
 build/
 app/build/
+app/paddleocr-runtime/
+app/src/main/assets/paddleocr/
 dist/
 local.properties
 *.iml

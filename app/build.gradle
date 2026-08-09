@@ -19,14 +19,32 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 237
-        versionName "0.1.237-recent-chats-ocr-anchor"
+        versionCode 239
+        versionName "0.1.239-offline-paddleocr"
         multiDexKeepProguard file("multidex-keep.pro")
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++11 -frtti -fexceptions -Wno-format"
+                arguments "-DANDROID_STL=c++_shared", "-DANDROID_ARM_NEON=TRUE"
+            }
+        }
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
 
     sourceSets {
         main {
             java.srcDirs += ["../src"]
+        }
+    }
+
+    ndkVersion "26.3.11579264"
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/paddleocr/CMakeLists.txt"
+            version "3.22.1"
         }
     }
 
@@ -47,6 +65,47 @@ dependencies {
     implementation "dev.rikka.shizuku:api:13.1.5"
     implementation "dev.rikka.shizuku:provider:13.1.5"
     implementation "androidx.core:core:1.13.1"
-    implementation "com.google.mlkit:text-recognition-chinese:16.0.1"
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
+}
+
+def paddleOcrRuntime = file("$projectDir/paddleocr-runtime")
+def paddleOcrAssets = file("$projectDir/src/main/assets/paddleocr")
+def paddleOcrDownloads = file("$buildDir/paddleocr-downloads")
+
+tasks.register("preparePaddleOcrRuntime") {
+    inputs.property("paddleLiteUrl", "https://paddleocr.bj.bcebos.com/libs/paddle_lite_libs_v2_10.tar.gz")
+    inputs.property("openCvUrl", "https://paddlelite-demo.bj.bcebos.com/libs/android/opencv-4.2.0-android-sdk.tar.gz")
+    inputs.property("modelsUrl", "https://paddleocr.bj.bcebos.com/PP-OCRv2/lite/ch_PP-OCRv2.tar.gz")
+    inputs.property("labelsUrl", "https://paddleocr.bj.bcebos.com/dygraph_v2.0/lite/ch_dict.tar.gz")
+    outputs.dir(paddleOcrRuntime)
+    outputs.dir(paddleOcrAssets)
+
+    doLast {
+        delete(paddleOcrRuntime)
+        delete(paddleOcrAssets)
+        paddleOcrDownloads.mkdirs()
+
+        def archives = [
+                [name: "paddle_lite_libs_v2_10.tar.gz", url: "https://paddleocr.bj.bcebos.com/libs/paddle_lite_libs_v2_10.tar.gz", destination: new File(paddleOcrRuntime, "PaddleLite")],
+                [name: "opencv-4.2.0-android-sdk.tar.gz", url: "https://paddlelite-demo.bj.bcebos.com/libs/android/opencv-4.2.0-android-sdk.tar.gz", destination: new File(paddleOcrRuntime, "OpenCV")],
+                [name: "ch_PP-OCRv2.tar.gz", url: "https://paddleocr.bj.bcebos.com/PP-OCRv2/lite/ch_PP-OCRv2.tar.gz", destination: new File(paddleOcrAssets, "models")],
+                [name: "ch_dict.tar.gz", url: "https://paddleocr.bj.bcebos.com/dygraph_v2.0/lite/ch_dict.tar.gz", destination: new File(paddleOcrAssets, "labels")]
+        ]
+        archives.each { archive ->
+            File local = new File(paddleOcrDownloads, archive.name)
+            if (!local.isFile()) {
+                ant.get(src: archive.url, dest: local, usetimestamp: true)
+            }
+            copy {
+                from tarTree(resources.gzip(local))
+                into archive.destination
+            }
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.startsWith("configureCMake") || name.startsWith("externalNativeBuild") || name.startsWith("merge")) {
+        dependsOn("preparePaddleOcrRuntime")
+    }
 }
