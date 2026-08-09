@@ -10,28 +10,29 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/** Keeps a small, read-only status snapshot available while the app is backgrounded. */
+/** Runs the native task engine while the application is backgrounded. */
 public final class PanelSyncService extends Service {
     private static final String PREFS = "ibox_native_panel";
     private static final String CHANNEL_ID = "ibox_panel_sync";
     private static final int NOTIFICATION_ID = 304;
     private ScheduledExecutorService scheduler;
     private volatile boolean stopped;
+    private NativeEngine engine;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(NOTIFICATION_ID, notification("正在同步面板状态"));
+        startForeground(NOTIFICATION_ID, notification("正在启动本机任务引擎"));
+        engine = new NativeEngine(this);
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleWithFixedDelay(this::sync, 0, 60, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(this::sync, 0, 1, TimeUnit.SECONDS);
     }
 
     @Override
@@ -54,21 +55,13 @@ public final class PanelSyncService extends Service {
     private void sync() {
         if (stopped) return;
         SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String endpoint = preferences.getString("endpoint", "").trim();
-        if (endpoint.isEmpty()) {
-            update("未配置服务地址");
-            return;
-        }
         try {
-            IBoxApi api = new IBoxApi(endpoint);
-            JSONObject watches = api.request("GET", "/api/ibox/v304/market/watches", null);
-            JSONObject quant = api.request("GET", "/api/ibox/v304/quant/strategies", null);
-            JSONObject trade = api.request("GET", "/api/ibox/v304/market/trade/tasks", null);
-            JSONObject firstSale = api.request("GET", "/api/ibox/v304/first-sales/tasks", null);
-            int watchCount = arrayLength(dataObject(watches), "watches", "items", "list");
-            int quantCount = arrayLength(dataObject(quant), "strategies", "items", "list");
-            int tradeCount = arrayLength(dataObject(trade), "tasks", "items", "list");
-            int firstCount = arrayLength(dataObject(firstSale), "tasks", "items", "list");
+            engine.tick();
+            JSONObject state = engine.backgroundSummary();
+            int watchCount = state.optInt("watchCount", 0);
+            int quantCount = state.optInt("quantCount", 0);
+            int tradeCount = state.optInt("tradeCount", 0);
+            int firstCount = state.optInt("firstSaleCount", 0);
             String summary = "行情 " + watchCount + " · 量化 " + quantCount + " · 交易 " + tradeCount + " · 首发 " + firstCount;
             preferences.edit()
                     .putString("last_sync_summary", summary)
@@ -79,19 +72,6 @@ public final class PanelSyncService extends Service {
             String message = error.getMessage();
             update("同步失败" + (message == null || message.isEmpty() ? "" : " · " + message));
         }
-    }
-
-    private JSONObject dataObject(JSONObject result) {
-        JSONObject data = result == null ? null : result.optJSONObject("data");
-        return data == null ? new JSONObject() : data;
-    }
-
-    private int arrayLength(JSONObject object, String... keys) {
-        for (String key : keys) {
-            JSONArray values = object.optJSONArray(key);
-            if (values != null) return values.length();
-        }
-        return 0;
     }
 
     private void createChannel() {

@@ -47,7 +47,6 @@ import java.util.function.Consumer;
 /** Native iBox panel client. The page never embeds the 5000 HTML document. */
 public final class MainActivity extends Activity {
     private static final String PREFS = "ibox_native_panel";
-    private static final String DEFAULT_ENDPOINT = "http://192.168.2.204:5000";
     private static final String[] PAGE_KEYS = {
             "accounts", "synthesis", "market", "quant", "trade", "lottery", "first-sale", "settings"
     };
@@ -68,12 +67,11 @@ public final class MainActivity extends Activity {
 
     private SharedPreferences preferences;
     private ExecutorService io;
-    private IBoxApi api;
+    private NativeEngine engine;
     private LinearLayout content;
     private LinearLayout nav;
     private TextView pageTitle;
     private TextView statusView;
-    private String endpoint;
     private String selectedPhone;
     private JSONArray accounts = new JSONArray();
     private String currentPage = "accounts";
@@ -90,15 +88,19 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         preferences = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        endpoint = preferences.getString("endpoint", DEFAULT_ENDPOINT);
-        selectedPhone = preferences.getString("selectedPhone", "");
+        engine = new NativeEngine(this);
+        selectedPhone = engine.store().getSelectedPhone();
         io = Executors.newFixedThreadPool(3);
         getWindow().setStatusBarColor(background);
         getWindow().setNavigationBarColor(background);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        showConnection();
+        if (engine.store().getAccounts().length() == 0) showConnection();
+        else {
+            setAppShell();
+            loadAccounts();
+        }
         requestNotificationPermission();
-        if (preferences.getBoolean("backgroundSync", false)) startPanelSyncService();
+        if (engine.store().getAccounts().length() > 0 && backgroundSyncEnabled()) startPanelSyncService();
     }
 
     @Override
@@ -123,6 +125,10 @@ public final class MainActivity extends Activity {
         stopService(new Intent(this, PanelSyncService.class));
     }
 
+    private boolean backgroundSyncEnabled() {
+        return preferences.getBoolean("backgroundSync", true);
+    }
+
     private void showConnection() {
         LinearLayout root = vertical(background);
         root.setPadding(dp(22), dp(30), dp(22), dp(28));
@@ -133,67 +139,33 @@ public final class MainActivity extends Activity {
         TextView brand = text("iBox", 30, ink, Typeface.BOLD);
         brand.setGravity(Gravity.CENTER);
         center.addView(brand, marginParams(-1, -2, 0, dp(8), 0, 0));
-        TextView headline = text("原生面板", 22, ink, Typeface.BOLD);
+        TextView headline = text("独立原生面板", 22, ink, Typeface.BOLD);
         headline.setGravity(Gravity.CENTER);
         center.addView(headline, marginParams(-1, -2, 0, 0, 0, dp(20)));
 
         LinearLayout card = card();
-        card.addView(text("服务连接", 17, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(14)));
-        EditText input = input("http://主机:5000");
-        input.setText(endpoint);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        card.addView(input, marginParams(-1, dp(48), 0, 0, 0, dp(10)));
-        TextView hint = text("连接后使用原生页面读取账号、行情和任务状态", 12, muted, Typeface.NORMAL);
+        card.addView(text("本机运行", 17, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
+        TextView hint = text("账号、任务和通知配置仅保存在此 APK；行情与交易直接访问 iBox 官方服务。", 13, muted, Typeface.NORMAL);
         card.addView(hint, marginParams(-1, -2, 0, 0, 0, dp(14)));
-        Button connect = button("连接面板", true);
+        Button connect = button("进入本机面板", true);
         card.addView(connect, new LinearLayout.LayoutParams(-1, dp(48)));
-        connect.setOnClickListener(v -> connect(input.getText().toString()));
+        connect.setOnClickListener(v -> {
+            setAppShell();
+            loadAccounts();
+        });
         center.addView(card, marginParams(-1, -2, 0, 0, 0, dp(16)));
 
         Button addAccount = button("短信登录 / 添加账号", false);
-        addAccount.setOnClickListener(v -> {
-            endpoint = normalizeEndpoint(input.getText().toString());
-            if (endpoint.isEmpty()) {
-                toast("请先填写服务地址");
-                return;
-            }
-            api = new IBoxApi(endpoint);
-            preferences.edit().putString("endpoint", endpoint).apply();
-            showLoginDialog();
-        });
+        addAccount.setOnClickListener(v -> showLoginDialog());
         center.addView(addAccount, marginParams(-1, dp(46), 0, dp(8), 0, 0));
 
-        TextView footer = text("iBox Native · API v304", 11, muted, Typeface.NORMAL);
+        TextView footer = text("iBox Native · 本机 Java 引擎", 11, muted, Typeface.NORMAL);
         footer.setGravity(Gravity.CENTER);
         root.addView(footer, new LinearLayout.LayoutParams(-1, dp(28)));
         setContentView(root);
-        input.requestFocus();
-    }
-
-    private void connect(String value) {
-        String normalized = normalizeEndpoint(value);
-        if (normalized.isEmpty()) {
-            toast("请输入服务地址");
-            return;
-        }
-        endpoint = normalized;
-        api = new IBoxApi(endpoint);
-        request("正在连接", "GET", "/api/ibox/v304/accounts", null, result -> {
-            preferences.edit().putString("endpoint", endpoint).apply();
-            setAppShell();
-            renderAccounts(result);
-        });
     }
 
     private void showLoginDialog() {
-        if (api == null) {
-            endpoint = normalizeEndpoint(endpoint);
-            if (endpoint.isEmpty()) {
-                toast("请先连接服务");
-                return;
-            }
-            api = new IBoxApi(endpoint);
-        }
         LinearLayout form = vertical(Color.TRANSPARENT);
         EditText phone = input("手机号");
         phone.setInputType(InputType.TYPE_CLASS_PHONE);
@@ -232,7 +204,7 @@ public final class MainActivity extends Activity {
             send.setEnabled(false);
             state.setText("正在创建验证会话…");
             state.setTextColor(muted);
-            request("创建短信会话", "POST", "/api/ibox/v304/sms/session", body, result -> {
+            request("创建短信会话", "POST", "/native/sms/session", body, result -> {
                 JSONObject data = result.optJSONObject("data");
                 smsSessionId = data == null ? "" : data.optString("sessionId", "");
                 smsPhone = value;
@@ -250,7 +222,7 @@ public final class MainActivity extends Activity {
                         captchaBody.put("captcha", captcha);
                     } catch (Exception ignored) {
                     }
-                    request("发送短信", "POST", "/api/ibox/v304/sms/captcha/" + Uri.encode(smsSessionId), captchaBody, smsResult -> {
+                    request("发送短信", "POST", "/native/sms/captcha/" + Uri.encode(smsSessionId), captchaBody, smsResult -> {
                         code.setEnabled(true);
                         send.setEnabled(false);
                         state.setText("短信已发送，请输入验证码");
@@ -279,7 +251,7 @@ public final class MainActivity extends Activity {
                 body.put("sessionId", smsSessionId);
             } catch (Exception ignored) {
             }
-            request("登录账号", "POST", "/api/ibox/v304/login", body, result -> {
+            request("登录账号", "POST", "/native/login", body, result -> {
                 smsSessionId = "";
                 smsPhone = "";
                 dialog.dismiss();
@@ -289,6 +261,7 @@ public final class MainActivity extends Activity {
                 } else {
                     loadAccounts();
                 }
+                if (backgroundSyncEnabled()) startPanelSyncService();
                 toast("账号已添加");
             });
         }));
@@ -336,13 +309,9 @@ public final class MainActivity extends Activity {
         toolbar.setPadding(dp(18), dp(10), dp(14), dp(10));
         pageTitle = text("资产总览", 22, ink, Typeface.BOLD);
         toolbar.addView(pageTitle, new LinearLayout.LayoutParams(0, dp(44), 1));
-        TextView live = text("已连接", 12, success, Typeface.BOLD);
+        TextView live = text("本机运行", 12, success, Typeface.BOLD);
         live.setGravity(Gravity.CENTER);
         toolbar.addView(live, marginParams(-2, dp(36), dp(8), 0, 0, 0));
-        Button settings = button("设置", false);
-        settings.setTextSize(12);
-        settings.setOnClickListener(v -> selectPage("settings"));
-        toolbar.addView(settings, new LinearLayout.LayoutParams(dp(64), dp(40)));
         root.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(64)));
 
         HorizontalScrollView navScroll = new HorizontalScrollView(this);
@@ -413,7 +382,7 @@ public final class MainActivity extends Activity {
         welcome.setBackground(shape(0xffe9f7ef, 0xffd5ecdd, 18));
         LinearLayout welcomeCopy = vertical(Color.TRANSPARENT);
         welcomeCopy.addView(text("今天也要稳稳运行", 15, ink, Typeface.BOLD));
-        welcomeCopy.addView(text("原生面板已连接，任务状态随时可查", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(4), 0, 0));
+        welcomeCopy.addView(text("原生引擎已就绪，任务状态随时可查", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(4), 0, 0));
         welcome.addView(welcomeCopy, new LinearLayout.LayoutParams(0, -2, 1));
         TextView badge = text("在线", 12, success, Typeface.BOLD);
         badge.setGravity(Gravity.CENTER);
@@ -436,12 +405,12 @@ public final class MainActivity extends Activity {
     }
 
     private void loadAccounts() {
-        request("同步账号", "GET", "/api/ibox/v304/accounts", null, result -> {
+        request("同步账号", "GET", "/native/accounts", null, result -> {
             accounts = result.optJSONArray("data");
             if (accounts == null) accounts = new JSONArray();
             if (selectedPhone.isEmpty() && accounts.length() > 0) {
                 selectedPhone = accounts.optJSONObject(0).optString("phone");
-                preferences.edit().putString("selectedPhone", selectedPhone).apply();
+                engine.store().setSelectedPhone(selectedPhone);
             }
             if ("accounts".equals(currentPage)) {
                 content.removeAllViews();
@@ -455,7 +424,7 @@ public final class MainActivity extends Activity {
         if (accounts == null) accounts = new JSONArray();
         if (accounts.length() > 0 && selectedPhone.isEmpty()) {
             selectedPhone = accounts.optJSONObject(0).optString("phone");
-            preferences.edit().putString("selectedPhone", selectedPhone).apply();
+            engine.store().setSelectedPhone(selectedPhone);
         }
         selectPage("accounts");
     }
@@ -478,7 +447,7 @@ public final class MainActivity extends Activity {
             selected.setBackground(shape(phone.equals(selectedPhone) ? 0xffe8f7ee : 0xffedf5fc, 0xffdbe9e1, 20));
             selected.setOnClickListener(v -> {
                 selectedPhone = phone;
-                preferences.edit().putString("selectedPhone", phone).apply();
+                engine.store().setSelectedPhone(phone);
                 content.removeAllViews();
                 showAccounts();
             });
@@ -524,7 +493,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadAssets(String phone) {
-        request("刷新资产", "GET", "/api/ibox/v304/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null, result -> {
+        request("刷新资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null, result -> {
             toast("资产已同步");
             loadAccounts();
         });
@@ -533,8 +502,8 @@ public final class MainActivity extends Activity {
     private void confirmRemoveAccount(String phone) {
         new AlertDialog.Builder(this).setTitle("移除账号").setMessage("移除后会暂停该账号未完成任务。")
                 .setNegativeButton("取消", null).setPositiveButton("确认移除", (dialog, which) ->
-                        request("移除账号", "POST", "/api/ibox/v304/accounts/" + Uri.encode(phone) + "/remove", null, result -> {
-                            if (phone.equals(selectedPhone)) selectedPhone = "";
+                        request("移除账号", "POST", "/native/accounts/" + Uri.encode(phone) + "/remove", null, result -> {
+                            if (phone.equals(selectedPhone)) selectedPhone = engine.store().getSelectedPhone();
                             loadAccounts();
                         })).show();
     }
@@ -545,7 +514,7 @@ public final class MainActivity extends Activity {
         Button refresh = button("刷新任务", false);
         refresh.setOnClickListener(v -> showSynthesis());
         content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-        request("同步合成任务", "GET", "/api/ibox/v304/synthesis/tasks", null, result -> {
+        request("同步合成任务", "GET", "/native/synthesis/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
             renderTaskList(tasks, "合成任务", content, true);
             if (!selectedPhone.isEmpty()) {
@@ -557,7 +526,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadSynthesisActivities() {
-        request("同步合成活动", "GET", "/api/ibox/v304/accounts/" + Uri.encode(selectedPhone) + "/synthesis/activities", null, result -> {
+        request("同步合成活动", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/activities", null, result -> {
             JSONObject data = result.optJSONObject("data");
             JSONArray activities = findArray(data, "activities", "items", "list");
             if (activities == null || activities.length() == 0) {
@@ -592,7 +561,7 @@ public final class MainActivity extends Activity {
 
     private void loadSynthesisCenter(String syntheticId) {
         if (syntheticId.isEmpty()) return;
-        request("读取材料", "GET", "/api/ibox/v304/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId), null, result -> {
+        request("读取材料", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId), null, result -> {
             JSONObject data = result.optJSONObject("data");
             showJsonDialog("合成材料", data);
         });
@@ -622,9 +591,10 @@ public final class MainActivity extends Activity {
                 body.put("syntheticNum", intValue(count, 1));
                 body.put("phones", new JSONArray().put(selectedPhone));
                 body.put("sourcePhone", selectedPhone);
+                if (scheduled) body.put("startAt", first(activity, "startAt", "startTime", "beginTime"));
             } catch (Exception ignored) {
             }
-            String path = scheduled ? "/api/ibox/v304/synthesis/tasks" : "/api/ibox/v304/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId) + "/submit";
+            String path = scheduled ? "/native/synthesis/tasks" : "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId) + "/submit";
             request(scheduled ? "保存合成任务" : "提交合成", "POST", path, body, result -> {
                 dialog.dismiss();
                 if (scheduled) toast("合成任务已保存");
@@ -651,7 +621,7 @@ public final class MainActivity extends Activity {
         content.addView(refresh, marginParams(-1, dp(42), 0, 0, 0, dp(12)));
         LinearLayout watchBox = vertical(Color.TRANSPARENT);
         content.addView(watchBox, new LinearLayout.LayoutParams(-1, -2));
-        refresh.setOnClickListener(v -> loadWatches(watchBox));
+        refresh.setOnClickListener(v -> loadWatches(watchBox, true));
         loadWatches(watchBox);
     }
 
@@ -661,7 +631,7 @@ public final class MainActivity extends Activity {
             target.addView(empty("输入名称后搜索"));
             return;
         }
-        request("搜索行情", "GET", "/api/ibox/v304/market?name=" + Uri.encode(name.trim()) + "&pageSize=20", null, result -> {
+        request("搜索行情", "GET", "/native/market?name=" + Uri.encode(name.trim()) + "&pageSize=20&phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews();
             JSONArray items = findArray(result.optJSONObject("data"), "items", "list", "records");
             if (items == null || items.length() == 0) {
@@ -683,7 +653,11 @@ public final class MainActivity extends Activity {
     }
 
     private void loadWatches(LinearLayout target) {
-        request("同步行情监控", "GET", "/api/ibox/v304/market/watches", null, result -> {
+        loadWatches(target, false);
+    }
+
+    private void loadWatches(LinearLayout target, boolean refresh) {
+        request(refresh ? "刷新行情监控" : "同步行情监控", "GET", "/native/market/watches" + (refresh ? "?refresh=1" : ""), null, result -> {
             target.removeAllViews();
             JSONArray watches = findArray(result.optJSONObject("data"), "watches", "items", "list");
             if (watches == null || watches.length() == 0) {
@@ -715,14 +689,15 @@ public final class MainActivity extends Activity {
     private void addWatch(JSONObject item) {
         JSONObject body = new JSONObject();
         try {
-            body.put("collectionId", first(item, "collectionId", "groupId", "id"));
-            body.put("name", first(item, "name", "title", "groupId", "id"));
-            body.put("searchTerm", first(item, "searchTerm", "name", "title"));
-            body.put("watchToken", first(item, "watchToken", "token"));
+                body.put("collectionId", first(item, "collectionId", "groupId", "id"));
+                body.put("name", first(item, "name", "title", "groupId", "id"));
+                body.put("searchTerm", first(item, "searchTerm", "name", "title"));
+                body.put("floorPrice", first(item, "floorPrice", "price"));
+                body.put("watchToken", first(item, "watchToken", "token"));
             body.put("riseThresholdPercent", 3);
             body.put("fallThresholdPercent", 3);
         } catch (Exception ignored) { }
-        request("加入行情监控", "POST", "/api/ibox/v304/market/watches", body, result -> toast("已加入行情监控"));
+        request("加入行情监控", "POST", "/native/market/watches", body, result -> toast("已加入行情监控"));
     }
 
     private void showThresholdDialog(JSONObject watch, LinearLayout target) {
@@ -742,7 +717,7 @@ public final class MainActivity extends Activity {
             }
             JSONObject body = new JSONObject();
             try { body.put("riseThresholdPercent", riseValue); body.put("fallThresholdPercent", fallValue); } catch (Exception ignored) { }
-            request("保存阈值", "PUT", "/api/ibox/v304/market/watches/" + Uri.encode(watch.optString("id")) + "/thresholds", body, result -> {
+            request("保存阈值", "PUT", "/native/market/watches/" + Uri.encode(watch.optString("id")) + "/thresholds", body, result -> {
                 dialog.dismiss();
                 loadWatches(target);
             });
@@ -752,7 +727,7 @@ public final class MainActivity extends Activity {
 
     private void cancelWatch(String id, LinearLayout target) {
         if (id.isEmpty()) return;
-        request("停止监控", "POST", "/api/ibox/v304/market/watches/" + Uri.encode(id) + "/cancel", null, result -> loadWatches(target));
+        request("停止监控", "POST", "/native/market/watches/" + Uri.encode(id) + "/cancel", null, result -> loadWatches(target));
     }
 
     private void showQuant() {
@@ -775,7 +750,7 @@ public final class MainActivity extends Activity {
 
     private void searchQuant(String name, LinearLayout target) {
         if (name == null || name.trim().isEmpty()) return;
-        request("搜索量化目标", "GET", "/api/ibox/v304/market?name=" + Uri.encode(name.trim()) + "&pageSize=20", null, result -> {
+        request("搜索量化目标", "GET", "/native/market?name=" + Uri.encode(name.trim()) + "&pageSize=20&phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews();
             JSONArray items = findArray(result.optJSONObject("data"), "items", "list", "records");
             if (items == null || items.length() == 0) { target.addView(empty("没有找到目标")); return; }
@@ -794,7 +769,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadQuantStrategies(LinearLayout target) {
-        request("同步量化策略", "GET", "/api/ibox/v304/quant/strategies", null, result -> {
+        request("同步量化策略", "GET", "/native/quant/strategies", null, result -> {
             target.removeAllViews();
             JSONArray strategies = findArray(result.optJSONObject("data"), "strategies", "items", "list");
             if (strategies == null || strategies.length() == 0) { target.addView(empty("暂无策略")); return; }
@@ -806,15 +781,16 @@ public final class MainActivity extends Activity {
                 row.addView(text(first(strategy, "title", "groupId", "id") + " · " + status, 15, ink, Typeface.BOLD));
                 row.addView(text(strategyMeta(strategy), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(10), 0, 0));
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
-                if ("verification_required".equals(strategy.optString("status"))) {
+                String strategyState = strategy.optString("status");
+                if ("verification_required".equals(strategyState)) {
                     Button verify = button("验证", true);
                     verify.setOnClickListener(v -> startTaskCaptcha("量化", strategy.optString("id"), strategy.optString("phone")));
                     actions.addView(verify, new LinearLayout.LayoutParams(0, dp(42), 1));
-                } else if ("monitoring".equals(strategy.optString("status"))) {
+                } else if ("monitoring".equals(strategyState)) {
                     Button pause = button("暂停", false);
                     pause.setOnClickListener(v -> quantAction(strategy.optString("id"), "disable", target));
                     actions.addView(pause, new LinearLayout.LayoutParams(0, dp(42), 1));
-                } else {
+                } else if (!isTerminalTaskStatus(strategyState)) {
                     Button start = button("启动", false);
                     start.setOnClickListener(v -> quantAction(strategy.optString("id"), "enable", target));
                     actions.addView(start, new LinearLayout.LayoutParams(0, dp(42), 1));
@@ -881,22 +857,22 @@ public final class MainActivity extends Activity {
                 JSONObject stopLoss = new JSONObject(); stopLoss.put("enabled", false); body.put("stopLoss", stopLoss);
                 if (!password.getText().toString().trim().isEmpty()) body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
-            String path = existing == null ? "/api/ibox/v304/quant/strategies" : "/api/ibox/v304/quant/strategies/" + Uri.encode(existing.optString("id"));
+            String path = existing == null ? "/native/quant/strategies" : "/native/quant/strategies/" + Uri.encode(existing.optString("id"));
             request("保存策略", existing == null ? "POST" : "PUT", path, body, result -> { dialog.dismiss(); selectPage("quant"); });
         }));
         dialog.show();
     }
 
     private void quantAction(String id, String action, ViewGroup target) {
-        request(action.equals("enable") ? "启动策略" : "暂停策略", "POST", "/api/ibox/v304/quant/strategies/" + Uri.encode(id) + "/" + action, null, result -> loadQuantStrategies((LinearLayout) target));
+        request(action.equals("enable") ? "启动策略" : "暂停策略", "POST", "/native/quant/strategies/" + Uri.encode(id) + "/" + action, null, result -> loadQuantStrategies((LinearLayout) target));
     }
 
     private void quantDelete(String id, ViewGroup target) {
-        request("删除策略", "DELETE", "/api/ibox/v304/quant/strategies/" + Uri.encode(id), null, result -> loadQuantStrategies((LinearLayout) target));
+        request("删除策略", "DELETE", "/native/quant/strategies/" + Uri.encode(id), null, result -> loadQuantStrategies((LinearLayout) target));
     }
 
     private void loadQuantEvents(String id) {
-        request("读取执行记录", "GET", "/api/ibox/v304/quant/strategies/" + Uri.encode(id) + "/events", null, result -> showJsonDialog("量化执行记录", result.optJSONObject("data")));
+        request("读取执行记录", "GET", "/native/quant/strategies/" + Uri.encode(id) + "/events", null, result -> showJsonDialog("量化执行记录", result.optJSONObject("data")));
     }
 
     private void showTrade() {
@@ -919,7 +895,7 @@ public final class MainActivity extends Activity {
 
     private void searchTrade(String name, LinearLayout target) {
         if (name == null || name.trim().isEmpty()) return;
-        request("搜索交易目标", "GET", "/api/ibox/v304/market?name=" + Uri.encode(name.trim()) + "&pageSize=20", null, result -> {
+        request("搜索交易目标", "GET", "/native/market?name=" + Uri.encode(name.trim()) + "&pageSize=20&phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews(); JSONArray items = findArray(result.optJSONObject("data"), "items", "list", "records");
             if (items == null || items.length() == 0) { target.addView(empty("没有可交易藏品")); return; }
             for (int i = 0; i < items.length(); i++) {
@@ -957,7 +933,7 @@ public final class MainActivity extends Activity {
                 body.put("autoStart", true);
             } catch (Exception ignored) {
             }
-            request("保存捡漏任务", "POST", "/api/ibox/v304/retired-market/tasks", body, result -> {
+            request("保存捡漏任务", "POST", "/native/retired-market/tasks", body, result -> {
                 dialog.dismiss();
                 toast("捡漏任务已保存");
                 showTrade();
@@ -986,13 +962,13 @@ public final class MainActivity extends Activity {
                 body.put("paymentPlatformCode", intValue(paymentCode, 0)); body.put("agreementAccepted", agreement.isChecked());
                 if ("consignment".equals(taskType)) { body.put("triggerPrice", doubleValue(trigger, 0)); body.put("monitorIntervalValue", intValue(interval, 5)); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim()); }
             } catch (Exception ignored) { }
-            request("创建交易任务", "POST", "/api/ibox/v304/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
+            request("创建交易任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
         }));
         dialog.show();
     }
 
     private void loadTradeTasks(LinearLayout target) {
-        request("同步交易任务", "GET", "/api/ibox/v304/market/trade/tasks", null, tradeResult -> request("同步捡漏任务", "GET", "/api/ibox/v304/retired-market/tasks", null, retiredResult -> {
+        request("同步交易任务", "GET", "/native/market/trade/tasks", null, tradeResult -> request("同步捡漏任务", "GET", "/native/retired-market/tasks", null, retiredResult -> {
             target.removeAllViews();
             renderTaskList(findArray(tradeResult.optJSONObject("data"), "tasks", "items", "list"), "交易", target, false);
             renderTaskList(findArray(retiredResult.optJSONObject("data"), "tasks", "items", "list"), "捡漏", target, false);
@@ -1000,7 +976,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadOrders(LinearLayout target) {
-        request("同步订单", "GET", "/api/ibox/v304/orders", null, result -> {
+        request("同步订单", "GET", "/native/orders?phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews(); JSONObject data = result.optJSONObject("data");
             if (data == null) { target.addView(empty("暂无订单")); return; }
             JSONArray pending = findArray(data, "pendingOrders", "pending", "orders");
@@ -1046,8 +1022,8 @@ public final class MainActivity extends Activity {
                         .setNegativeButton("返回", null)
                         .setPositiveButton("确认取消", (dialog, which) -> {
                             String path = prefix.startsWith("合成")
-                                    ? "/api/ibox/v304/synthesis/tasks/" + Uri.encode(id) + "/cancel"
-                                    : "/api/ibox/v304/first-sales/tasks/" + Uri.encode(id) + "/cancel";
+                                    ? "/native/synthesis/tasks/" + Uri.encode(id) + "/cancel"
+                                    : "/native/first-sales/tasks/" + Uri.encode(id) + "/cancel";
                             request("取消" + prefix, "POST", path, null, result -> {
                                 target.removeAllViews();
                                 if (prefix.startsWith("合成")) showSynthesis(); else showFirstSale();
@@ -1056,19 +1032,16 @@ public final class MainActivity extends Activity {
                 row.addView(cancel, new LinearLayout.LayoutParams(-1, dp(40)));
             } else if (!id.isEmpty() && (prefix.equals("交易") || prefix.equals("捡漏"))) {
                 boolean enabled = task.optBoolean("enabled", false);
-                String base = prefix.equals("交易") ? "/api/ibox/v304/market/trade/tasks/" : "/api/ibox/v304/retired-market/tasks/";
+                String base = prefix.equals("交易") ? "/native/market/trade/tasks/" : "/native/retired-market/tasks/";
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
-                Button toggle = button(enabled ? "暂停" : "启动", false);
-                toggle.setOnClickListener(v -> {
-                    String action = enabled ? "disable" : "enable";
-                    JSONObject body = null;
-                    if (!enabled && prefix.equals("交易") && "consignment".equals(task.optString("type"))) {
-                        toast("寄售任务启动需要交易密码，请在网页端或后续验证弹层输入");
-                        return;
-                    }
-                    request(enabled ? "暂停任务" : "启动任务", "POST", base + Uri.encode(id) + "/" + action, body, result -> showTrade());
-                });
-                actions.addView(toggle, new LinearLayout.LayoutParams(0, dp(40), 1));
+                if (!isTerminalTaskStatus(status)) {
+                    Button toggle = button(enabled ? "暂停" : "启动", false);
+                    toggle.setOnClickListener(v -> {
+                        String action = enabled ? "disable" : "enable";
+                        request(enabled ? "暂停任务" : "启动任务", "POST", base + Uri.encode(id) + "/" + action, null, result -> showTrade());
+                    });
+                    actions.addView(toggle, new LinearLayout.LayoutParams(0, dp(40), 1));
+                }
                 if ("payment_pending".equals(task.optString("status"))) {
                     Button payment = button("支付", true);
                     payment.setOnClickListener(v -> request("获取支付链接", "POST", base + Uri.encode(id) + "/payment", null, result -> {
@@ -1114,16 +1087,16 @@ public final class MainActivity extends Activity {
         String base;
         if (prefix.startsWith("首发")) {
             kind = "first-sale";
-            base = "/api/ibox/v304/first-sales/tasks/" + Uri.encode(taskId) + "/captcha";
+            base = "/native/first-sales/tasks/" + Uri.encode(taskId) + "/captcha";
         } else if (prefix.startsWith("量化")) {
             kind = "quant";
-            base = "/api/ibox/v304/quant/strategies/" + Uri.encode(taskId) + "/captcha";
+            base = "/native/quant/strategies/" + Uri.encode(taskId) + "/captcha";
         } else if (prefix.startsWith("捡漏")) {
             kind = "retired";
-            base = "/api/ibox/v304/retired-market/tasks/" + Uri.encode(taskId) + "/captcha";
+            base = "/native/retired-market/tasks/" + Uri.encode(taskId) + "/captcha";
         } else {
             kind = "trade";
-            base = "/api/ibox/v304/market/trade/tasks/" + Uri.encode(taskId) + "/captcha";
+            base = "/native/market/trade/tasks/" + Uri.encode(taskId) + "/captcha";
         }
         JSONObject body = null;
         if ("first-sale".equals(kind)) {
@@ -1163,13 +1136,18 @@ public final class MainActivity extends Activity {
     }
 
     private void loadLottery(LinearLayout target) {
-        request("同步抽奖状态", "GET", "/api/ibox/v304/lottery/auto", null, result -> {
+        request("同步抽奖状态", "GET", "/native/lottery/auto", null, result -> {
             target.removeAllViews(); JSONArray activities = findArray(result.optJSONObject("data"), "activities", "items", "list");
             if (activities == null || activities.length() == 0) { target.addView(empty("暂无抽奖活动")); return; }
             for (int i = 0; i < activities.length(); i++) {
                 JSONObject activity = activities.optJSONObject(i); if (activity == null) continue;
                 LinearLayout row = card(); row.addView(text(first(activity, "title", "name", "id"), 15, ink, Typeface.BOLD));
                 row.addView(text("状态 " + first(activity, "phase", "status", "onlineStatus") + "\n" + first(activity, "startTime", "endTime", "updatedAt"), 12, muted, Typeface.NORMAL));
+                String id = activity.optString("id");
+                boolean enabled = activity.optBoolean("enabled", false);
+                Button toggle = button(enabled ? "停止自动抽奖" : "开启自动抽奖", enabled);
+                toggle.setOnClickListener(v -> request(enabled ? "停止自动抽奖" : "开启自动抽奖", "POST", "/native/lottery/auto/" + Uri.encode(id) + "/" + (enabled ? "disable" : "enable"), null, ignored -> loadLottery(target)));
+                row.addView(toggle, marginParams(-1, dp(42), 0, dp(8), 0, 0));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
         });
@@ -1183,7 +1161,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadFirstSales(LinearLayout target) {
-        request("同步首发项目", "GET", "/api/ibox/v304/first-sales?refresh=1", null, result -> {
+        request("同步首发项目", "GET", "/native/first-sales?refresh=1&phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews(); JSONArray items = findArray(result.optJSONObject("data"), "items", "sales", "list");
             if (items == null || items.length() == 0) { target.addView(empty("暂无首发项目")); return; }
             for (int i = 0; i < items.length(); i++) {
@@ -1198,7 +1176,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadFirstSaleTasks(LinearLayout target) {
-        request("同步首发任务", "GET", "/api/ibox/v304/first-sales/tasks", null, result -> {
+        request("同步首发任务", "GET", "/native/first-sales/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
             addSectionTitle("抢购任务"); renderTaskList(tasks, "首发", target, true);
         });
@@ -1208,9 +1186,9 @@ public final class MainActivity extends Activity {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
         LinearLayout form = vertical(Color.TRANSPARENT);
         Spinner mode = spinner(new String[]{"scheduled", "immediate"}, "scheduled");
-        EditText count = numberInput("购买数量", "1"); EditText paymentCode = numberInput("支付通道编号", ""); EditText password = passwordInput("支付密码");
+        EditText count = numberInput("购买数量", "1"); EditText paymentCode = numberInput("支付通道编号", "");
         form.addView(labelled("提交方式", mode));
-        form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
+        form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, new LinearLayout.LayoutParams(-1, dp(46)));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("加入首发抢购").setView(form).setNegativeButton("取消", null).setPositiveButton("保存任务", null).create();
         dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
             JSONObject body = new JSONObject();
@@ -1220,24 +1198,23 @@ public final class MainActivity extends Activity {
                 body.put("title", first(item, "title", "name", "saleId", "id"));
                 body.put("num", intValue(count, 1));
                 body.put("paymentPlatformCode", intValue(paymentCode, 0));
-                body.put("paymentPassword", password.getText().toString().trim());
-                body.put("phones", new JSONArray().put(selectedPhone));
                 body.put("sourcePhone", selectedPhone);
+                boolean immediate = "immediate".equals(mode.getSelectedItem().toString());
+                body.put("startAt", immediate ? java.time.Instant.now().toString() : first(item, "startAt", "startTime", "onSaleTime", "saleTime"));
             } catch (Exception ignored) {
             }
             boolean immediate = "immediate".equals(mode.getSelectedItem().toString());
-            String path = immediate ? "/api/ibox/v304/first-sales/orders" : "/api/ibox/v304/first-sales/tasks";
-            request(immediate ? "立即提交首发" : "保存首发任务", "POST", path, body, result -> { dialog.dismiss(); toast(immediate ? "首发提交已返回" : "首发任务已保存"); showFirstSale(); });
+            request(immediate ? "立即提交首发" : "保存首发任务", "POST", "/native/first-sales/tasks", body, result -> { dialog.dismiss(); toast(immediate ? "首发任务已提交" : "首发任务已保存"); showFirstSale(); });
         }));
         dialog.show();
     }
 
     private void showSettings() {
-        content.removeAllViews(); addPageHeading("设置", "连接与通知");
-        LinearLayout service = card(); service.addView(text("服务连接", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
-        EditText endpointEdit = input("面板服务地址"); endpointEdit.setText(endpoint); service.addView(endpointEdit, marginParams(-1, dp(46), 0, 0, 0, dp(10)));
-        Button saveEndpoint = button("保存地址并重连", true); saveEndpoint.setOnClickListener(v -> connect(endpointEdit.getText().toString())); service.addView(saveEndpoint, new LinearLayout.LayoutParams(-1, dp(44)));
-        content.addView(service, marginParams(-1, -2, 0, 0, 0, dp(12)));
+        content.removeAllViews(); addPageHeading("设置", "通知与本地执行");
+        LinearLayout runtime = card();
+        runtime.addView(text("独立运行", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
+        runtime.addView(text("账号、策略、任务和通知配置保存在本机；无需填写面板服务地址。", 12, muted, Typeface.NORMAL));
+        content.addView(runtime, marginParams(-1, -2, 0, 0, 0, dp(12)));
 
         LinearLayout bark = card(); bark.addView(text("Bark 通知", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
         CheckBox enabled = check("启用推送", false); bark.addView(enabled);
@@ -1245,17 +1222,17 @@ public final class MainActivity extends Activity {
         bark.addView(server, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(key, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(hour, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         LinearLayout barkActions = horizontal(Color.TRANSPARENT); Button load = button("读取", false); Button save = button("保存", true); Button test = button("测试", false);
         barkActions.addView(load, new LinearLayout.LayoutParams(0, dp(42), 1)); barkActions.addView(save, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); barkActions.addView(test, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); bark.addView(barkActions, new LinearLayout.LayoutParams(-1, -2));
-        load.setOnClickListener(v -> request("读取 Bark", "GET", "/api/ibox/v304/notifications/bark", null, result -> fillBark(result, enabled, server, key, hour)));
-        save.setOnClickListener(v -> { JSONObject body = new JSONObject(); try { body.put("enabled", enabled.isChecked()); body.put("server", server.getText().toString().trim()); body.put("deviceKey", key.getText().toString().trim()); body.put("dailySummaryHour", intValue(hour, 9)); } catch (Exception ignored) { } request("保存 Bark", "PUT", "/api/ibox/v304/notifications/bark", body, result -> toast("Bark 配置已保存")); });
-        test.setOnClickListener(v -> request("发送 Bark 测试", "POST", "/api/ibox/v304/notifications/bark/test", null, result -> toast("测试请求已提交")));
+        load.setOnClickListener(v -> request("读取 Bark", "GET", "/native/notifications/bark", null, result -> fillBark(result, enabled, server, key, hour)));
+        save.setOnClickListener(v -> { JSONObject body = new JSONObject(); try { body.put("enabled", enabled.isChecked()); body.put("server", server.getText().toString().trim()); body.put("deviceKey", key.getText().toString().trim()); body.put("dailySummaryHour", intValue(hour, 9)); } catch (Exception ignored) { } request("保存 Bark", "PUT", "/native/notifications/bark", body, result -> toast("Bark 配置已保存")); });
+        test.setOnClickListener(v -> request("发送 Bark 测试", "POST", "/native/notifications/bark/test", null, result -> toast("测试请求已提交")));
         content.addView(bark, marginParams(-1, -2, 0, 0, 0, dp(12)));
 
         LinearLayout backgroundCard = card();
         backgroundCard.addView(text("后台同步", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
-        CheckBox backgroundSync = check("保持状态通知", preferences.getBoolean("backgroundSync", false));
+        CheckBox backgroundSync = check("保持状态通知", backgroundSyncEnabled());
         backgroundCard.addView(backgroundSync);
         String lastSummary = preferences.getString("last_sync_summary", "尚未同步");
-        backgroundCard.addView(text("每 60 秒读取行情、量化、交易和首发任务状态\n最近：" + lastSummary, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(2), 0, dp(8)));
+        backgroundCard.addView(text("前台服务执行行情监控、任务调度和状态通知\n最近：" + lastSummary, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(2), 0, dp(8)));
         backgroundSync.setOnCheckedChangeListener((view, checked) -> {
             preferences.edit().putBoolean("backgroundSync", checked).apply();
             if (checked) {
@@ -1286,11 +1263,11 @@ public final class MainActivity extends Activity {
     }
 
     private void request(String label, String method, String path, JSONObject body, Consumer<JSONObject> successCallback) {
-        if (api == null) { toast("请先连接服务"); return; }
+        if (engine == null) engine = new NativeEngine(this);
         setStatus(label + "…", muted);
         io.execute(() -> {
             try {
-                JSONObject result = api.request(method, path, body);
+                JSONObject result = engine.request(method, path, body);
                 runOnUiThread(() -> { setStatus("已同步", success); successCallback.accept(result); });
             } catch (Exception error) {
                 runOnUiThread(() -> { setStatus(error.getMessage() == null ? "请求失败" : error.getMessage(), danger); toast(error.getMessage() == null ? "请求失败" : error.getMessage()); });
@@ -1311,7 +1288,10 @@ public final class MainActivity extends Activity {
 
     private LinearLayout metricGrid(JSONObject data) {
         LinearLayout grid = horizontal(Color.TRANSPARENT); grid.setWeightSum(2f);
-        String[][] values = {{"藏品总数", first(data, "total", "totalCount", "count")}, {"总估值", money(first(data, "totalValue", "valuation", "value"))}, {"可交易", first(data, "tradeable", "tradeableCount", "usableCount")}, {"成交额", money(first(data, "historyAmount", "completedAmount", "totalSellAmount"))}};
+        boolean marketAvailable = data != null && data.optBoolean("marketAvailable", false);
+        String estimatedValue = first(data, "estimatedValue");
+        String estimate = estimatedValue.isEmpty() ? (marketAvailable ? "暂无报价" : "--") : money(estimatedValue);
+        String[][] values = {{"藏品总数", first(data, "total", "totalCount", "count")}, {"市值估算", estimate}, {"已估值数量", first(data, "pricedQuantity")}, {"行情状态", marketAvailable ? "已连接" : "暂不可用"}};
         for (String[] value : values) { LinearLayout box = vertical(0xfff0f8f4); box.setPadding(dp(10), dp(10), dp(10), dp(10)); box.addView(text(value[0], 11, muted, Typeface.NORMAL)); box.addView(text(value[1].isEmpty() ? "--" : value[1], 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(68), 1f); params.setMargins(0, 0, dp(6), 0); grid.addView(box, params); }
         return grid;
     }
@@ -1336,7 +1316,6 @@ public final class MainActivity extends Activity {
     private void toast(String message) { if (!isFinishing()) Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
-    private String normalizeEndpoint(String value) { String result = value == null ? "" : value.trim(); while (result.endsWith("/")) result = result.substring(0, result.length() - 1); return result; }
     private String value(JSONObject object, String key, String fallback) { return object == null ? fallback : object.optString(key, fallback); }
     private String first(JSONObject object, String... keys) { if (object == null) return ""; for (String key : keys) { Object value = object.opt(key); if (value != null && value != JSONObject.NULL && !String.valueOf(value).isEmpty()) return String.valueOf(value); } return ""; }
     private String number(JSONObject object, String key, String fallback) { return object == null ? fallback : String.valueOf(object.opt(key) == null || object.opt(key) == JSONObject.NULL ? fallback : object.opt(key)); }
@@ -1346,6 +1325,7 @@ public final class MainActivity extends Activity {
     private double parseDouble(String value, double fallback) { try { return Double.parseDouble(value.trim()); } catch (Exception error) { return fallback; } }
     private double doubleValue(EditText input, double fallback) { return parseDouble(input.getText().toString(), fallback); }
     private int intValue(EditText input, int fallback) { try { return Integer.parseInt(input.getText().toString().trim()); } catch (Exception error) { return fallback; } }
+    private boolean isTerminalTaskStatus(String status) { return "payment_pending".equals(status) || "submitted".equals(status) || "cancelled".equals(status); }
     private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
     private String strategyMeta(JSONObject strategy) { return (strategy.optString("executionMode", "monitor").equals("live") ? "真实执行" : "仅监控") + " · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
     private JSONArray findArray(JSONObject object, String... keys) { if (object == null) return null; for (String key : keys) { JSONArray array = object.optJSONArray(key); if (array != null) return array; } return null; }
