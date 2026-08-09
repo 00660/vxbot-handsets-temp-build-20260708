@@ -5,6 +5,16 @@ import java.util.Locale;
 public final class MessageRouter {
     private static final String TARGET_SEPARATORS = "，,。！？!?；;：:、~～\"“”'‘’()[]{}<>《》";
     private static final int MAX_TTS_COMMAND_CHARS = 2000;
+    private static final String[] TEXT_REPLY_PHRASES = {
+            "用文字回复我", "文字回复我", "用文字回我", "文字回我",
+            "打字回复我", "打字回我", "用文本回复我", "文本回复我",
+            "请用文字回复", "请文字回复", "请打字回复", "请用文本回复"
+    };
+    private static final String[] VOICE_REPLY_PHRASES = {
+            "用语音回复我", "语音回复我", "用语音回我", "语音回我",
+            "发语音回复我", "发语音回我", "用声音回复我", "声音回复我",
+            "请用语音回复", "请语音回复", "请发语音回复", "请用声音回复"
+    };
 
     public enum Kind {
         TEXT,
@@ -38,23 +48,44 @@ public final class MessageRouter {
         KNOWLEDGE
     }
 
+    public enum ReplyFormat {
+        DEFAULT,
+        TEXT,
+        VOICE
+    }
+
     public static final class Route {
         public final Kind kind;
         public final String instruction;
         public final String targetName;
         public final boolean exitCommand;
         public final boolean explicitModeCommand;
+        public final ReplyFormat replyFormat;
 
         public Route(Kind kind, String instruction) {
             this(kind, instruction, "", false, false);
         }
 
         public Route(Kind kind, String instruction, String targetName, boolean exitCommand, boolean explicitModeCommand) {
+            this(kind, instruction, targetName, exitCommand, explicitModeCommand, ReplyFormat.DEFAULT);
+        }
+
+        private Route(Kind kind, String instruction, String targetName, boolean exitCommand,
+                      boolean explicitModeCommand, ReplyFormat replyFormat) {
             this.kind = kind;
             this.instruction = instruction;
             this.targetName = targetName == null ? "" : targetName.trim();
             this.exitCommand = exitCommand;
             this.explicitModeCommand = explicitModeCommand;
+            this.replyFormat = replyFormat == null ? ReplyFormat.DEFAULT : replyFormat;
+        }
+
+        public Route withReplyFormat(ReplyFormat replyFormat) {
+            ReplyFormat format = replyFormat == null ? ReplyFormat.DEFAULT : replyFormat;
+            if (this.replyFormat == format) {
+                return this;
+            }
+            return new Route(kind, instruction, targetName, exitCommand, explicitModeCommand, format);
         }
     }
 
@@ -62,6 +93,11 @@ public final class MessageRouter {
     }
 
     public static Route classify(String text, BotConfig config) {
+        return classifyWithoutReplyFormat(text, config)
+                .withReplyFormat(detectReplyFormat(text, config));
+    }
+
+    private static Route classifyWithoutReplyFormat(String text, BotConfig config) {
         String source = text == null ? "" : text;
         String command = stripBotMention(source, config);
         if (command.isEmpty()) {
@@ -774,6 +810,19 @@ public final class MessageRouter {
         return clean;
     }
 
+    private static ReplyFormat detectReplyFormat(String text, BotConfig config) {
+        String value = compact(stripBotMention(text, config));
+        if (value.isEmpty()) {
+            return ReplyFormat.DEFAULT;
+        }
+        int textIndex = lastIndexOfAny(value, TEXT_REPLY_PHRASES);
+        int voiceIndex = lastIndexOfAny(value, VOICE_REPLY_PHRASES);
+        if (textIndex < 0 && voiceIndex < 0) {
+            return ReplyFormat.DEFAULT;
+        }
+        return textIndex > voiceIndex ? ReplyFormat.TEXT : ReplyFormat.VOICE;
+    }
+
     private static boolean looksLikeImageAnalysis(String text) {
         String value = compact(text).toLowerCase(Locale.ROOT);
         if (value.isEmpty()) {
@@ -794,6 +843,11 @@ public final class MessageRouter {
                 || value.matches(".*(图片分析|看图分析|识图|看看图|这图|这张图|图里|图片里|照片里|whatsthis|analyzethis|analyzeimage|describeimage).*");
     }
 
+    private static boolean looksLikeImageDesignRequest(String value) {
+        return value.matches(".*(设计|制作|生成|绘制|画|绘画|创作|做).{0,16}(图片|图|海报|壁纸|头像|插画|封面|视觉稿|宣传图|配图|logo|Logo|LOGO|标志|图标).*")
+                || value.matches(".*(图片|图|海报|壁纸|头像|插画|封面|视觉稿|宣传图|配图|logo|Logo|LOGO|标志|图标).{0,16}(设计|制作|生成|绘制|画|绘画|创作|做).*");
+    }
+
     private static boolean looksLikeImageRequest(String text) {
         String value = compact(text);
         String lower = removeWhitespace(text == null ? "" : text.toLowerCase(Locale.ROOT));
@@ -803,6 +857,9 @@ public final class MessageRouter {
         }
         if (value.matches("^(图|图片|照片|相片|\\[图片\\]|\\[照片\\]|识图|图生图不行|文生图可以吗)$")) {
             return false;
+        }
+        if (looksLikeImageDesignRequest(value)) {
+            return true;
         }
         if (value.matches(".*(清凉|清爽穿搭|比基尼|泳装|泳衣|泳池自拍|海边自拍|海滩自拍|沙滩自拍|度假自拍|夏日自拍|夏日泳装|清凉图).*")) {
             return true;

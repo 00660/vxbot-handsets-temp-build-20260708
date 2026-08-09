@@ -20,11 +20,11 @@ import java.io.OutputStream;
 /**
  * 面板图片的独立投递流程。
  *
- * 每个可见页面阶段都要求连续两帧 OCR 证据后才进入下一步，避免页面尚未绘制完成时误点。
+ * 每个可见页面阶段都在限定区域内轮询。精确群名可立即点击，模糊群名需要连续两帧确认。
  */
 public final class PanelImageDeliveryFlow {
     private static final int STABLE_FRAME_COUNT = 2;
-    private static final long SHARE_LIST_TIMEOUT_MS = 30000L;
+    private static final float MIN_TARGET_MATCH_RATIO = 0.50f;
     private static final long TARGET_TIMEOUT_MS = 30000L;
     private static final long CONFIRM_TIMEOUT_MS = 30000L;
     private static final long SEND_TIMEOUT_MS = 30000L;
@@ -56,6 +56,16 @@ public final class PanelImageDeliveryFlow {
         }
     }
 
+    private static final class TargetCandidate {
+        final OcrHelper.OcrItem item;
+        final float matchRatio;
+
+        TargetCandidate(OcrHelper.OcrItem item, float matchRatio) {
+            this.item = item;
+            this.matchRatio = matchRatio;
+        }
+    }
+
     public boolean shareExistingImage(Context context, BotConfig config, File file, String target) {
         long startedAt = SystemClock.uptimeMillis();
         HsClient hs = new HsClient(config == null ? 9010 : config.hsPort);
@@ -72,19 +82,16 @@ public final class PanelImageDeliveryFlow {
             if (!startShareIntent(context, asset)) {
                 return false;
             }
-            if (!waitForRecentChats(context, config, hs)) {
-                BotLog.e(context, "panel.share.list.timeout", "分享页最近聊天未就绪 target=" + target);
-                return false;
-            }
-
-            OcrHelper.OcrItem selected = waitForUniqueTarget(context, config, hs, targetKey, target);
+            TargetCandidate selected = waitForTarget(context, config, hs, targetKey, target);
             if (selected == null) {
-                BotLog.e(context, "panel.share.target.timeout", "最近聊天中未找到唯一目标 target=" + target);
+                BotLog.e(context, "panel.share.target.timeout", "最近聊天中未找到目标 target=" + target);
                 return false;
             }
-            hs.tap(selected.centerX, selected.centerY);
+            hs.tap(selected.item.centerX, selected.item.centerY);
             BotLog.i(context, "panel.share.target.tap", "点击最近聊天目标 target=" + target
-                    + " rect=" + selected.rect.flattenToString());
+                    + " text=" + selected.item.text
+                    + " match=" + Math.round(selected.matchRatio * 100f) + "%"
+                    + " rect=" + selected.item.rect.flattenToString());
 
             if (!waitForConfirmPage(context, config, hs, targetKey, target)) {
                 BotLog.e(context, "panel.share.confirm.timeout", "确认页未就绪 target=" + target);
@@ -135,49 +142,25 @@ public final class PanelImageDeliveryFlow {
         }
     }
 
-    private boolean waitForRecentChats(Context context, BotConfig config, HsClient hs) {
-        long deadline = SystemClock.uptimeMillis() + SHARE_LIST_TIMEOUT_MS;
-        OcrHelper.OcrItem previous = null;
-        int stableFrames = 0;
-        int attempts = 0;
-        while (SystemClock.uptimeMillis() < deadline) {
-            attempts++;
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            OcrHelper.OcrItem recentChats = findRecentChatsHeader(screen);
-            if (recentChats != null) {
-                stableFrames = sameVisualItem(previous, recentChats) ? stableFrames + 1 : 1;
-                previous = recentChats;
-                if (stableFrames >= STABLE_FRAME_COUNT) {
-                    BotLog.i(context, "panel.share.list.ready", "最近聊天已稳定 rect="
-                            + recentChats.rect.flattenToString() + " attempts=" + attempts);
-                    return true;
-                }
-            } else {
-                previous = null;
-                stableFrames = 0;
-            }
-            SystemClock.sleep(selectPoll(config));
-        }
-        return false;
-    }
-
-    private OcrHelper.OcrItem waitForUniqueTarget(Context context, BotConfig config, HsClient hs,
-                                                   String targetKey, String target) {
+    private TargetCandidate waitForTarget(Context context, BotConfig config, HsClient hs,
+                                           String targetKey, String target) {
         long deadline = SystemClock.uptimeMillis() + TARGET_TIMEOUT_MS;
-        OcrHelper.OcrItem previous = null;
+        TargetCandidate previous = null;
         int stableFrames = 0;
         int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
             attempts++;
             OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
             OcrHelper.OcrItem recentChats = findRecentChatsHeader(screen);
-            OcrHelper.OcrItem candidate = findUniqueTargetBelowRecentChats(screen, recentChats, targetKey);
+            TargetCandidate candidate = findBestTargetBelowRecentChats(screen, recentChats, targetKey);
             if (candidate != null) {
-                stableFrames = sameVisualItem(previous, candidate) ? stableFrames + 1 : 1;
+                stableFrames = sameTargetCandidate(previous, candidate) ? stableFrames + 1 : 1;
                 previous = candidate;
-                if (stableFrames >= STABLE_FRAME_COUNT) {
+                if (candidate.matchRatio >= 1f || stableFrames >= STABLE_FRAME_COUNT) {
                     BotLog.i(context, "panel.share.target.ready", "最近聊天目标已稳定 target=" + target
-                            + " text=" + candidate.text + " rect=" + candidate.rect.flattenToString()
+                            + " text=" + candidate.item.text
+                            + " match=" + Math.round(candidate.matchRatio * 100f) + "%"
+                            + " rect=" + candidate.item.rect.flattenToString()
                             + " attempts=" + attempts);
                     return candidate;
                 }
@@ -193,23 +176,17 @@ public final class PanelImageDeliveryFlow {
     private boolean waitForConfirmPage(Context context, BotConfig config, HsClient hs,
                                        String targetKey, String target) {
         long deadline = SystemClock.uptimeMillis() + CONFIRM_TIMEOUT_MS;
-        ConfirmState previous = null;
-        int stableFrames = 0;
         int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
             attempts++;
             ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
             if (current != null) {
-                stableFrames = sameConfirmState(previous, current) ? stableFrames + 1 : 1;
-                previous = current;
-                if (stableFrames >= STABLE_FRAME_COUNT) {
-                    BotLog.i(context, "panel.share.confirm.ready", "确认页已稳定 target=" + target
-                            + " attempts=" + attempts);
-                    return true;
-                }
-            } else {
-                previous = null;
-                stableFrames = 0;
+                BotLog.i(context, "panel.share.confirm.ready", "确认页分区已就绪 target=" + target
+                        + " sendTo=" + current.sendTo.rect.flattenToString()
+                        + " targetRect=" + current.target.rect.flattenToString()
+                        + " sendRect=" + current.send.rect.flattenToString()
+                        + " attempts=" + attempts);
+                return true;
             }
             SystemClock.sleep(confirmPoll(config));
         }
@@ -226,16 +203,21 @@ public final class PanelImageDeliveryFlow {
             attempts++;
             ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
             Rect greenButton = current == null ? null : OcrHelper.findShareConfirmGreenSendButton(context, hs);
-            boolean sendMatchesGreenButton = current != null && greenButton != null
-                    && greenButton.contains(current.send.centerX, current.send.centerY);
-            if (sendMatchesGreenButton) {
+            if (current != null && greenButton != null && overlapsSendLabel(greenButton, current.send.rect)) {
+                hs.tap(greenButton.centerX(), greenButton.centerY());
+                BotLog.i(context, "panel.share.send.green.tap", "点击绿色发送按钮 target=" + target
+                        + " sendRect=" + current.send.rect.flattenToString()
+                        + " greenRect=" + greenButton.flattenToString() + " attempts=" + attempts);
+                return true;
+            }
+            if (current != null) {
                 stableFrames = sameConfirmState(previous, current) ? stableFrames + 1 : 1;
                 previous = current;
                 if (stableFrames >= STABLE_FRAME_COUNT) {
                     hs.tap(current.send.centerX, current.send.centerY);
-                    BotLog.i(context, "panel.share.send.tap", "点击 OCR 发送按钮 target=" + target
-                            + " sendRect=" + current.send.rect.flattenToString()
-                            + " greenRect=" + greenButton.flattenToString() + " attempts=" + attempts);
+                    BotLog.i(context, "panel.share.send.ocr.tap", "绿色取色未命中，点击稳定 OCR 发送按钮 target="
+                            + target + " sendRect=" + current.send.rect.flattenToString()
+                            + " attempts=" + attempts);
                     return true;
                 }
             } else {
@@ -284,23 +266,27 @@ public final class PanelImageDeliveryFlow {
         return result;
     }
 
-    private OcrHelper.OcrItem findUniqueTargetBelowRecentChats(OcrHelper.Screen screen,
-                                                                 OcrHelper.OcrItem recentChats,
-                                                                 String targetKey) {
+    private TargetCandidate findBestTargetBelowRecentChats(OcrHelper.Screen screen,
+                                                            OcrHelper.OcrItem recentChats,
+                                                            String targetKey) {
         if (screen == null || recentChats == null || targetKey.isEmpty()) {
             return null;
         }
         int minY = recentChats.rect.bottom + Math.max(8, Math.round(screen.height * 0.005f));
         int maxY = screen.height - Math.max(96, Math.round(screen.height * 0.10f));
-        OcrHelper.OcrItem result = null;
+        TargetCandidate result = null;
         for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < minY || item.centerY > maxY || !targetKey.equals(groupNameKey(item.text))) {
+            if (item.centerY < minY || item.centerY > maxY) {
                 continue;
             }
-            if (result != null) {
-                return null;
+            float matchRatio = targetMatchRatio(targetKey, groupNameKey(item.text));
+            if (matchRatio < MIN_TARGET_MATCH_RATIO) {
+                continue;
             }
-            result = item;
+            if (result == null || matchRatio > result.matchRatio
+                    || matchRatio == result.matchRatio && item.centerY < result.item.centerY) {
+                result = new TargetCandidate(item, matchRatio);
+            }
         }
         return result;
     }
@@ -309,39 +295,113 @@ public final class PanelImageDeliveryFlow {
         if (screen == null || screen.height <= 0) {
             return null;
         }
+        int minHeaderY = Math.round(screen.height * 0.40f);
+        int maxHeaderY = Math.round(screen.height * 0.70f);
         OcrHelper.OcrItem sendTo = null;
-        OcrHelper.OcrItem target = null;
-        OcrHelper.OcrItem send = null;
-        int minContentY = Math.round(screen.height * 0.15f);
-        int maxContentY = Math.round(screen.height * 0.88f);
-        int minSendY = Math.round(screen.height * 0.45f);
         for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < minContentY || item.centerY > maxContentY) {
+            if (item.centerY < minHeaderY || item.centerY > maxHeaderY) {
                 continue;
             }
             String key = textKey(item.text);
-            if (key.contains("发送给")) {
-                if (sendTo != null) {
-                    return null;
+            if (key.contains("发送给") || key.contains("发送到")) {
+                if (sendTo == null || item.centerY < sendTo.centerY) {
+                    sendTo = item;
                 }
-                sendTo = item;
             }
-            if (targetKey.equals(groupNameKey(item.text))) {
-                if (target != null) {
-                    return null;
-                }
-                target = item;
+        }
+        if (sendTo == null) {
+            return null;
+        }
+
+        int minTargetY = sendTo.rect.bottom + Math.max(12, Math.round(screen.height * 0.008f));
+        int maxTargetY = Math.min(Math.round(screen.height * 0.78f),
+                sendTo.rect.bottom + Math.round(screen.height * 0.30f));
+        OcrHelper.OcrItem target = findBestMatchingItem(screen, targetKey, minTargetY, maxTargetY,
+                0f, 1f);
+        if (target == null) {
+            return null;
+        }
+
+        int minSendY = Math.max(Math.round(screen.height * 0.76f),
+                target.rect.bottom + Math.round(screen.height * 0.14f));
+        int maxSendY = Math.round(screen.height * 0.95f);
+        OcrHelper.OcrItem send = null;
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < minSendY || item.centerY > maxSendY
+                    || item.centerX < Math.round(screen.width * 0.35f)
+                    || item.centerX > Math.round(screen.width * 0.90f)
+                    || !"发送".equals(textKey(item.text))) {
+                continue;
             }
-            if (item.centerY >= minSendY && "发送".equals(key)) {
-                if (send != null) {
-                    return null;
-                }
+            if (send == null || item.centerY > send.centerY) {
                 send = item;
             }
         }
         return sendTo != null && target != null && send != null
                 ? new ConfirmState(sendTo, target, send)
                 : null;
+    }
+
+    private OcrHelper.OcrItem findBestMatchingItem(OcrHelper.Screen screen, String targetKey,
+                                                    int minY, int maxY, float minX, float maxX) {
+        OcrHelper.OcrItem best = null;
+        float bestRatio = 0f;
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < minY || item.centerY > maxY
+                    || item.centerX < screen.width * minX || item.centerX > screen.width * maxX) {
+                continue;
+            }
+            float matchRatio = targetMatchRatio(targetKey, groupNameKey(item.text));
+            if (matchRatio < MIN_TARGET_MATCH_RATIO) {
+                continue;
+            }
+            if (best == null || matchRatio > bestRatio
+                    || matchRatio == bestRatio && item.centerY < best.centerY) {
+                best = item;
+                bestRatio = matchRatio;
+            }
+        }
+        return best;
+    }
+
+    private boolean sameTargetCandidate(TargetCandidate first, TargetCandidate second) {
+        return first != null && second != null && sameVisualItem(first.item, second.item);
+    }
+
+    private boolean overlapsSendLabel(Rect greenButton, Rect sendLabel) {
+        if (greenButton == null || sendLabel == null) {
+            return false;
+        }
+        int padding = 24;
+        return greenButton.left - padding <= sendLabel.right
+                && greenButton.right + padding >= sendLabel.left
+                && greenButton.top - padding <= sendLabel.bottom
+                && greenButton.bottom + padding >= sendLabel.top;
+    }
+
+    private float targetMatchRatio(String targetKey, String candidateKey) {
+        if (targetKey == null || candidateKey == null || targetKey.isEmpty() || candidateKey.isEmpty()) {
+            return 0f;
+        }
+        if (targetKey.equals(candidateKey)) {
+            return 1f;
+        }
+        int[] previous = new int[candidateKey.length() + 1];
+        int[] current = new int[candidateKey.length() + 1];
+        for (int targetIndex = 1; targetIndex <= targetKey.length(); targetIndex++) {
+            char targetChar = targetKey.charAt(targetIndex - 1);
+            for (int candidateIndex = 1; candidateIndex <= candidateKey.length(); candidateIndex++) {
+                if (targetChar == candidateKey.charAt(candidateIndex - 1)) {
+                    current[candidateIndex] = previous[candidateIndex - 1] + 1;
+                } else {
+                    current[candidateIndex] = Math.max(previous[candidateIndex], current[candidateIndex - 1]);
+                }
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+        return previous[candidateKey.length()] / (float) targetKey.length();
     }
 
     private boolean sameVisualItem(OcrHelper.OcrItem first, OcrHelper.OcrItem second) {

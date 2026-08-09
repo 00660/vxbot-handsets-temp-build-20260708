@@ -366,9 +366,11 @@ public final class BotService extends Service {
             enterCodexForegroundMode(config, message);
             return;
         }
+        MessageRouter.Route classifiedRoute = MessageRouter.classify(message.text, config);
         MessageRouter.Route route = sessionStore.isSessionCodexMode(this, message, config)
                 ? new MessageRouter.Route(MessageRouter.Kind.CODEX, "本群 Codex 模式：授权发起人的消息直接交给 Codex 处理，不再走其它工具分流。")
-                : MessageRouter.classify(message.text, config);
+                .withReplyFormat(classifiedRoute.replyFormat)
+                : classifiedRoute;
         route = applySessionMode(message, route);
         if (route.kind == MessageRouter.Kind.SHUTUP) {
             sessionStore.muteFor(message.sessionName, 30 * 60 * 1000L);
@@ -552,11 +554,13 @@ public final class BotService extends Service {
         }
         String roastTarget = sessionStore.roastTargetName(message.sessionName);
         if (!roastTarget.isEmpty() && NameNormalizer.sameName(roastTarget, message.senderName)) {
-            return new MessageRouter.Route(MessageRouter.Kind.TROLL, "", roastTarget, false, false);
+            return new MessageRouter.Route(MessageRouter.Kind.TROLL, "", roastTarget, false, false)
+                    .withReplyFormat(route.replyFormat);
         }
         String loverTarget = sessionStore.loverTargetName(message.sessionName);
         if (!loverTarget.isEmpty() && NameNormalizer.sameName(loverTarget, message.senderName)) {
-            return new MessageRouter.Route(MessageRouter.Kind.LOVER, MessageRouter.loverInstruction(loverTarget), loverTarget, false, false);
+            return new MessageRouter.Route(MessageRouter.Kind.LOVER, MessageRouter.loverInstruction(loverTarget), loverTarget, false, false)
+                    .withReplyFormat(route.replyFormat);
         }
         return route;
     }
@@ -796,7 +800,16 @@ public final class BotService extends Service {
     }
 
     private boolean shouldSendReplyAsVoice(BotConfig config, MessageRouter.Route route) {
-        if (config == null || route == null || !config.normalReplyAsVoice) {
+        if (config == null || route == null) {
+            return false;
+        }
+        if (route.replyFormat == MessageRouter.ReplyFormat.VOICE) {
+            return true;
+        }
+        if (route.replyFormat == MessageRouter.ReplyFormat.TEXT) {
+            return false;
+        }
+        if (!config.normalReplyAsVoice) {
             return false;
         }
         return route.kind == MessageRouter.Kind.TEXT
