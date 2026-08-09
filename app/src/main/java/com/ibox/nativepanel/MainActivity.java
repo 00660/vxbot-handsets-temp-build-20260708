@@ -1202,8 +1202,8 @@ public final class MainActivity extends Activity {
             String eventTime = "immediate".equals(task.optString("mode"))
                     ? first(task, "startedAt", "createdAt")
                     : first(task, "startTime", "startAt");
-            JSONArray phones = task.optJSONArray("phones");
-            int boundCount = phones == null ? (first(task, "phone", "sourcePhone").isEmpty() ? 0 : 1) : phones.length();
+            JSONArray boundPhones = task.optJSONArray("phones");
+            int boundCount = boundPhones == null ? (first(task, "phone", "sourcePhone").isEmpty() ? 0 : 1) : boundPhones.length();
             String metadata = (eventTime.isEmpty() ? "时间待定" : time(eventTime))
                     + " · 数量 " + Math.max(1, intValue(first(task, "num"), 1))
                     + " · 已绑定 " + boundCount + " 个账号";
