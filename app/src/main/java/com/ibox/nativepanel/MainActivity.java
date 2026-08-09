@@ -25,7 +25,6 @@ import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -71,7 +70,7 @@ public final class MainActivity extends Activity {
     private ExecutorService io;
     private NativeEngine engine;
     private LinearLayout content;
-    private LinearLayout nav;
+    private ScrollView pageScroll;
     private TextView pageTitle;
     private TextView statusView;
     private String selectedPhone;
@@ -103,6 +102,7 @@ public final class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         setAppShell();
         showAccounts();
+        scrollContentToTop();
         loadAccounts();
         if (engine.store().getAccounts().length() > 0 && backgroundSyncEnabled()) startPanelSyncService();
     }
@@ -318,28 +318,37 @@ public final class MainActivity extends Activity {
         toolbar.addView(live, marginParams(-2, dp(36), dp(8), 0, 0, 0));
         root.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(64)));
 
-        HorizontalScrollView navScroll = new HorizontalScrollView(this);
-        navScroll.setHorizontalScrollBarEnabled(false);
-        nav = horizontal(Color.TRANSPARENT);
-        nav.setGravity(Gravity.CENTER_VERTICAL);
-        nav.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout navContainer = vertical(surface);
+        navContainer.setPadding(dp(12), dp(8), dp(12), dp(8));
+        int navColumns = getResources().getConfiguration().screenWidthDp >= 600 ? PAGE_KEYS.length : 4;
+        int navRows = (PAGE_KEYS.length + navColumns - 1) / navColumns;
+        LinearLayout navRow = null;
         navButtons.clear();
         for (int i = 0; i < PAGE_KEYS.length; i++) {
+            if (i % navColumns == 0) {
+                navRow = horizontal(Color.TRANSPARENT);
+                navRow.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(42));
+                if (i > 0) rowParams.setMargins(0, dp(6), 0, 0);
+                navContainer.addView(navRow, rowParams);
+            }
             final String key = PAGE_KEYS[i];
             Button tab = button(PAGE_LABELS[i], i == 0);
             tab.setTextSize(12);
-            tab.setMinWidth(dp(82));
-            tab.setPadding(dp(12), 0, dp(12), 0);
+            tab.setPadding(dp(6), 0, dp(6), 0);
             tab.setOnClickListener(v -> selectPage(key));
             navButtons.add(tab);
-            nav.addView(tab, marginParams(-2, dp(42), 0, 0, dp(6), 0));
+            LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+            if (i % navColumns != 0) tabParams.setMargins(dp(6), 0, 0, 0);
+            navRow.addView(tab, tabParams);
         }
-        navScroll.addView(nav, new HorizontalScrollView.LayoutParams(-2, -1));
-        root.addView(navScroll, new LinearLayout.LayoutParams(-1, dp(58)));
+        root.addView(navContainer, new LinearLayout.LayoutParams(-1, dp(navRows * 42 + (navRows - 1) * 6 + 16)));
 
         ScrollView scroll = new ScrollView(this);
         styleScroll(scroll);
         scroll.setFillViewport(true);
+        scroll.setSaveEnabled(false);
+        pageScroll = scroll;
         content = vertical(Color.TRANSPARENT);
         content.setPadding(dp(16), dp(14), dp(16), dp(18));
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
@@ -355,6 +364,7 @@ public final class MainActivity extends Activity {
 
     private void selectPage(String key) {
         if (content == null) return;
+        scrollContentToTop();
         currentPage = key;
         for (int i = 0; i < navButtons.size(); i++) {
             boolean selected = PAGE_KEYS[i].equals(key);
@@ -372,6 +382,10 @@ public final class MainActivity extends Activity {
             case "settings": showSettings(); break;
             default: showAccounts();
         }
+    }
+
+    private void scrollContentToTop() {
+        if (pageScroll != null) pageScroll.post(() -> pageScroll.scrollTo(0, 0));
     }
 
     private String pageTitle(String key) {
