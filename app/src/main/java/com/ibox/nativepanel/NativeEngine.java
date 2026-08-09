@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -51,6 +52,7 @@ public final class NativeEngine {
     private static final String LOTTERY_HISTORY_URL = "https://sail-api.ibox.art/activity-service/lottery-activitys/history";
     private static final String LOTTERY_ACTIVITY_URL = "https://sail-api.ibox.art/activity-service/lottery-activitys";
     private static final String ORDER_LIST_URL = "https://sail-api.ibox.art/order-service/orders";
+    private static final String PURCHASE_CONSIGNMENT_ORDER_LIST_URL = "https://sail-api.ibox.art/order-service/purchase-consignment-orders";
     private static final long CAPTCHA_TTL_MS = 2L * 60L * 1000L;
     private static final long WATCH_NOTIFY_WINDOW_MS = 5L * 60L * 1000L;
     private static final long MARKET_WATCH_MIN_INTERVAL_MS = 15L * 1000L;
@@ -260,11 +262,151 @@ public final class NativeEngine {
 
     private JSONObject loadOrders(String requestedPhone) throws Exception {
         IBoxDirectClient.Account account = requestedPhone == null || requestedPhone.trim().isEmpty() ? firstAccount() : account(requestedPhone);
-        JSONObject query = objectOf("pageNo", 1, "pageSize", 100);
-        JSONObject response = client.requestAuthenticated(account, "GET", ORDER_LIST_URL, null, query, false, "订单");
+        OrderPage collectionOrders = OrderPage.empty();
+        OrderPage consignmentOrders = OrderPage.empty();
+        JSONArray failures = new JSONArray();
+        try {
+            collectionOrders = loadOrderPage(
+                    account,
+                    ORDER_LIST_URL,
+                    objectOf("pageNo", 1, "pageSize", 40, "productType", 0, "orderType", 0, "orderStatus", 0),
+                    "collection_pending"
+            );
+        } catch (Exception error) {
+            failures.put("collection_pending");
+        }
+        try {
+            consignmentOrders = loadOrderPage(
+                    account,
+                    PURCHASE_CONSIGNMENT_ORDER_LIST_URL,
+                    objectOf("pageNo", 1, "pageSize", 40, "initiatorType", 2),
+                    "consignment"
+            );
+        } catch (Exception error) {
+            failures.put("consignment");
+        }
+
+        JSONArray sellOrders = new JSONArray();
+        JSONArray buyOrders = new JSONArray();
+        JSONArray wantedPendingOrders = new JSONArray();
+        for (int index = 0; index < consignmentOrders.items.length(); index++) {
+            JSONObject order = consignmentOrders.items.optJSONObject(index);
+            if (order == null) continue;
+            int orderType = integer(order.opt("orderType"), -1);
+            if (orderType == 2) sellOrders.put(order);
+            if (orderType == 1) {
+                buyOrders.put(order);
+                if (integer(order.opt("orderStatus"), -1) == 0) wantedPendingOrders.put(order);
+            }
+        }
+        List<JSONObject> pending = new ArrayList<>();
+        appendOrders(pending, collectionOrders.items);
+        appendOrders(pending, wantedPendingOrders);
+        Collections.sort(pending, (left, right) -> Long.compare(
+                epoch(right.optString("createdAt")),
+                epoch(left.optString("createdAt"))
+        ));
+        JSONArray pendingOrders = new JSONArray();
+        for (JSONObject order : pending) pendingOrders.put(order);
+        return ok(objectOf(
+                "phone", account.phone,
+                "collectionPendingOrders", collectionOrders.items,
+                "collectionPendingCount", collectionOrders.count,
+                "wantedPendingOrders", wantedPendingOrders,
+                "wantedPendingCount", wantedPendingOrders.length(),
+                "pendingOrders", pendingOrders,
+                "sellOrders", sellOrders,
+                "buyOrders", buyOrders,
+                "orderReadFailures", failures,
+                "updatedAt", Instant.now().toString()
+        ));
+    }
+
+    private OrderPage loadOrderPage(IBoxDirectClient.Account account, String url, JSONObject query, String type) throws Exception {
+        JSONObject response = client.requestAuthenticated(account, "GET", url, null, query, false, "订单");
         Object root = data(response);
-        JSONArray orders = firstArray(root, "orders", "list", "records", "items", "rows");
-        return ok(objectOf("pendingOrders", orders, "updatedAt", Instant.now().toString()));
+        JSONArray source = firstArray(root, "orders", "list", "records", "items", "rows");
+        JSONArray items = new JSONArray();
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject order = source.optJSONObject(index);
+            if (order != null) items.put(platformOrderSummary(order, type, account.phone));
+        }
+        return new OrderPage(integer(first(object(root), "total", "totalCount", "count"), 0), items);
+    }
+
+    private static JSONObject platformOrderSummary(JSONObject order, String type, String phone) throws JSONException {
+        JSONObject preview = order.optJSONObject("productPreview");
+        JSONObject collection = order.optJSONObject("digitalCollection");
+        JSONObject result = new JSONObject();
+        result.put("id", first(order, "id", "orderId", "orderNumber"));
+        result.put("orderUuid", deepString(order, "orderUuid", "orderUUId"));
+        result.put("listingOrderItemId", deepString(order, "listingOrderItemId"));
+        result.put("type", type);
+        result.put("groupId", first(order, "groupId", "digitalCollectionGroupId", "collectionGroupId"));
+        String title = first(order, "name", "title", "productName", "digitalCollectionName");
+        if (title.isEmpty()) title = assetName(preview);
+        if (title.isEmpty()) title = assetName(collection);
+        result.put("title", title.isEmpty() ? "未命名藏品" : title);
+        String cover = assetCover(preview);
+        if (cover.isEmpty()) cover = assetCover(collection);
+        if (cover.isEmpty()) cover = assetCover(order);
+        result.put("cover", cover);
+        result.put("price", numericOrNull(first(order, "price", "salePrice", "totalPrice", "amount")));
+        result.put("quantity", Math.max(1, integer(first(order, "quantity", "buyCount", "count"), 1)));
+        putNullable(result, "orderStatus", firstNullable(order, "orderStatus", "status", "orderState"));
+        putNullable(result, "orderType", firstNullable(order, "orderType"));
+        putNullable(result, "initiatorType", firstNullable(order, "initiatorType"));
+        result.put("createdAt", first(order, "createdAt", "createTime"));
+        result.put("updatedAt", first(order, "updatedAt", "updateTime"));
+        result.put("phone", phone);
+        result.put("source", "platform_order_service");
+        return result;
+    }
+
+    private static void appendOrders(List<JSONObject> target, JSONArray source) {
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject item = source.optJSONObject(index);
+            if (item != null) target.add(item);
+        }
+    }
+
+    private static String assetName(JSONObject source) {
+        if (source == null) return "";
+        String direct = first(source, "name", "title", "digitalCollectionName", "collectionName");
+        return direct.isEmpty() ? first(source.optJSONObject("digitalCollection"), "name", "title") : direct;
+    }
+
+    private static String assetCover(JSONObject source) {
+        if (source == null) return "";
+        String direct = first(source, "coverPicUrl", "coverUrl", "headerPicUrl");
+        return direct.isEmpty() ? first(source.optJSONObject("digitalCollection"), "coverPicUrl", "coverUrl", "headerPicUrl") : direct;
+    }
+
+    private static Object firstNullable(JSONObject source, String... keys) {
+        if (source == null) return JSONObject.NULL;
+        for (String key : keys) {
+            Object value = source.opt(key);
+            if (value != null && value != JSONObject.NULL) return value;
+        }
+        return JSONObject.NULL;
+    }
+
+    private static void putNullable(JSONObject target, String key, Object value) throws JSONException {
+        target.put(key, value == null ? JSONObject.NULL : value);
+    }
+
+    private static final class OrderPage {
+        final int count;
+        final JSONArray items;
+
+        OrderPage(int count, JSONArray items) {
+            this.count = Math.max(0, count);
+            this.items = items == null ? new JSONArray() : items;
+        }
+
+        static OrderPage empty() {
+            return new OrderPage(0, new JSONArray());
+        }
     }
 
     private JSONObject searchMarket(String phone, String name, int pageNo, int pageSize) throws Exception {
@@ -472,6 +614,8 @@ public final class NativeEngine {
         task.put("sourcePhone", phone);
         task.put("saleId", saleId);
         task.put("num", Math.max(1, task.optInt("num", 1)));
+        task.put("mode", "immediate".equals(task.optString("mode")) ? "immediate" : "scheduled");
+        task.put("phones", new JSONArray().put(phone));
         task.put("enabled", true);
         task.put("status", "scheduled");
         task.put("createdAt", Instant.now().toString());

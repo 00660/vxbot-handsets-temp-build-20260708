@@ -8,6 +8,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -17,6 +19,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.text.InputType;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -25,6 +28,7 @@ import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -35,12 +39,17 @@ import org.json.JSONObject;
 import com.geetest.captcha.GTCaptcha4Client;
 import com.geetest.captcha.GTCaptcha4Config;
 
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -58,7 +67,6 @@ public final class MainActivity extends Activity {
     private final int ink = Color.rgb(30, 42, 52);
     private final int muted = Color.rgb(126, 137, 148);
     private final int primary = Color.rgb(101, 198, 139);
-    private final int primaryDark = Color.rgb(73, 168, 112);
     private final int success = Color.rgb(67, 170, 110);
     private final int danger = Color.rgb(205, 88, 103);
     private final int amber = Color.rgb(196, 145, 50);
@@ -81,6 +89,8 @@ public final class MainActivity extends Activity {
     private String smsPhone = "";
     private int bottomSystemInset;
     private TextView transientMessage;
+    private final Set<String> assetSyncInFlight = new HashSet<>();
+    private final LruCache<String, Bitmap> coverCache = new LruCache<>(48);
     private final Runnable dismissTransientMessage = () -> {
         if (transientMessage != null) transientMessage.setVisibility(View.GONE);
     };
@@ -313,9 +323,6 @@ public final class MainActivity extends Activity {
         toolbar.setPadding(dp(18), dp(10), dp(14), dp(10));
         pageTitle = text("资产总览", 22, ink, Typeface.BOLD);
         toolbar.addView(pageTitle, new LinearLayout.LayoutParams(0, dp(44), 1));
-        TextView live = text("本机运行", 12, success, Typeface.BOLD);
-        live.setGravity(Gravity.CENTER);
-        toolbar.addView(live, marginParams(-2, dp(36), dp(8), 0, 0, 0));
         root.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(64)));
 
         LinearLayout navContainer = vertical(surface);
@@ -400,116 +407,19 @@ public final class MainActivity extends Activity {
             return;
         }
         pageTitle.setText("资产总览");
-        addPageHeading("资产概览", "账号与数字资产");
-        LinearLayout welcome = horizontal(0xffe9f7ef);
-        welcome.setGravity(Gravity.CENTER_VERTICAL);
-        welcome.setPadding(dp(16), dp(14), dp(16), dp(14));
-        welcome.setBackground(shape(0xffe9f7ef, 0xffd5ecdd, 18));
-        LinearLayout welcomeCopy = vertical(Color.TRANSPARENT);
-        welcomeCopy.addView(text("今天也要稳稳运行", 15, ink, Typeface.BOLD));
-        welcomeCopy.addView(text("原生引擎已就绪，任务状态随时可查", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(4), 0, 0));
-        welcome.addView(welcomeCopy, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView badge = text("在线", 12, success, Typeface.BOLD);
-        badge.setGravity(Gravity.CENTER);
-        badge.setPadding(dp(10), 0, dp(10), 0);
-        badge.setBackground(shape(0xffd8f0e1, 0xffc0e5cc, 18));
-        welcome.addView(badge, new LinearLayout.LayoutParams(dp(54), dp(32)));
-        content.addView(welcome, marginParams(-1, -2, 0, 0, 0, dp(12)));
-        Button refresh = button("刷新账号", false);
-        refresh.setOnClickListener(v -> loadAccounts());
-        content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-        Button add = button("短信登录 / 添加账号", true);
-        add.setOnClickListener(v -> showLoginDialog());
-        content.addView(add, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
         renderAccountCards();
+        syncAccountAssets();
     }
 
     private void renderFirstRunWorkspace() {
-        pageTitle.setText("工作台");
+        pageTitle.setText("资产总览");
         LinearLayout account = card();
-        LinearLayout accountHeader = horizontal(Color.TRANSPARENT);
-        accountHeader.setGravity(Gravity.CENTER_VERTICAL);
-        accountHeader.addView(text("账号", 16, ink, Typeface.BOLD), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView state = text("未登录", 11, amber, Typeface.BOLD);
-        state.setGravity(Gravity.CENTER);
-        state.setPadding(dp(10), 0, dp(10), 0);
-        state.setBackground(shape(0xfffff6dd, 0xfff0d99a, 14));
-        accountHeader.addView(state, new LinearLayout.LayoutParams(-2, dp(28)));
-        account.addView(accountHeader, new LinearLayout.LayoutParams(-1, -2));
-        account.addView(text("未登录 iBox 账号", 21, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(12), 0, dp(14)));
+        account.addView(text("登录 iBox 账号", 20, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(14)));
         Button addAccount = button("短信登录", true);
         addAccount.setContentDescription("短信登录并添加账号");
         addAccount.setOnClickListener(v -> showLoginDialog());
         account.addView(addAccount, new LinearLayout.LayoutParams(-1, dp(48)));
-        content.addView(account, marginParams(-1, -2, 0, 0, 0, dp(18)));
-
-        int watchCount = engine.store().getMarketWatches().length();
-        int quantCount = engine.store().getQuantStrategies().length();
-        int tradeCount = engine.store().getTradeTasks().length();
-        int scheduledCount = engine.store().getSynthesisTasks().length()
-                + engine.store().getLotteryTasks().length()
-                + engine.store().getFirstSaleTasks().length();
-        addSectionTitle("运行状态");
-        LinearLayout firstRow = horizontal(Color.TRANSPARENT);
-        addHomeMetric(firstRow, "行情监控", String.valueOf(watchCount), 0xffedf5fc, 0);
-        addHomeMetric(firstRow, "量化策略", String.valueOf(quantCount), 0xffeef8f1, dp(8));
-        content.addView(firstRow, marginParams(-1, dp(72), 0, 0, 0, dp(8)));
-
-        LinearLayout secondRow = horizontal(Color.TRANSPARENT);
-        addHomeMetric(secondRow, "交易任务", String.valueOf(tradeCount), 0xfffff4e8, 0);
-        addHomeMetric(secondRow, "定时任务", String.valueOf(scheduledCount), 0xfffff0f2, dp(8));
-        content.addView(secondRow, marginParams(-1, dp(72), 0, 0, 0, dp(18)));
-
-        addSectionTitle("快捷入口");
-        addHomeFeatureRow("行情监控", watchCount + " 个监控", "market", infoBlue, "量化策略", quantCount + " 个策略", "quant", primaryDark);
-        addHomeFeatureRow("交易执行", tradeCount + " 个任务", "trade", amber, "首发抢购", engine.store().getFirstSaleTasks().length() + " 个任务", "first-sale", danger);
-        addHomeFeatureRow("自动抽奖", engine.store().getLotteryTasks().length() + " 个任务", "lottery", 0xff8064bd, "合成任务", engine.store().getSynthesisTasks().length() + " 个任务", "synthesis", 0xff3f9a9e);
-        addHomeFeatureRow("资产总览", "未登录", "accounts", 0xff398b96, "设置", backgroundSyncEnabled() ? "后台已开启" : "后台已关闭", "settings", 0xff65707c);
-    }
-
-    private void addHomeFeatureRow(String leftTitle, String leftState, String leftPage, int leftAccent, String rightTitle, String rightState, String rightPage, int rightAccent) {
-        LinearLayout row = horizontal(Color.TRANSPARENT);
-        row.addView(homeFeature(leftTitle, leftState, leftPage, leftAccent), new LinearLayout.LayoutParams(0, dp(92), 1));
-        LinearLayout.LayoutParams rightParams = new LinearLayout.LayoutParams(0, dp(92), 1);
-        rightParams.setMargins(dp(8), 0, 0, 0);
-        row.addView(homeFeature(rightTitle, rightState, rightPage, rightAccent), rightParams);
-        content.addView(row, marginParams(-1, dp(92), 0, 0, 0, dp(8)));
-    }
-
-    private void addHomeMetric(LinearLayout row, String label, String value, int fill, int leftMargin) {
-        LinearLayout item = vertical(fill);
-        item.setPadding(dp(12), dp(10), dp(12), dp(9));
-        item.setBackground(shape(fill, 0xffdce8e4, 12));
-        item.addView(text(label, 11, muted, Typeface.BOLD));
-        item.addView(text(value, 21, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
-        params.setMargins(leftMargin, 0, 0, 0);
-        row.addView(item, params);
-    }
-
-    private LinearLayout homeFeature(String title, String subtitle, String page, int accent) {
-        LinearLayout feature = card();
-        feature.setPadding(dp(14), dp(12), dp(14), dp(11));
-        feature.setGravity(Gravity.CENTER_VERTICAL);
-        feature.setClickable(true);
-        feature.setFocusable(true);
-        feature.setContentDescription("打开" + title);
-        feature.setOnClickListener(v -> selectPage(page));
-
-        LinearLayout heading = horizontal(Color.TRANSPARENT);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView marker = new TextView(this);
-        marker.setBackground(shape(accent, 0, 6));
-        heading.addView(marker, new LinearLayout.LayoutParams(dp(9), dp(9)));
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, -2, 1f);
-        titleParams.setMargins(dp(8), 0, 0, 0);
-        heading.addView(text(title, 15, ink, Typeface.BOLD), titleParams);
-        TextView arrow = text(">", 16, accent, Typeface.BOLD);
-        arrow.setGravity(Gravity.CENTER);
-        heading.addView(arrow, new LinearLayout.LayoutParams(dp(24), dp(28)));
-        feature.addView(heading, new LinearLayout.LayoutParams(-1, -2));
-        feature.addView(text(subtitle, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
-        return feature;
+        content.addView(account, marginParams(-1, -2, 0, 0, 0, dp(12)));
     }
 
     private void loadAccounts() {
@@ -572,10 +482,7 @@ public final class MainActivity extends Activity {
             card.addView(metricGrid(assetData), marginParams(-1, -2, 0, 0, 0, dp(12)));
             JSONArray items = findArray(assetData, "items", "collections", "records", "list");
             if (items != null && items.length() > 0) renderAssetRows(card, items);
-            else card.addView(text("暂无资产明细，点击刷新读取", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(10)));
-            Button refresh = button("刷新资产", false);
-            refresh.setOnClickListener(v -> loadAssets(phone));
-            card.addView(refresh, new LinearLayout.LayoutParams(-1, dp(42)));
+            else card.addView(text(cache == null ? "资产同步中" : "暂无资产明细", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(4)));
             content.addView(card, marginParams(-1, -2, 0, 0, 0, dp(14)));
         }
     }
@@ -591,6 +498,8 @@ public final class MainActivity extends Activity {
             LinearLayout row = horizontal(Color.TRANSPARENT);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(0, dp(10), 0, dp(10));
+            ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), name);
+            row.addView(cover, marginParams(dp(54), dp(54), 0, 0, dp(12), 0));
             LinearLayout info = vertical(Color.TRANSPARENT);
             info.addView(text(name, 14, ink, Typeface.BOLD));
             info.addView(text("数量 " + (quantity.isEmpty() ? "1" : quantity), 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
@@ -600,11 +509,20 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void loadAssets(String phone) {
-        request("刷新资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null, result -> {
-            toast("资产已同步");
-            loadAccounts();
-        });
+    private void syncAccountAssets() {
+        for (int i = 0; i < accounts.length(); i++) {
+            JSONObject account = accounts.optJSONObject(i);
+            String phone = account == null ? "" : account.optString("phone");
+            if (phone.isEmpty() || !assetSyncInFlight.add(phone)) continue;
+            request("同步资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null, result -> {
+                assetSyncInFlight.remove(phone);
+                accounts = engine.store().getAccounts();
+                if ("accounts".equals(currentPage)) {
+                    content.removeAllViews();
+                    renderAccountCards();
+                }
+            }, () -> assetSyncInFlight.remove(phone));
+        }
     }
 
     private void confirmRemoveAccount(String phone) {
@@ -619,38 +537,41 @@ public final class MainActivity extends Activity {
 
     private void showSynthesis() {
         content.removeAllViews();
-        addPageHeading("合成任务", "活动、材料与定时任务");
-        Button refresh = button("刷新任务", false);
-        refresh.setOnClickListener(v -> showSynthesis());
-        content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
+        addSectionTitle("定时任务");
+        LinearLayout taskBox = vertical(Color.TRANSPARENT);
+        content.addView(taskBox, marginParams(-1, -2, 0, 0, 0, dp(14)));
+        addSectionTitle("合成活动");
+        LinearLayout activityBox = vertical(Color.TRANSPARENT);
+        content.addView(activityBox, new LinearLayout.LayoutParams(-1, -2));
+        renderLoading(taskBox, "任务同步中");
         request("同步合成任务", "GET", "/native/synthesis/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
-            renderTaskList(tasks, "合成任务", content, true);
-            if (!selectedPhone.isEmpty()) {
-                Button activities = button("读取当前账号活动", false);
-                activities.setOnClickListener(v -> loadSynthesisActivities());
-                content.addView(activities, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-            }
-        });
+            taskBox.removeAllViews();
+            renderTaskList(tasks, "合成任务", taskBox, true);
+        }, () -> renderRetry(taskBox, "合成任务同步失败", () -> showSynthesis()));
+        if (selectedPhone.isEmpty()) activityBox.addView(empty("请先登录账号"));
+        else loadSynthesisActivities(activityBox);
     }
 
-    private void loadSynthesisActivities() {
+    private void loadSynthesisActivities(LinearLayout target) {
+        renderLoading(target, "活动同步中");
         request("同步合成活动", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/activities", null, result -> {
+            target.removeAllViews();
             JSONObject data = result.optJSONObject("data");
             JSONArray activities = findArray(data, "activities", "items", "list");
             if (activities == null || activities.length() == 0) {
-                content.addView(empty("当前没有可用合成活动"));
+                target.addView(empty("暂无可用合成活动"));
                 return;
             }
-            addSectionTitle("可用活动");
             for (int i = 0; i < activities.length(); i++) {
                 JSONObject activity = activities.optJSONObject(i);
                 if (activity == null) continue;
                 String title = first(activity, "title", "name", "activityName", "id");
-                String phase = first(activity, "phase", "status", "startTime");
+                String phase = synthesisPhaseLabel(first(activity, "phase", "status"));
+                String period = first(activity, "startTime", "startAt");
                 LinearLayout row = card();
                 row.addView(text(title, 15, ink, Typeface.BOLD));
-                row.addView(text(phase, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+                row.addView(text(phase + (period.isEmpty() ? "" : " · " + time(period)), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
                 String syntheticId = first(activity, "syntheticId", "id");
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
                 Button detail = button("材料", false);
@@ -663,9 +584,9 @@ public final class MainActivity extends Activity {
                 actions.addView(immediate, marginParams(dp(92), dp(42), dp(8), 0, 0, 0));
                 actions.addView(schedule, marginParams(dp(72), dp(42), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-                content.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+                target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
-        });
+        }, () -> renderRetry(target, "合成活动同步失败", () -> loadSynthesisActivities(target)));
     }
 
     private void loadSynthesisCenter(String syntheticId) {
@@ -713,7 +634,6 @@ public final class MainActivity extends Activity {
 
     private void showMarket() {
         content.removeAllViews();
-        addPageHeading("行情监控", "价格基准与涨跌阈值");
         LinearLayout search = horizontal(Color.TRANSPARENT);
         EditText query = input("搜索藏品名称");
         Button searchButton = button("搜索", true);
@@ -722,16 +642,14 @@ public final class MainActivity extends Activity {
         content.addView(search, marginParams(-1, -2, 0, 0, 0, dp(12)));
         LinearLayout resultBox = vertical(Color.TRANSPARENT);
         content.addView(resultBox, marginParams(-1, -2, 0, 0, 0, dp(8)));
-        searchButton.setOnClickListener(v -> searchMarket(query.getText().toString(), resultBox));
-        Button refresh = button("刷新监控", false);
-        content.addView(refresh, marginParams(-1, dp(42), 0, 0, 0, dp(12)));
+        addSectionTitle("监控项目");
         LinearLayout watchBox = vertical(Color.TRANSPARENT);
         content.addView(watchBox, new LinearLayout.LayoutParams(-1, -2));
-        refresh.setOnClickListener(v -> loadWatches(watchBox, true));
-        loadWatches(watchBox);
+        searchButton.setOnClickListener(v -> searchMarket(query.getText().toString(), resultBox, query, watchBox));
+        loadWatches(watchBox, true);
     }
 
-    private void searchMarket(String name, LinearLayout target) {
+    private void searchMarket(String name, LinearLayout target, EditText query, LinearLayout watchBox) {
         if (name == null || name.trim().isEmpty()) {
             target.removeAllViews();
             target.addView(empty("输入名称后搜索"));
@@ -748,10 +666,16 @@ public final class MainActivity extends Activity {
                 JSONObject item = items.optJSONObject(i);
                 if (item == null) continue;
                 LinearLayout row = card();
-                row.addView(text(first(item, "name", "title", "groupId", "id"), 15, ink, Typeface.BOLD));
-                row.addView(text("编号 " + first(item, "groupId", "id") + " · 地板 " + money(first(item, "floorPrice", "price")), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+                LinearLayout header = horizontal(Color.TRANSPARENT);
+                ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), first(item, "name", "title", "groupId", "id"));
+                header.addView(cover, marginParams(dp(50), dp(50), 0, 0, dp(12), 0));
+                LinearLayout details = vertical(Color.TRANSPARENT);
+                details.addView(text(first(item, "name", "title", "groupId", "id"), 15, ink, Typeface.BOLD));
+                details.addView(text("编号 " + first(item, "groupId", "id") + " · 地板 " + money(first(item, "floorPrice", "price")), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
+                header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
+                row.addView(header, marginParams(-1, -2, 0, 0, 0, dp(10)));
                 Button add = button("加入监控", false);
-                add.setOnClickListener(v -> addWatch(item));
+                add.setOnClickListener(v -> addWatch(item, target, query, watchBox));
                 row.addView(add, new LinearLayout.LayoutParams(-1, dp(42)));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
@@ -763,6 +687,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadWatches(LinearLayout target, boolean refresh) {
+        renderLoading(target, "行情同步中");
         request(refresh ? "刷新行情监控" : "同步行情监控", "GET", "/native/market/watches" + (refresh ? "?refresh=1" : ""), null, result -> {
             target.removeAllViews();
             JSONArray watches = findArray(result.optJSONObject("data"), "watches", "items", "list");
@@ -774,10 +699,16 @@ public final class MainActivity extends Activity {
                 JSONObject watch = watches.optJSONObject(i);
                 if (watch == null) continue;
                 LinearLayout row = card();
-                row.addView(text(first(watch, "name", "collectionId", "id"), 15, ink, Typeface.BOLD));
+                LinearLayout header = horizontal(Color.TRANSPARENT);
+                ImageView cover = coverImage(first(watch, "cover", "image", "imageUrl", "coverUrl"), first(watch, "name", "collectionId", "id"));
+                header.addView(cover, marginParams(dp(50), dp(50), 0, 0, dp(12), 0));
+                LinearLayout details = vertical(Color.TRANSPARENT);
+                details.addView(text(first(watch, "name", "collectionId", "id"), 15, ink, Typeface.BOLD));
                 String price = money(first(watch, "latestPrice", "currentPrice", "price"));
                 String change = first(watch, "changePercent", "change");
-                row.addView(text(price + " · 变化 " + (change.isEmpty() ? "--" : change + "%") + "\n提醒 涨≥" + number(watch, "riseThresholdPercent", "3") + "% / 跌≥" + number(watch, "fallThresholdPercent", "3") + "%", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(10), 0, 0));
+                details.addView(text(price + " · 变化 " + (change.isEmpty() ? "--" : change + "%") + "\n提醒 涨≥" + number(watch, "riseThresholdPercent", "3") + "% / 跌≥" + number(watch, "fallThresholdPercent", "3") + "%", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
+                header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
+                row.addView(header, marginParams(-1, -2, 0, 0, 0, dp(10)));
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
                 Button threshold = button("阈值", false);
                 threshold.setOnClickListener(v -> showThresholdDialog(watch, target));
@@ -789,10 +720,10 @@ public final class MainActivity extends Activity {
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
-        });
+        }, () -> renderRetry(target, "行情监控同步失败", () -> loadWatches(target, refresh)));
     }
 
-    private void addWatch(JSONObject item) {
+    private void addWatch(JSONObject item, LinearLayout resultBox, EditText query, LinearLayout watchBox) {
         JSONObject body = new JSONObject();
         try {
                 body.put("collectionId", first(item, "collectionId", "groupId", "id"));
@@ -800,10 +731,16 @@ public final class MainActivity extends Activity {
                 body.put("searchTerm", first(item, "searchTerm", "name", "title"));
                 body.put("floorPrice", first(item, "floorPrice", "price"));
                 body.put("watchToken", first(item, "watchToken", "token"));
+            body.put("cover", first(item, "cover", "image", "imageUrl", "coverUrl"));
             body.put("riseThresholdPercent", 3);
             body.put("fallThresholdPercent", 3);
         } catch (Exception ignored) { }
-        request("加入行情监控", "POST", "/native/market/watches", body, result -> toast("已加入行情监控"));
+        request("加入行情监控", "POST", "/native/market/watches", body, result -> {
+            resultBox.removeAllViews();
+            query.setText("");
+            loadWatches(watchBox, true);
+            toast("已加入行情监控");
+        });
     }
 
     private void showThresholdDialog(JSONObject watch, LinearLayout target) {
@@ -835,7 +772,6 @@ public final class MainActivity extends Activity {
 
     private void showQuant() {
         content.removeAllViews();
-        addPageHeading("量化策略", "监控、执行与事件记录");
         LinearLayout search = horizontal(Color.TRANSPARENT);
         EditText query = input("搜索策略目标");
         Button find = button("搜索", true);
@@ -978,7 +914,6 @@ public final class MainActivity extends Activity {
 
     private void showTrade() {
         content.removeAllViews();
-        addPageHeading("交易执行", "市场搜索、任务与订单");
         LinearLayout search = horizontal(Color.TRANSPARENT);
         EditText query = input("输入藏品名称");
         Button find = button("搜索", true);
@@ -1064,21 +999,248 @@ public final class MainActivity extends Activity {
     }
 
     private void loadTradeTasks(LinearLayout target) {
-        request("同步交易任务", "GET", "/native/market/trade/tasks", null, tradeResult -> request("同步捡漏任务", "GET", "/native/retired-market/tasks", null, retiredResult -> {
+        renderLoading(target, "交易任务同步中");
+        final JSONArray[] tradeTasks = new JSONArray[1];
+        final JSONArray[] retiredTasks = new JSONArray[1];
+        final boolean[] completed = new boolean[2];
+        final boolean[] failed = new boolean[2];
+        Runnable render = () -> {
+            if (!completed[0] || !completed[1]) return;
             target.removeAllViews();
-            renderTaskList(findArray(tradeResult.optJSONObject("data"), "tasks", "items", "list"), "交易", target, false);
-            renderTaskList(findArray(retiredResult.optJSONObject("data"), "tasks", "items", "list"), "捡漏", target, false);
-        }));
+            if (failed[0] && failed[1]) {
+                renderRetry(target, "交易任务同步失败", () -> loadTradeTasks(target));
+                return;
+            }
+            if ((tradeTasks[0] == null || tradeTasks[0].length() == 0) && (retiredTasks[0] == null || retiredTasks[0].length() == 0)) {
+                target.addView(empty("暂无市场交易任务"));
+                return;
+            }
+            renderTradeTaskRows(tradeTasks[0], false, target);
+            renderTradeTaskRows(retiredTasks[0], true, target);
+        };
+        request("同步交易任务", "GET", "/native/market/trade/tasks", null, result -> {
+            tradeTasks[0] = findArray(result.optJSONObject("data"), "tasks", "items", "list");
+            completed[0] = true;
+            render.run();
+        }, () -> {
+            failed[0] = true;
+            completed[0] = true;
+            render.run();
+        });
+        request("同步捡漏任务", "GET", "/native/retired-market/tasks", null, result -> {
+            retiredTasks[0] = findArray(result.optJSONObject("data"), "tasks", "items", "list");
+            completed[1] = true;
+            render.run();
+        }, () -> {
+            failed[1] = true;
+            completed[1] = true;
+            render.run();
+        });
     }
 
     private void loadOrders(LinearLayout target) {
+        renderLoading(target, "订单同步中");
         request("同步订单", "GET", "/native/orders?phone=" + Uri.encode(selectedPhone), null, result -> {
-            target.removeAllViews(); JSONObject data = result.optJSONObject("data");
-            if (data == null) { target.addView(empty("暂无订单")); return; }
-            JSONArray pending = findArray(data, "pendingOrders", "pending", "orders");
-            if (pending == null || pending.length() == 0) { target.addView(empty("暂无订单")); return; }
-            renderTaskList(pending, "平台订单", target, false);
-        });
+            target.removeAllViews();
+            renderPlatformOrders(result.optJSONObject("data"), target);
+        }, () -> renderRetry(target, "订单同步失败", () -> loadOrders(target)));
+    }
+
+    private void renderTradeTaskRows(JSONArray tasks, boolean retired, LinearLayout target) {
+        if (tasks == null) return;
+        for (int i = 0; i < tasks.length(); i++) {
+            JSONObject task = tasks.optJSONObject(i);
+            if (task == null) continue;
+            String status = task.optString("status", "");
+            String type = retired ? "捡漏" : tradeTypeLabel(task.optString("type", ""));
+            LinearLayout row = card();
+            row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
+            String amount;
+            if (retired) {
+                amount = "价格 " + money(first(task, "minPrice")) + " 至 " + money(first(task, "maxPrice"));
+                if ("locked".equals(status) || "payment_pending".equals(status)) amount += " · 锁定 " + money(first(task, "lockedPrice"));
+            } else if ("consignment".equals(task.optString("type"))) {
+                amount = "挂牌 " + money(first(task, "price")) + " · 行情不低于 " + money(first(task, "triggerPrice"));
+            } else {
+                amount = money(first(task, "price")) + " · " + Math.max(1, intValue(first(task, "quantity"), 1)) + " 件";
+            }
+            String last = task.optString("lastResult", "");
+            String metadata = "账号 " + first(task, "phone", "sourcePhone", "-") + " · " + amount;
+            if (!last.isEmpty()) metadata += "\n" + taskResultLabel(last);
+            row.addView(text(metadata, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+
+            String id = task.optString("id", "");
+            if (!id.isEmpty()) {
+                String base = retired ? "/native/retired-market/tasks/" : "/native/market/trade/tasks/";
+                LinearLayout actions = horizontal(Color.TRANSPARENT);
+                if ("verification_required".equals(status)) {
+                    Button verify = button("完成人机验证", true);
+                    verify.setOnClickListener(v -> startTaskCaptcha(retired ? "捡漏" : "交易", id, first(task, "phone", "sourcePhone")));
+                    actions.addView(verify, new LinearLayout.LayoutParams(0, dp(42), 1));
+                } else if ("payment_pending".equals(status)) {
+                    Button payment = button("进入支付", true);
+                    payment.setOnClickListener(v -> request("获取支付链接", "POST", base + Uri.encode(id) + "/payment", null, result -> openWallet(first(result.optJSONObject("data"), "cashierLink", "paymentUrl"))));
+                    actions.addView(payment, new LinearLayout.LayoutParams(0, dp(42), 1));
+                } else if ((retired && ("draft".equals(status) || "paused".equals(status) || "blocked".equals(status)))
+                        || (!retired && ("draft".equals(status) || "paused".equals(status) || "blocked".equals(status)))) {
+                    Button start = button("启动监控", false);
+                    start.setOnClickListener(v -> request("启动任务", "POST", base + Uri.encode(id) + "/enable", null, result -> showTrade()));
+                    actions.addView(start, new LinearLayout.LayoutParams(0, dp(42), 1));
+                } else if ((retired && "scheduled".equals(status)) || (!retired && ("scheduled".equals(status) || "waiting_price".equals(status)))) {
+                    Button pause = button("暂停", false);
+                    pause.setOnClickListener(v -> request("暂停任务", "POST", base + Uri.encode(id) + "/disable", null, result -> showTrade()));
+                    actions.addView(pause, new LinearLayout.LayoutParams(0, dp(42), 1));
+                }
+                Button delete = button("删除", false);
+                delete.setTextColor(danger);
+                delete.setOnClickListener(v -> showProjectDialog("删除任务", text("确认删除这条任务？", 14, muted, Typeface.NORMAL), "删除", dialog -> {
+                    dialog.dismiss();
+                    request("删除任务", "DELETE", base + Uri.encode(id), null, result -> showTrade());
+                }));
+                LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(actions.getChildCount() == 0 ? -1 : dp(76), dp(42));
+                if (actions.getChildCount() > 0) deleteParams.setMargins(dp(8), 0, 0, 0);
+                actions.addView(delete, deleteParams);
+                row.addView(actions, marginParams(-1, -2, 0, dp(10), 0, 0));
+            }
+            target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+        }
+    }
+
+    private void renderPlatformOrders(JSONObject data, LinearLayout target) {
+        if (data == null) {
+            target.addView(empty("暂无订单"));
+            return;
+        }
+        JSONArray pending = mergeOrderGroups(
+                findArray(data, "collectionPendingOrders"),
+                findArray(data, "wantedPendingOrders"),
+                findArray(data, "pendingOrders", "pending")
+        );
+        JSONArray sells = arrayOrEmpty(findArray(data, "sellOrders"));
+        JSONArray buys = withoutPendingBuys(findArray(data, "buyOrders"));
+        if (pending.length() == 0 && sells.length() == 0 && buys.length() == 0) {
+            target.addView(empty("暂无订单"));
+            return;
+        }
+        renderOrderGroup("待支付订单", pending, true, target);
+        renderOrderGroup("卖出订单 · 寄售", sells, false, target);
+        renderOrderGroup("买入订单 · 求购", buys, false, target);
+    }
+
+    private JSONArray mergeOrderGroups(JSONArray... sources) {
+        JSONArray result = new JSONArray();
+        Set<String> seen = new HashSet<>();
+        for (JSONArray source : sources) {
+            if (source == null) continue;
+            for (int i = 0; i < source.length(); i++) {
+                JSONObject order = source.optJSONObject(i);
+                if (order == null) continue;
+                String key = first(order, "orderUuid", "orderUUId", "orderNumber", "id");
+                if (key.isEmpty()) key = first(order, "type") + ":" + first(order, "createdAt", "createTime") + ":" + first(order, "price", "amount");
+                if (seen.add(key)) result.put(order);
+            }
+        }
+        return result;
+    }
+
+    private JSONArray withoutPendingBuys(JSONArray orders) {
+        JSONArray result = new JSONArray();
+        if (orders == null) return result;
+        for (int i = 0; i < orders.length(); i++) {
+            JSONObject order = orders.optJSONObject(i);
+            if (order != null && intValue(first(order, "orderStatus", "status", "orderState"), -1) != 0) result.put(order);
+        }
+        return result;
+    }
+
+    private void renderOrderGroup(String title, JSONArray orders, boolean pending, LinearLayout target) {
+        TextView heading = text(title + " · " + orders.length(), 14, ink, Typeface.BOLD);
+        target.addView(heading, marginParams(-1, -2, 0, 0, 0, dp(8)));
+        if (orders.length() == 0) {
+            target.addView(empty("暂无" + title));
+            return;
+        }
+        for (int i = 0; i < orders.length(); i++) {
+            JSONObject order = orders.optJSONObject(i);
+            if (order == null) continue;
+            String titleText = first(order, "title", "name", "groupId", "id");
+            LinearLayout row = card();
+            LinearLayout header = horizontal(Color.TRANSPARENT);
+            ImageView cover = coverImage(first(order, "cover", "image", "imageUrl", "coverUrl"), titleText);
+            header.addView(cover, marginParams(dp(48), dp(48), 0, 0, dp(12), 0));
+            LinearLayout details = vertical(Color.TRANSPARENT);
+            details.addView(text(titleText + " · " + platformOrderStatusLabel(order, pending), 14, ink, Typeface.BOLD));
+            String orderId = first(order, "orderUuid", "orderUUId", "orderNumber", "id");
+            String metadata = "账号 " + first(order, "phone", "-") + " · " + (orderId.isEmpty() ? "平台订单" : "订单 " + orderId);
+            String createdAt = first(order, "createdAt", "createTime");
+            if (!createdAt.isEmpty()) metadata += " · " + time(createdAt);
+            details.addView(text(metadata, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(5), 0, 0));
+            header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
+            header.addView(text(money(first(order, "price", "salePrice", "totalPrice", "amount")), 13, pending ? amber : success, Typeface.BOLD), new LinearLayout.LayoutParams(-2, -2));
+            row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+            target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+        }
+    }
+
+    private void renderFirstSaleTaskList(JSONArray tasks, LinearLayout target) {
+        target.removeAllViews();
+        if (tasks == null || tasks.length() == 0) {
+            target.addView(empty("暂无抢购任务"));
+            return;
+        }
+        for (int i = 0; i < tasks.length(); i++) {
+            JSONObject task = tasks.optJSONObject(i);
+            if (task == null) continue;
+            String status = task.optString("status", "");
+            String mode = "immediate".equals(task.optString("mode")) ? "立即抢购" : "定时抢购";
+            LinearLayout row = card();
+            LinearLayout header = horizontal(Color.TRANSPARENT);
+            ImageView cover = coverImage(first(task, "cover", "image", "imageUrl", "coverUrl"), first(task, "title", "saleId", "id"));
+            header.addView(cover, marginParams(dp(50), dp(50), 0, 0, dp(12), 0));
+            header.addView(text(first(task, "title", "saleId", "id") + " · " + mode + " · " + firstSaleTaskStatusLabel(status), 14, ink, Typeface.BOLD), new LinearLayout.LayoutParams(0, -2, 1));
+            row.addView(header, marginParams(-1, -2, 0, 0, 0, dp(2)));
+            String eventTime = "immediate".equals(task.optString("mode"))
+                    ? first(task, "startedAt", "createdAt")
+                    : first(task, "startTime", "startAt");
+            JSONArray phones = task.optJSONArray("phones");
+            int boundCount = phones == null ? (first(task, "phone", "sourcePhone").isEmpty() ? 0 : 1) : phones.length();
+            String metadata = (eventTime.isEmpty() ? "时间待定" : time(eventTime))
+                    + " · 数量 " + Math.max(1, intValue(first(task, "num"), 1))
+                    + " · 已绑定 " + boundCount + " 个账号";
+            row.addView(text(metadata, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, dp(4)));
+            JSONObject runs = task.optJSONObject("runs");
+            if (runs != null) {
+                Iterator<String> phones = runs.keys();
+                while (phones.hasNext()) {
+                    String phone = phones.next();
+                    JSONObject run = runs.optJSONObject(phone);
+                    LinearLayout runRow = horizontal(Color.TRANSPARENT);
+                    runRow.setGravity(Gravity.CENTER_VERTICAL);
+                    runRow.addView(text(phone + " · " + firstSaleRunLabel(run), 12, muted, Typeface.NORMAL), new LinearLayout.LayoutParams(0, dp(34), 1));
+                    if (run != null && "verification_required".equals(run.optString("status"))) {
+                        Button verify = button("验证", true);
+                        verify.setOnClickListener(v -> startTaskCaptcha("首发", task.optString("id"), phone));
+                        runRow.addView(verify, new LinearLayout.LayoutParams(dp(72), dp(34)));
+                    } else if (run != null && "payment_pending".equals(run.optString("status")) && !first(run, "cashierLink", "paymentUrl").isEmpty()) {
+                        Button pay = button("支付", true);
+                        String link = first(run, "cashierLink", "paymentUrl");
+                        pay.setOnClickListener(v -> openWallet(link));
+                        runRow.addView(pay, new LinearLayout.LayoutParams(dp(72), dp(34)));
+                    }
+                    row.addView(runRow, new LinearLayout.LayoutParams(-1, dp(34)));
+                }
+            }
+            if (("scheduled".equals(status) || "verification_required".equals(status)) && !task.optString("id").isEmpty()) {
+                Button cancel = button("取消任务", false);
+                cancel.setTextColor(danger);
+                cancel.setOnClickListener(v -> showProjectDialog("取消任务", text("取消后不会再按计划执行，是否继续？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
+                    dialog.dismiss();
+                    request("取消首发任务", "POST", "/native/first-sales/tasks/" + Uri.encode(task.optString("id")) + "/cancel", null, result -> showFirstSale());
+                }));
+                row.addView(cancel, marginParams(-1, dp(40), 0, dp(8), 0, 0));
+            }
+            target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+        }
     }
 
     private void renderTaskList(JSONArray tasks, String prefix, LinearLayout target, boolean allowCancel) {
@@ -1110,19 +1272,21 @@ public final class MainActivity extends Activity {
                 row.addView(wallet, marginParams(-1, dp(40), 0, dp(4), 0, dp(4)));
             }
             if (!id.isEmpty() && allowCancel) {
-                Button cancel = button("取消任务", false);
-                cancel.setTextColor(danger);
-                cancel.setOnClickListener(v -> showProjectDialog("取消任务", text("取消后不会再按计划执行，是否继续？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
-                    dialog.dismiss();
-                    String path = prefix.startsWith("合成")
-                            ? "/native/synthesis/tasks/" + Uri.encode(id) + "/cancel"
-                            : "/native/first-sales/tasks/" + Uri.encode(id) + "/cancel";
-                    request("取消" + prefix, "POST", path, null, result -> {
-                        target.removeAllViews();
-                        if (prefix.startsWith("合成")) showSynthesis(); else showFirstSale();
-                    });
-                }));
-                row.addView(cancel, new LinearLayout.LayoutParams(-1, dp(40)));
+                if ("scheduled".equals(status)) {
+                    Button cancel = button("取消任务", false);
+                    cancel.setTextColor(danger);
+                    cancel.setOnClickListener(v -> showProjectDialog("取消任务", text("取消后不会再按计划执行，是否继续？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
+                        dialog.dismiss();
+                        String path = prefix.startsWith("合成")
+                                ? "/native/synthesis/tasks/" + Uri.encode(id) + "/cancel"
+                                : "/native/first-sales/tasks/" + Uri.encode(id) + "/cancel";
+                        request("取消" + prefix, "POST", path, null, result -> {
+                            target.removeAllViews();
+                            if (prefix.startsWith("合成")) showSynthesis(); else showFirstSale();
+                        });
+                    }));
+                    row.addView(cancel, new LinearLayout.LayoutParams(-1, dp(40)));
+                }
             } else if (!id.isEmpty() && (prefix.equals("交易") || prefix.equals("捡漏"))) {
                 boolean enabled = task.optBoolean("enabled", false);
                 String base = prefix.equals("交易") ? "/native/market/trade/tasks/" : "/native/retired-market/tasks/";
@@ -1224,20 +1388,36 @@ public final class MainActivity extends Activity {
     }
 
     private void showLottery() {
-        content.removeAllViews(); addPageHeading("自动抽奖", "活动与账号状态");
-        Button refresh = button("刷新抽奖状态", false); content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-        LinearLayout list = vertical(Color.TRANSPARENT); content.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        refresh.setOnClickListener(v -> loadLottery(list)); loadLottery(list);
+        content.removeAllViews();
+        LinearLayout list = vertical(Color.TRANSPARENT);
+        content.addView(list, new LinearLayout.LayoutParams(-1, -2));
+        loadLottery(list);
     }
 
     private void loadLottery(LinearLayout target) {
+        renderLoading(target, "抽奖同步中");
         request("同步抽奖状态", "GET", "/native/lottery/auto", null, result -> {
             target.removeAllViews(); JSONArray activities = findArray(result.optJSONObject("data"), "activities", "items", "list");
             if (activities == null || activities.length() == 0) { target.addView(empty("暂无抽奖活动")); return; }
             for (int i = 0; i < activities.length(); i++) {
                 JSONObject activity = activities.optJSONObject(i); if (activity == null) continue;
-                LinearLayout row = card(); row.addView(text(first(activity, "title", "name", "id"), 15, ink, Typeface.BOLD));
-                row.addView(text("状态 " + first(activity, "phase", "status", "onlineStatus") + "\n" + first(activity, "startTime", "endTime", "updatedAt"), 12, muted, Typeface.NORMAL));
+                LinearLayout row = card();
+                row.addView(text(first(activity, "title", "name", "id") + " · " + lotteryPhaseLabel(activity), 15, ink, Typeface.BOLD));
+                String starts = first(activity, "startedAt", "startTime");
+                String ends = first(activity, "endedAt", "endTime");
+                row.addView(text((starts.isEmpty() ? "时间待定" : time(starts)) + (ends.isEmpty() ? "" : " 至 " + time(ends)), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, dp(8)));
+                JSONObject accountStates = activity.optJSONObject("accounts");
+                if (accountStates != null) {
+                    Iterator<String> phones = accountStates.keys();
+                    while (phones.hasNext()) {
+                        String phone = phones.next();
+                        JSONObject snapshot = accountStates.optJSONObject(phone);
+                        int available = snapshot == null ? -1 : snapshot.optInt("availableCount", -1);
+                        String count = available < 0 ? "次数待同步" : "剩余 " + available + " 次";
+                        String status = lotteryAccountStatusLabel(snapshot);
+                        row.addView(text(phone + " · " + count + " · " + status, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(5)));
+                    }
+                }
                 String id = activity.optString("id");
                 boolean enabled = activity.optBoolean("enabled", false);
                 Button toggle = button(enabled ? "停止自动抽奖" : "开启自动抽奖", enabled);
@@ -1245,42 +1425,67 @@ public final class MainActivity extends Activity {
                 row.addView(toggle, marginParams(-1, dp(42), 0, dp(8), 0, 0));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
-        });
+        }, () -> renderRetry(target, "抽奖活动同步失败", () -> loadLottery(target)));
     }
 
     private void showFirstSale() {
-        content.removeAllViews(); addPageHeading("首发抢购", "发售项目与任务");
-        Button refresh = button("刷新首发项目", false); content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
-        LinearLayout list = vertical(Color.TRANSPARENT); content.addView(list, new LinearLayout.LayoutParams(-1, -2));
-        refresh.setOnClickListener(v -> loadFirstSales(list)); loadFirstSales(list);
+        content.removeAllViews();
+        addSectionTitle("发售项目");
+        LinearLayout sales = vertical(Color.TRANSPARENT);
+        content.addView(sales, marginParams(-1, -2, 0, 0, 0, dp(14)));
+        addSectionTitle("抢购任务");
+        LinearLayout tasks = vertical(Color.TRANSPARENT);
+        content.addView(tasks, new LinearLayout.LayoutParams(-1, -2));
+        if (selectedPhone.isEmpty()) sales.addView(empty("请先登录账号"));
+        else loadFirstSales(sales);
+        loadFirstSaleTasks(tasks);
     }
 
     private void loadFirstSales(LinearLayout target) {
+        renderLoading(target, "首发项目同步中");
         request("同步首发项目", "GET", "/native/first-sales?refresh=1&phone=" + Uri.encode(selectedPhone), null, result -> {
             target.removeAllViews(); JSONArray items = findArray(result.optJSONObject("data"), "items", "sales", "list");
             if (items == null || items.length() == 0) { target.addView(empty("暂无首发项目")); return; }
             for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.optJSONObject(i); if (item == null) continue;
-                LinearLayout row = card(); row.addView(text(first(item, "title", "name", "saleId", "id"), 15, ink, Typeface.BOLD));
-                row.addView(text(money(first(item, "price", "salePrice")) + " · " + first(item, "phase", "status", "startTime"), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
-                Button prepare = button("加入任务", false); prepare.setOnClickListener(v -> showFirstSaleDialog(item));
-                row.addView(prepare, new LinearLayout.LayoutParams(-1, dp(42))); target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+                String title = first(item, "title", "name", "saleId", "id");
+                LinearLayout row = card();
+                LinearLayout header = horizontal(Color.TRANSPARENT);
+                ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), title);
+                header.addView(cover, marginParams(dp(54), dp(54), 0, 0, dp(12), 0));
+                LinearLayout details = vertical(Color.TRANSPARENT);
+                details.addView(text(title + " · " + firstSalePhaseLabel(item), 15, ink, Typeface.BOLD));
+                String limit = first(item, "userOnceMaxBuyNum", "onceMaxBuyNum", "limitNum");
+                details.addView(text(money(first(item, "price", "salePrice")) + " · " + (limit.isEmpty() ? "限购待确认" : "限购 " + limit + " 件"), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
+                header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
+                row.addView(header, marginParams(-1, -2, 0, 0, 0, dp(8)));
+                String mode = item.optString("action", "");
+                boolean canPrepare = ("scheduled".equals(mode) || "immediate".equals(mode))
+                        && !first(item, "saleId", "id").isEmpty()
+                        && !first(item, "groupId", "digitalCollectionGroupId").isEmpty()
+                        && intValue(limit, 0) > 0;
+                if (canPrepare) {
+                    Button prepare = button("immediate".equals(mode) ? "立即抢购" : "准备抢购", "immediate".equals(mode));
+                    prepare.setOnClickListener(v -> showFirstSaleDialog(item, mode));
+                    row.addView(prepare, new LinearLayout.LayoutParams(-1, dp(42)));
+                }
+                target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
-            loadFirstSaleTasks(target);
-        });
+        }, () -> renderRetry(target, "首发项目同步失败", () -> loadFirstSales(target)));
     }
 
     private void loadFirstSaleTasks(LinearLayout target) {
+        renderLoading(target, "抢购任务同步中");
         request("同步首发任务", "GET", "/native/first-sales/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
-            addSectionTitle("抢购任务"); renderTaskList(tasks, "首发", target, true);
-        });
+            renderFirstSaleTaskList(tasks, target);
+        }, () -> renderRetry(target, "抢购任务同步失败", () -> loadFirstSaleTasks(target)));
     }
 
-    private void showFirstSaleDialog(JSONObject item) {
+    private void showFirstSaleDialog(JSONObject item, String initialMode) {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
         LinearLayout form = vertical(Color.TRANSPARENT);
-        OptionField mode = optionField("提交方式", new String[]{"scheduled", "immediate"}, "scheduled");
+        OptionField mode = optionField("提交方式", new String[]{initialMode}, initialMode);
         EditText count = numberInput("购买数量", "1"); EditText paymentCode = numberInput("支付通道编号", "");
         form.addView(labelled("提交方式", mode));
         form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, new LinearLayout.LayoutParams(-1, dp(46)));
@@ -1290,9 +1495,11 @@ public final class MainActivity extends Activity {
                 body.put("groupId", first(item, "groupId", "id"));
                 body.put("saleId", first(item, "saleId", "id"));
                 body.put("title", first(item, "title", "name", "saleId", "id"));
+                body.put("cover", first(item, "cover", "image", "imageUrl", "coverUrl"));
                 body.put("num", intValue(count, 1));
                 body.put("paymentPlatformCode", intValue(paymentCode, 0));
                 body.put("sourcePhone", selectedPhone);
+                body.put("mode", mode.value());
                 boolean immediate = "immediate".equals(mode.value());
                 body.put("startAt", immediate ? java.time.Instant.now().toString() : first(item, "startAt", "startTime", "onSaleTime", "saleTime"));
             } catch (Exception ignored) {
@@ -1303,11 +1510,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showSettings() {
-        content.removeAllViews(); addPageHeading("设置", "通知与本地执行");
-        LinearLayout runtime = card();
-        runtime.addView(text("独立运行", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
-        runtime.addView(text("账号、策略、任务和通知配置保存在本机；无需填写面板服务地址。", 12, muted, Typeface.NORMAL));
-        content.addView(runtime, marginParams(-1, -2, 0, 0, 0, dp(12)));
+        content.removeAllViews();
 
         LinearLayout bark = card(); bark.addView(text("Bark 通知", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
         ProjectToggle enabled = toggle("启用推送", false); bark.addView(enabled);
@@ -1325,7 +1528,7 @@ public final class MainActivity extends Activity {
         ProjectToggle backgroundSync = toggle("保持状态通知", backgroundSyncEnabled());
         backgroundCard.addView(backgroundSync);
         String lastSummary = preferences.getString("last_sync_summary", "尚未同步");
-        backgroundCard.addView(text("前台服务执行行情监控、任务调度和状态通知\n最近：" + lastSummary, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(2), 0, dp(8)));
+        backgroundCard.addView(text("最近：" + lastSummary, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(2), 0, dp(8)));
         backgroundSync.setOnCheckedChangeListener((view, checked) -> {
             preferences.edit().putBoolean("backgroundSync", checked).apply();
             if (checked) {
@@ -1411,6 +1614,10 @@ public final class MainActivity extends Activity {
     }
 
     private void request(String label, String method, String path, JSONObject body, Consumer<JSONObject> successCallback) {
+        request(label, method, path, body, successCallback, null);
+    }
+
+    private void request(String label, String method, String path, JSONObject body, Consumer<JSONObject> successCallback, Runnable failureCallback) {
         if (engine == null) engine = new NativeEngine(this);
         setStatus(label + "…", muted);
         io.execute(() -> {
@@ -1418,7 +1625,11 @@ public final class MainActivity extends Activity {
                 JSONObject result = engine.request(method, path, body);
                 runOnUiThread(() -> { setStatus("已同步", success); successCallback.accept(result); });
             } catch (Exception error) {
-                runOnUiThread(() -> { setStatus(error.getMessage() == null ? "请求失败" : error.getMessage(), danger); toast(error.getMessage() == null ? "请求失败" : error.getMessage()); });
+                runOnUiThread(() -> {
+                    setStatus(error.getMessage() == null ? "请求失败" : error.getMessage(), danger);
+                    toast(error.getMessage() == null ? "请求失败" : error.getMessage());
+                    if (failureCallback != null) failureCallback.run();
+                });
             }
         });
     }
@@ -1427,12 +1638,97 @@ public final class MainActivity extends Activity {
         if (statusView != null) { statusView.setText(value); statusView.setTextColor(color); }
     }
 
-    private void addPageHeading(String kicker, String title) {
-        content.addView(text(kicker, 11, primary, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(3)));
-        content.addView(text(title, 20, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(14)));
+    private void renderLoading(LinearLayout target, String label) {
+        target.removeAllViews();
+        target.addView(empty(label));
+    }
+
+    private void renderRetry(LinearLayout target, String label, Runnable retry) {
+        target.removeAllViews();
+        target.addView(empty(label), marginParams(-1, -2, 0, 0, 0, dp(8)));
+        Button retryButton = button("重试", false);
+        retryButton.setOnClickListener(v -> retry.run());
+        target.addView(retryButton, new LinearLayout.LayoutParams(-1, dp(42)));
     }
 
     private void addSectionTitle(String title) { content.addView(text(title, 17, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8))); }
+
+    private ImageView coverImage(String source, String name) {
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackground(shape(0xffedf4f1, 0xffdce8e4, 10));
+        image.setContentDescription((name == null || name.isEmpty() ? "藏品" : name) + "封面");
+        loadCover(image, source);
+        return image;
+    }
+
+    private void loadCover(ImageView target, String source) {
+        String url = coverUrl(source);
+        if (url.isEmpty()) return;
+        target.setTag(url);
+        Bitmap cached = coverCache.get(url);
+        if (cached != null) {
+            target.setImageBitmap(cached);
+            return;
+        }
+        io.execute(() -> {
+            Bitmap bitmap = decodeCover(url);
+            if (bitmap == null) return;
+            coverCache.put(url, bitmap);
+            runOnUiThread(() -> {
+                Object active = target.getTag();
+                if (url.equals(active)) target.setImageBitmap(bitmap);
+            });
+        });
+    }
+
+    private String coverUrl(String source) {
+        String value = source == null ? "" : source.trim();
+        if (value.startsWith("//")) value = "https:" + value;
+        if (value.isEmpty()) return "";
+        Uri uri = Uri.parse(value);
+        String scheme = uri.getScheme();
+        if (!"https".equalsIgnoreCase(scheme) && !"http".equalsIgnoreCase(scheme)) return "";
+        return value;
+    }
+
+    private Bitmap decodeCover(String source) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(source).openConnection();
+            connection.setConnectTimeout(6000);
+            connection.setReadTimeout(8000);
+            connection.setInstanceFollowRedirects(true);
+            if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) return null;
+            try (InputStream input = connection.getInputStream()) {
+                Bitmap bitmap = BitmapFactory.decodeStream(input);
+                if (bitmap == null) return null;
+                int edge = dp(112);
+                int longest = Math.max(bitmap.getWidth(), bitmap.getHeight());
+                if (longest <= edge) return bitmap;
+                float ratio = edge / (float) longest;
+                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, Math.max(1, Math.round(bitmap.getWidth() * ratio)), Math.max(1, Math.round(bitmap.getHeight() * ratio)), true);
+                if (scaled != bitmap) bitmap.recycle();
+                return scaled;
+            }
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void openWallet(String link) {
+        if (link == null || link.trim().isEmpty()) {
+            toast("支付入口不可用");
+            return;
+        }
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(link)));
+        } catch (Exception error) {
+            toast("无法打开支付入口");
+        }
+    }
 
     private LinearLayout metricGrid(JSONObject data) {
         LinearLayout grid = horizontal(Color.TRANSPARENT); grid.setWeightSum(2f);
@@ -1600,9 +1896,135 @@ public final class MainActivity extends Activity {
     private double parseDouble(String value, double fallback) { try { return Double.parseDouble(value.trim()); } catch (Exception error) { return fallback; } }
     private double doubleValue(EditText input, double fallback) { return parseDouble(input.getText().toString(), fallback); }
     private int intValue(EditText input, int fallback) { try { return Integer.parseInt(input.getText().toString().trim()); } catch (Exception error) { return fallback; } }
+    private int intValue(String value, int fallback) { try { return Integer.parseInt(value == null ? "" : value.trim()); } catch (Exception error) { return fallback; } }
     private boolean isTerminalTaskStatus(String status) { return "payment_pending".equals(status) || "submitted".equals(status) || "cancelled".equals(status); }
+    private String synthesisPhaseLabel(String value) {
+        if ("preparing".equals(value)) return "即将开始";
+        if ("available".equals(value)) return "可合成";
+        if ("expired".equals(value) || "ended".equals(value)) return "已结束";
+        return value == null || value.isEmpty() ? "状态待确认" : value;
+    }
+    private String lotteryPhaseLabel(JSONObject activity) {
+        String phase = activity == null ? "" : activity.optString("phase", "");
+        if ("open".equals(phase)) return "进行中";
+        if ("not_started".equals(phase)) return "未开始";
+        if ("ended".equals(phase)) return "已结束";
+        if ("time_unverified".equals(phase)) return "时间未确认";
+        int status = activity == null ? -1 : activity.optInt("onlineStatus", -1);
+        if (status == 1 && activity.optBoolean("enableOpen", false)) return "进行中";
+        if (status == 0) return "未开始";
+        if (status == 2) return "已结束";
+        return "未开放";
+    }
+    private String lotteryAccountStatusLabel(JSONObject snapshot) {
+        String status = snapshot == null ? "" : snapshot.optString("status", "");
+        if ("ready".equals(status)) return "待抽奖";
+        if ("drawing".equals(status)) return "抽奖中";
+        if ("drawn".equals(status)) return "已抽取";
+        if ("submitted".equals(status)) return "已完成";
+        if ("no_chance".equals(status)) return "无抽奖次数";
+        if ("not_started".equals(status)) return "等待开始";
+        if ("ended".equals(status)) return "活动已结束";
+        if ("failed".equals(status)) return first(snapshot, "message", "status");
+        return "等待同步";
+    }
+    private String firstSalePhaseLabel(JSONObject item) {
+        String label = first(item, "saleStatusLabel");
+        if (!label.isEmpty()) return label;
+        String phase = item == null ? "" : item.optString("phase", "");
+        if ("preparing".equals(phase)) return "即将开售";
+        if ("available".equals(phase)) return "立即购买";
+        if ("expired_placeholder".equals(phase)) return "最近结束";
+        if ("sold_out".equals(phase)) return "已售罄";
+        if ("ended".equals(phase)) return "已结束";
+        return "状态未识别";
+    }
+    private String firstSaleTaskStatusLabel(String status) {
+        if ("scheduled".equals(status)) return "等待开始";
+        if ("running".equals(status)) return "提交中";
+        if ("verification_required".equals(status)) return "等待人工验证";
+        if ("payment_pending".equals(status)) return "待支付";
+        if ("submitted".equals(status)) return "已提交";
+        if ("partial".equals(status)) return "部分完成";
+        if ("failed".equals(status)) return "提交失败";
+        if ("expired".equals(status)) return "已过期";
+        if ("cancelled".equals(status)) return "已取消";
+        return "状态未知";
+    }
+    private String firstSaleRunLabel(JSONObject run) {
+        String status = run == null ? "" : run.optString("status", "");
+        String label;
+        if ("ready".equals(status)) label = "已就绪";
+        else if ("submitting".equals(status)) label = "提交中";
+        else if ("verification_required".equals(status)) label = "需要人机验证";
+        else if ("payment_pending".equals(status)) label = "待支付";
+        else if ("submitted".equals(status)) label = "已提交";
+        else if ("failed".equals(status)) label = "失败";
+        else label = "等待同步";
+        String message = first(run, "message");
+        return message.isEmpty() ? label : label + " · " + message;
+    }
+    private String tradeTypeLabel(String type) {
+        if ("consignment".equals(type)) return "寄售";
+        if ("wanted".equals(type)) return "求购";
+        return "交易";
+    }
+    private String tradeStatusLabel(String status, boolean retired) {
+        if (retired) {
+            if ("draft".equals(status)) return "待启动";
+            if ("scheduled".equals(status)) return "监控中";
+            if ("paused".equals(status)) return "已暂停";
+            if ("blocked".equals(status)) return "不可锁单";
+            if ("verification_required".equals(status)) return "需人机验证";
+            if ("locked".equals(status)) return "已锁单";
+            if ("payment_pending".equals(status)) return "待钱包支付";
+            return "待处理";
+        }
+        if ("draft".equals(status)) return "待启动";
+        if ("scheduled".equals(status)) return "监控中";
+        if ("waiting_price".equals(status)) return "监控中·等待行情";
+        if ("paused".equals(status)) return "已暂停";
+        if ("blocked".equals(status)) return "账号受限";
+        if ("verification_required".equals(status)) return "需人机验证";
+        if ("submitted".equals(status)) return "已提交";
+        if ("payment_pending".equals(status)) return "待钱包支付";
+        if ("cancelled".equals(status)) return "寄售已取消";
+        return "待处理";
+    }
+    private String taskResultLabel(String value) {
+        if ("waiting_price".equals(value)) return "等待行情触发";
+        if ("armed".equals(value)) return "已准备，等待提交条件";
+        if ("ready".equals(value)) return "已就绪";
+        if ("monitoring".equals(value)) return "监控中";
+        if ("monitor_ready".equals(value)) return "监控已就绪";
+        if ("locking".equals(value)) return "正在锁单";
+        if ("locked".equals(value)) return "已锁单";
+        if ("submitted".equals(value)) return "已提交";
+        if ("consignment_cancelled".equals(value)) return "寄售已取消";
+        if ("payment_pending".equals(value) || "retired_market_payment_pending".equals(value)) return "已创建订单，等待钱包支付";
+        return value == null || value.isEmpty() || value.contains("_") ? "任务状态已更新" : value;
+    }
+    private String platformOrderStatusLabel(JSONObject order, boolean pending) {
+        if (pending) return "待支付";
+        int status = intValue(first(order, "orderStatus", "status", "orderState"), -1);
+        int type = intValue(first(order, "orderType"), -1);
+        if (status == 0) return "待付款";
+        if (status == 1) return "支付成功";
+        if (status == 2) return type == 1 ? "求购中" : "寄售中";
+        if (status == 3) return "购买锁定";
+        if (status == 4) return "取消购买";
+        if (status == 5) return "已售出转移中";
+        if (status == 6) return "结算中";
+        if (status == 7) return "订单完成";
+        if (status == 8) return "求购退款中";
+        if (status == 9) return "退款重试中";
+        if (status == 10) return "订单取消";
+        if (status == 11) return "退款成功";
+        return "平台已记录";
+    }
     private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
     private String strategyMeta(JSONObject strategy) { return (strategy.optString("executionMode", "monitor").equals("live") ? "真实执行" : "仅监控") + " · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
     private JSONArray findArray(JSONObject object, String... keys) { if (object == null) return null; for (String key : keys) { JSONArray array = object.optJSONArray(key); if (array != null) return array; } return null; }
+    private JSONArray arrayOrEmpty(JSONArray source) { return source == null ? new JSONArray() : source; }
     private String pretty(JSONObject object) { if (object == null) return "暂无数据"; StringBuilder output = new StringBuilder(); Iterator<String> keys = object.keys(); while (keys.hasNext()) { String key = keys.next(); Object value = object.opt(key); output.append(key).append("：").append(value).append('\n'); } return output.toString(); }
 }
