@@ -43,7 +43,15 @@ jobs:
         env:
           IBOX_KEYSTORE_PATH: ${{ runner.temp }}/ibox-native.p12
           IBOX_KEYSTORE_PASSWORD: ${{ secrets.IBOX_ANDROID_SIGNING_PASSWORD }}
-        run: gradle :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee "$RUNNER_TEMP/ibox-gradle.log"
+      - name: Report build failure
+        if: failure()
+        run: |
+          message="$(awk '/ error: / { print; exit }' "$RUNNER_TEMP/ibox-gradle.log")"
+          if [ -z "$message" ]; then message="$(tail -n 1 "$RUNNER_TEMP/ibox-gradle.log")"; fi
+          echo "::error title=Gradle build::$message"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
