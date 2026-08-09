@@ -17,9 +17,6 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.webkit.JavascriptInterface;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -33,6 +30,9 @@ import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import com.geetest.captcha.GTCaptcha4Client;
+import com.geetest.captcha.GTCaptcha4Config;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -148,16 +148,6 @@ public final class MainActivity extends Activity {
         card.addView(connect, new LinearLayout.LayoutParams(-1, dp(48)));
         connect.setOnClickListener(v -> connect(input.getText().toString()));
         center.addView(card, marginParams(-1, -2, 0, 0, 0, dp(16)));
-
-        Button openWeb = button("打开网页登录", false);
-        openWeb.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(normalizeEndpoint(input.getText().toString()))));
-            } catch (Exception error) {
-                toast("无法打开地址");
-            }
-        });
-        center.addView(openWeb, new LinearLayout.LayoutParams(-1, dp(46)));
 
         Button addAccount = button("短信登录 / 添加账号", false);
         addAccount.setOnClickListener(v -> {
@@ -310,60 +300,32 @@ public final class MainActivity extends Activity {
             toast("验证参数为空");
             return;
         }
-        WebView webView = new WebView(this);
-        WebSettings settings = webView.getSettings();
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setBuiltInZoomControls(false);
-        settings.setDisplayZoomControls(false);
-        CaptchaBridge bridge = new CaptchaBridge(callback);
-        webView.addJavascriptInterface(bridge, "AndroidBridge");
-        String safeCaptchaId = captchaId.replace("\\", "\\\\").replace("'", "\\'");
-        String html = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                + "<style>body{font-family:sans-serif;margin:0;padding:16px;color:#172033;background:#fff}#captcha{min-height:120px}#state{color:#6b7890;font-size:14px;line-height:1.5}</style></head><body>"
-                + "<div id='captcha'></div><div id='state'>正在加载验证…</div>"
-                + "<script src='https://static.geetest.com/v4/gt4.js'></script><script>"
-                + "var cid='" + safeCaptchaId + "';"
-                + "function setState(v){document.getElementById('state').innerText=v;}"
-                + "if(typeof window.initGeetest4!=='function'){setState('验证脚本加载失败，请检查网络');}else{"
-                + "window.initGeetest4({captchaId:cid,product:'bind',language:'zho'},function(c){"
-                + "c.appendTo('#captcha');c.onReady(function(){setState('请完成滑块验证');if(c.showCaptcha)c.showCaptcha();});"
-                + "c.onSuccess(function(){var v=c.getValidate();if(v)AndroidBridge.submit(JSON.stringify(v));});"
-                + "c.onError(function(){setState('验证失败，请重试');});"
-                + "});}</script></body></html>";
-        webView.loadDataWithBaseURL("https://static.geetest.com/", html, "text/html", "UTF-8", null);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("人机验证")
-                .setView(webView)
-                .setNegativeButton("取消", null)
-                .create();
-        bridge.dialog = dialog;
-        dialog.setOnDismissListener(v -> webView.destroy());
-        dialog.show();
-        if (dialog.getWindow() != null) dialog.getWindow().setLayout(-1, dp(420));
-    }
-
-    private final class CaptchaBridge {
-        private final CaptchaCallback callback;
-        private AlertDialog dialog;
-
-        private CaptchaBridge(CaptchaCallback callback) {
-            this.callback = callback;
-        }
-
-        @JavascriptInterface
-        public void submit(String value) {
-            runOnUiThread(() -> {
-                try {
-                    JSONObject result = new JSONObject(value == null ? "{}" : value);
-                    if (dialog != null) dialog.dismiss();
-                    callback.onResult(result);
-                } catch (Exception error) {
-                    toast("验证结果无效");
-                }
-            });
-        }
+        GTCaptcha4Client client = GTCaptcha4Client.getClient(this);
+        GTCaptcha4Config config = new GTCaptcha4Config.Builder()
+                .setLanguage("zho")
+                .setCanceledOnTouchOutside(false)
+                .setTimeOut(10000)
+                .build();
+        client.init(captchaId, config)
+                .addOnSuccessListener((success, value) -> {
+                    client.destroy();
+                    if (!success || value == null || value.trim().isEmpty()) {
+                        runOnUiThread(() -> toast("人机验证未通过"));
+                        return;
+                    }
+                    runOnUiThread(() -> {
+                        try {
+                            callback.onResult(new JSONObject(value));
+                        } catch (Exception error) {
+                            toast("验证结果格式无效");
+                        }
+                    });
+                })
+                .addOnFailureListener(error -> {
+                    client.destroy();
+                    runOnUiThread(() -> toast("人机验证失败：" + (error == null ? "未知错误" : error)));
+                })
+                .verifyWithCaptcha();
     }
 
     private void setAppShell() {
@@ -1295,7 +1257,6 @@ public final class MainActivity extends Activity {
         Button addAccount = button("短信登录 / 添加账号", true);
         addAccount.setOnClickListener(v -> showLoginDialog());
         content.addView(addAccount, marginParams(-1, dp(44), 0, 0, 0, dp(10)));
-        Button webLogin = button("网页登录 / 添加账号", false); webLogin.setOnClickListener(v -> { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(endpoint))); } catch (Exception error) { toast("无法打开地址"); } }); content.addView(webLogin, new LinearLayout.LayoutParams(-1, dp(44)));
         load.performClick();
     }
 
