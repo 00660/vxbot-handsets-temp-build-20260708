@@ -16,7 +16,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/** Keeps the foreground notification in sync with server-backed panel state. */
+/** Runs the native task engine while the application is backgrounded. */
 public final class PanelSyncService extends Service {
     private static final String PREFS = "ibox_native_panel";
     private static final String CHANNEL_ID = "ibox_panel_sync";
@@ -29,11 +29,11 @@ public final class PanelSyncService extends Service {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        startForeground(NOTIFICATION_ID, notification("正在同步服务端状态"));
+        startForeground(NOTIFICATION_ID, notification("正在启动本机任务引擎"));
         engine = new NativeEngine(this);
         scheduler = Executors.newScheduledThreadPool(2);
-        scheduler.scheduleWithFixedDelay(this::tick, 15, 15, TimeUnit.SECONDS);
-        scheduler.scheduleWithFixedDelay(this::sync, 0, 15, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(this::tick, 0, 25, TimeUnit.MILLISECONDS);
+        scheduler.scheduleWithFixedDelay(this::sync, 0, 1, TimeUnit.SECONDS);
     }
 
     @Override

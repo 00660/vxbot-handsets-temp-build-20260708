@@ -72,7 +72,6 @@ public final class NativeEngine {
 
     private final NativeStore store;
     private final IBoxDirectClient client;
-    private final PanelApiClient panelClient;
     private final Map<String, IBoxDirectClient.SmsSession> smsSessions = new HashMap<>();
     private final Map<String, TaskCaptchaSession> taskCaptchaSessions = new HashMap<>();
     private volatile long lastMarketWatchAt;
@@ -81,25 +80,17 @@ public final class NativeEngine {
     public NativeEngine(Context context) {
         store = new NativeStore(context);
         client = new IBoxDirectClient(store.getOrCreateDeviceId());
-        panelClient = new PanelApiClient();
     }
 
     public NativeStore store() {
         return store;
     }
 
+    /**
+     * Transitional local router used by the existing native screens. No call
+     * leaves the device for a panel host: external requests use iBox directly.
+     */
     public JSONObject request(String method, String rawPath, JSONObject body) throws Exception {
-        Route route = Route.parse(rawPath);
-        String verb = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
-        if (verb.isEmpty()) verb = "GET";
-        if (isLocalLotteryToggle(route, verb)) return requestDirect(verb, rawPath, body);
-
-        JSONObject response = panelClient.request(verb, rawPath, body);
-        mirrorPanelState(route, verb, response);
-        return response;
-    }
-
-    private JSONObject requestDirect(String method, String rawPath, JSONObject body) throws Exception {
         Route route = Route.parse(rawPath);
         String verb = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
         if (verb.isEmpty()) verb = "GET";
@@ -202,55 +193,26 @@ public final class NativeEngine {
         throw new NativeException("原生功能路径不存在：" + route.path);
     }
 
-    private boolean isLocalLotteryToggle(Route route, String verb) {
-        return "POST".equals(verb)
-                && route.path.startsWith("/lottery/auto/")
-                && (route.path.endsWith("/enable") || route.path.endsWith("/disable"));
-    }
-
-    private void mirrorPanelState(Route route, String verb, JSONObject response) {
-        try {
-            if ("GET".equals(verb) && "/accounts".equals(route.path)) {
-                JSONArray accounts = response.optJSONArray("data");
-                if (accounts != null) {
-                    for (int index = 0; index < accounts.length(); index++) {
-                        JSONObject account = accounts.optJSONObject(index);
-                        if (account != null) store.upsertAccount(account);
-                    }
-                }
-                return;
-            }
-
-            if ("GET".equals(verb) && route.path.startsWith("/accounts/") && route.path.endsWith("/assets")) {
-                String phone = route.segment(2);
-                JSONObject account = store.getAccount(phone);
-                JSONObject assets = response.optJSONObject("data");
-                if (account != null && assets != null) {
-                    account.put("assetCache", objectOf(
-                            "data", assets,
-                            "updatedAt", Instant.now().toString(),
-                            "stale", false));
-                    store.upsertAccount(account);
-                }
-                return;
-            }
-
-            if ("POST".equals(verb) && route.path.startsWith("/accounts/") && route.path.endsWith("/remove")) {
-                store.removeAccount(route.segment(2));
-            }
-        } catch (Exception ignored) {
-            // The server response remains authoritative when local UI caching fails.
-        }
-    }
-
     public void tick() {
-        if (store.getLotteryTasks().length() == 0) return;
         synchronized (TICK_LOCK) {
+            try {
+                refreshMarketWatches(false);
+            } catch (Exception ignored) {
+                // Individual watch errors are persisted by refreshMarketWatches.
+            }
             try {
                 refreshLottery(false);
                 processLotteryAutoDraw();
             } catch (Exception ignored) {
-                // Keep the legacy local lottery toggle isolated from server-backed tasks.
+                // Network failures must not terminate the foreground engine.
+            }
+            try {
+                processSynthesisTasks();
+                processFirstSaleTasks();
+                processQuantStrategies();
+                processTradeTasks();
+            } catch (Exception ignored) {
+                // Task state carries the error for the corresponding card.
             }
         }
     }

@@ -9,7 +9,6 @@
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="iBox 量化面板"
-        android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity

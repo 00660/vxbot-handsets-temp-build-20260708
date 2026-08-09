@@ -441,7 +441,10 @@ public final class MainActivity extends Activity {
         request("同步账号", "GET", "/native/accounts", null, result -> {
             accounts = result.optJSONArray("data");
             if (accounts == null) accounts = new JSONArray();
-            reconcileSelectedPhone();
+            if (selectedPhone.isEmpty() && accounts.length() > 0) {
+                selectedPhone = accounts.optJSONObject(0).optString("phone");
+                engine.store().setSelectedPhone(selectedPhone);
+            }
             if ("accounts".equals(currentPage)) {
                 content.removeAllViews();
                 showAccounts();
@@ -452,27 +455,11 @@ public final class MainActivity extends Activity {
     private void renderAccounts(JSONObject result) {
         accounts = result.optJSONArray("data");
         if (accounts == null) accounts = new JSONArray();
-        reconcileSelectedPhone();
-        selectPage("accounts");
-    }
-
-    private void reconcileSelectedPhone() {
-        String firstAvailablePhone = "";
-        boolean selectedPhoneExists = false;
-        for (int i = 0; i < accounts.length(); i++) {
-            JSONObject account = accounts.optJSONObject(i);
-            String phone = account == null ? "" : account.optString("phone").trim();
-            if (phone.isEmpty()) continue;
-            if (firstAvailablePhone.isEmpty()) firstAvailablePhone = phone;
-            if (phone.equals(selectedPhone)) {
-                selectedPhoneExists = true;
-                break;
-            }
-        }
-        if (!selectedPhoneExists) {
-            selectedPhone = firstAvailablePhone;
+        if (accounts.length() > 0 && selectedPhone.isEmpty()) {
+            selectedPhone = accounts.optJSONObject(0).optString("phone");
             engine.store().setSelectedPhone(selectedPhone);
         }
+        selectPage("accounts");
     }
 
     private void renderAccountCards() {
