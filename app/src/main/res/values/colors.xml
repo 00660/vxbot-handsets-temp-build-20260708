@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="panel_background">#F5F7FB</color>
+    <color name="panel_background">#F8FBFC</color>
     <color name="panel_surface">#FFFFFF</color>
-    <color name="panel_ink">#172033</color>
-    <color name="panel_muted">#6B7890</color>
-    <color name="panel_primary">#1769E0</color>
-    <color name="panel_success">#16A673</color>
+    <color name="panel_ink">#1E2A34</color>
+    <color name="panel_muted">#7E8994</color>
+    <color name="panel_primary">#65C68B</color>
+    <color name="panel_success">#43AA6E</color>
 </resources>

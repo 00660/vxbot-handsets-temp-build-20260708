@@ -55,14 +55,15 @@ public final class MainActivity extends Activity {
             "资产总览", "合成任务", "行情监控", "量化策略", "交易执行", "自动抽奖", "首发抢购", "设置"
     };
 
-    private final int ink = Color.rgb(23, 32, 51);
-    private final int muted = Color.rgb(107, 120, 144);
-    private final int primary = Color.rgb(33, 102, 233);
-    private final int primaryDark = Color.rgb(20, 83, 197);
-    private final int success = Color.rgb(18, 148, 93);
-    private final int danger = Color.rgb(196, 55, 80);
-    private final int amber = Color.rgb(174, 111, 19);
-    private final int background = Color.rgb(245, 248, 252);
+    private final int ink = Color.rgb(30, 42, 52);
+    private final int muted = Color.rgb(126, 137, 148);
+    private final int primary = Color.rgb(101, 198, 139);
+    private final int primaryDark = Color.rgb(73, 168, 112);
+    private final int success = Color.rgb(67, 170, 110);
+    private final int danger = Color.rgb(205, 88, 103);
+    private final int amber = Color.rgb(196, 145, 50);
+    private final int infoBlue = Color.rgb(75, 132, 202);
+    private final int background = Color.rgb(248, 251, 252);
     private final int surface = Color.WHITE;
 
     private SharedPreferences preferences;
@@ -406,6 +407,20 @@ public final class MainActivity extends Activity {
     private void showAccounts() {
         content.removeAllViews();
         addPageHeading("资产概览", "账号与数字资产");
+        LinearLayout welcome = horizontal(0xffe9f7ef);
+        welcome.setGravity(Gravity.CENTER_VERTICAL);
+        welcome.setPadding(dp(16), dp(14), dp(16), dp(14));
+        welcome.setBackground(shape(0xffe9f7ef, 0xffd5ecdd, 18));
+        LinearLayout welcomeCopy = vertical(Color.TRANSPARENT);
+        welcomeCopy.addView(text("今天也要稳稳运行", 15, ink, Typeface.BOLD));
+        welcomeCopy.addView(text("原生面板已连接，任务状态随时可查", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(4), 0, 0));
+        welcome.addView(welcomeCopy, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView badge = text("在线", 12, success, Typeface.BOLD);
+        badge.setGravity(Gravity.CENTER);
+        badge.setPadding(dp(10), 0, dp(10), 0);
+        badge.setBackground(shape(0xffd8f0e1, 0xffc0e5cc, 18));
+        welcome.addView(badge, new LinearLayout.LayoutParams(dp(54), dp(32)));
+        content.addView(welcome, marginParams(-1, -2, 0, 0, 0, dp(12)));
         Button refresh = button("刷新账号", false);
         refresh.setOnClickListener(v -> loadAccounts());
         content.addView(refresh, marginParams(-1, dp(44), 0, 0, 0, dp(12)));
@@ -460,7 +475,7 @@ public final class MainActivity extends Activity {
             TextView selected = text(phone.equals(selectedPhone) ? "当前" : "切换", 12, phone.equals(selectedPhone) ? success : primary, Typeface.BOLD);
             selected.setGravity(Gravity.CENTER);
             selected.setPadding(dp(10), 0, dp(10), 0);
-            selected.setBackground(shape(phone.equals(selectedPhone) ? 0xffe7fbf2 : 0xffedf4ff, 0xffd2e0f1, 20));
+            selected.setBackground(shape(phone.equals(selectedPhone) ? 0xffe8f7ee : 0xffedf5fc, 0xffdbe9e1, 20));
             selected.setOnClickListener(v -> {
                 selectedPhone = phone;
                 preferences.edit().putString("selectedPhone", phone).apply();
@@ -1297,7 +1312,7 @@ public final class MainActivity extends Activity {
     private LinearLayout metricGrid(JSONObject data) {
         LinearLayout grid = horizontal(Color.TRANSPARENT); grid.setWeightSum(2f);
         String[][] values = {{"藏品总数", first(data, "total", "totalCount", "count")}, {"总估值", money(first(data, "totalValue", "valuation", "value"))}, {"可交易", first(data, "tradeable", "tradeableCount", "usableCount")}, {"成交额", money(first(data, "historyAmount", "completedAmount", "totalSellAmount"))}};
-        for (String[] value : values) { LinearLayout box = vertical(0xfff5f8fc); box.setPadding(dp(10), dp(10), dp(10), dp(10)); box.addView(text(value[0], 11, muted, Typeface.NORMAL)); box.addView(text(value[1].isEmpty() ? "--" : value[1], 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(68), 1f); params.setMargins(0, 0, dp(6), 0); grid.addView(box, params); }
+        for (String[] value : values) { LinearLayout box = vertical(0xfff0f8f4); box.setPadding(dp(10), dp(10), dp(10), dp(10)); box.addView(text(value[0], 11, muted, Typeface.NORMAL)); box.addView(text(value[1].isEmpty() ? "--" : value[1], 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(68), 1f); params.setMargins(0, 0, dp(6), 0); grid.addView(box, params); }
         return grid;
     }
 
@@ -1307,15 +1322,15 @@ public final class MainActivity extends Activity {
     private Spinner spinner(String[] values, String selected) { Spinner spinner = new Spinner(this); ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values); spinner.setAdapter(adapter); for (int i = 0; i < values.length; i++) if (values[i].equals(selected)) spinner.setSelection(i); return spinner; }
     private EditText numberInput(String hint, String value) { EditText input = input(hint); input.setText(value == null ? "" : value); input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL); return input; }
     private EditText passwordInput(String hint) { EditText input = input(hint); input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); return input; }
-    private EditText input(String hint) { EditText input = new EditText(this); input.setHint(hint); input.setHintTextColor(0xff94a3b8); input.setTextColor(ink); input.setTextSize(14); input.setSingleLine(true); input.setPadding(dp(13), 0, dp(13), 0); input.setBackground(shape(surface, 0xffcbd5e1, 10)); return input; }
+    private EditText input(String hint) { EditText input = new EditText(this); input.setHint(hint); input.setHintTextColor(0xff8795a0); input.setTextColor(ink); input.setTextSize(14); input.setSingleLine(true); input.setPadding(dp(13), 0, dp(13), 0); input.setBackground(shape(surface, 0xffdbe7e4, 12)); return input; }
 
-    private LinearLayout card() { LinearLayout card = vertical(surface); card.setPadding(dp(17), dp(16), dp(17), dp(16)); card.setBackground(shape(surface, 0xffe4eaf2, 15)); return card; }
+    private LinearLayout card() { LinearLayout card = vertical(surface); card.setPadding(dp(17), dp(16), dp(17), dp(16)); card.setBackground(shape(surface, 0xffe5eeeb, 18)); card.setElevation(dp(2)); return card; }
     private LinearLayout vertical(int color) { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); view.setBackgroundColor(color); return view; }
     private LinearLayout horizontal(int color) { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.HORIZONTAL); view.setBackgroundColor(color); return view; }
-    private TextView empty(String value) { TextView view = text(value, 13, muted, Typeface.NORMAL); view.setGravity(Gravity.CENTER); view.setPadding(dp(12), dp(24), dp(12), dp(24)); view.setBackground(shape(surface, 0xffe4eaf2, 14)); return view; }
+    private TextView empty(String value) { TextView view = text(value, 13, muted, Typeface.NORMAL); view.setGravity(Gravity.CENTER); view.setPadding(dp(12), dp(24), dp(12), dp(24)); view.setBackground(shape(surface, 0xffe5eeeb, 16)); return view; }
     private TextView text(String value, float size, int color, int style) { TextView view = new TextView(this); view.setText(value == null ? "" : value); view.setTextSize(size); view.setTextColor(color); view.setTypeface(Typeface.DEFAULT, style); view.setLineSpacing(dp(2), 1f); return view; }
     private Button button(String value, boolean active) { Button button = new Button(this); button.setAllCaps(false); button.setText(value); button.setTextSize(13); button.setTypeface(Typeface.DEFAULT, Typeface.BOLD); button.setMinHeight(dp(42)); button.setPadding(dp(10), 0, dp(10), 0); styleButton(button, active); return button; }
-    private void styleButton(Button button, boolean active) { button.setTextColor(active ? Color.WHITE : ink); button.setBackground(shape(active ? primary : surface, active ? primary : 0xffd6e0ed, 10)); }
+    private void styleButton(Button button, boolean active) { button.setTextColor(active ? Color.WHITE : ink); button.setBackground(shape(active ? primary : surface, active ? primary : 0xffdce8e4, 12)); button.setElevation(active ? dp(1) : 0); }
     private GradientDrawable shape(int fill, int stroke, int radius) { GradientDrawable drawable = new GradientDrawable(); drawable.setColor(fill); if (stroke != 0) drawable.setStroke(dp(1), stroke); drawable.setCornerRadius(dp(radius)); return drawable; }
     private LinearLayout.LayoutParams marginParams(int width, int height, int left, int top, int right, int bottom) { LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height); params.setMargins(left, top, right, bottom); return params; }
     private void toast(String message) { if (!isFinishing()) Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
