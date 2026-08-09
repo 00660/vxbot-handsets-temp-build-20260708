@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 240
-        versionName "0.1.240-portrait-rotation-lock"
+        versionCode 241
+        versionName "0.1.241-paused-ocr-dump"
         multiDexKeepProguard file("multidex-keep.pro")
         externalNativeBuild {
             cmake {

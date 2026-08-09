@@ -969,7 +969,6 @@ public final class BotService extends Service {
         return ACTION_HANDLE_NOTIFICATION.equals(action)
                 || ACTION_START.equals(action)
                 || ACTION_TEST_OCR.equals(action)
-                || ACTION_DUMP_OCR.equals(action)
                 || ACTION_BROADCAST_TEXT.equals(action)
                 || ACTION_DEBUG_OPEN_IMAGE_SHARE.equals(action)
                 || ACTION_MORNING_GREETING.equals(action);
