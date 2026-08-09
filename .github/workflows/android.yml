@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - native-android-panel
     paths:
       - "app/**"
       - "build.gradle"
