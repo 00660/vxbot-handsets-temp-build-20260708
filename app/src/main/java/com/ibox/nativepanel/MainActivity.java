@@ -3,12 +3,14 @@ package com.ibox.nativepanel;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -17,6 +19,8 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -78,7 +82,6 @@ public final class MainActivity extends Activity {
     private final List<Button> navButtons = new ArrayList<>();
     private String smsSessionId = "";
     private String smsPhone = "";
-    private EditText loginCodeInput;
 
     private interface CaptchaCallback {
         void onResult(JSONObject result);
@@ -129,29 +132,45 @@ public final class MainActivity extends Activity {
     }
 
     private void showLoginDialog() {
-        LinearLayout form = vertical(Color.TRANSPARENT);
-        EditText phone = input("手机号");
+        Dialog dialog = new Dialog(this);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout sheet = vertical(surface);
+        sheet.setPadding(dp(20), dp(18), dp(20), dp(20));
+        sheet.setBackground(shape(surface, 0xffe5eeeb, 16));
+
+        LinearLayout header = horizontal(Color.TRANSPARENT);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(text("短信登录", 21, ink, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(44), 1));
+        Button close = button("×", false);
+        close.setTextSize(22);
+        close.setPadding(0, 0, 0, 0);
+        close.setContentDescription("关闭登录");
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        sheet.addView(header, marginParams(-1, dp(44), 0, 0, 0, dp(14)));
+
+        EditText phone = input("11 位手机号");
         phone.setInputType(InputType.TYPE_CLASS_PHONE);
         EditText code = input("短信验证码");
         code.setInputType(InputType.TYPE_CLASS_NUMBER);
         code.setEnabled(false);
-        loginCodeInput = code;
         Button send = button("获取验证码", true);
-        TextView state = text("需要先完成人机验证", 12, muted, Typeface.NORMAL);
-        form.addView(labelled("手机号", phone));
+        Button login = button("登录", false);
+        login.setEnabled(false);
+        login.setAlpha(0.55f);
+        TextView state = text("", 12, muted, Typeface.NORMAL);
+        state.setMinHeight(dp(22));
+
+        sheet.addView(labelled("手机号", phone));
         LinearLayout codeRow = horizontal(Color.TRANSPARENT);
         codeRow.addView(code, new LinearLayout.LayoutParams(0, dp(46), 1));
-        codeRow.addView(send, marginParams(dp(112), dp(46), dp(8), 0, 0, 0));
-        form.addView(text("短信验证码", 12, muted, Typeface.BOLD), marginParams(-1, -2, 0, dp(2), 0, dp(4)));
-        form.addView(codeRow, marginParams(-1, -2, 0, 0, 0, dp(6)));
-        form.addView(state, marginParams(-1, -2, 0, 0, 0, dp(4)));
+        codeRow.addView(send, marginParams(dp(124), dp(46), dp(8), 0, 0, 0));
+        sheet.addView(text("短信验证码", 12, muted, Typeface.BOLD), marginParams(-1, -2, 0, dp(2), 0, dp(4)));
+        sheet.addView(codeRow, marginParams(-1, -2, 0, 0, 0, dp(6)));
+        sheet.addView(state, marginParams(-1, dp(22), 0, dp(4), 0, dp(12)));
+        sheet.addView(login, new LinearLayout.LayoutParams(-1, dp(48)));
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("短信登录")
-                .setView(form)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("登录", null)
-                .create();
         send.setOnClickListener(v -> {
             String value = phone.getText().toString().trim();
             if (!value.matches("\\d{11}")) {
@@ -165,6 +184,7 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
             send.setEnabled(false);
+            send.setAlpha(0.55f);
             state.setText("正在创建验证会话…");
             state.setTextColor(muted);
             request("创建短信会话", "POST", "/native/sms/session", body, result -> {
@@ -174,6 +194,7 @@ public final class MainActivity extends Activity {
                 String captchaId = data == null ? "" : data.optString("captchaId", "");
                 if (smsSessionId.isEmpty() || captchaId.isEmpty()) {
                     send.setEnabled(true);
+                    send.setAlpha(1f);
                     state.setText("服务未返回验证参数");
                     state.setTextColor(danger);
                     return;
@@ -187,15 +208,21 @@ public final class MainActivity extends Activity {
                     }
                     request("发送短信", "POST", "/native/sms/captcha/" + Uri.encode(smsSessionId), captchaBody, smsResult -> {
                         code.setEnabled(true);
+                        code.setAlpha(1f);
                         send.setEnabled(false);
+                        styleButton(send, false);
+                        send.setText("已发送");
                         state.setText("短信已发送，请输入验证码");
                         state.setTextColor(success);
+                        login.setEnabled(true);
+                        login.setAlpha(1f);
+                        styleButton(login, true);
                         code.requestFocus();
                     });
                 });
             });
         });
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        login.setOnClickListener(v -> {
             String value = code.getText().toString().trim();
             if (smsSessionId.isEmpty() || smsPhone.isEmpty()) {
                 state.setText("请先获取短信验证码");
@@ -218,18 +245,24 @@ public final class MainActivity extends Activity {
                 smsSessionId = "";
                 smsPhone = "";
                 dialog.dismiss();
-                if (content == null) {
-                    setAppShell();
-                    loadAccounts();
-                } else {
-                    loadAccounts();
-                }
+                loadAccounts();
                 if (backgroundSyncEnabled()) startPanelSyncService();
                 toast("账号已添加");
             });
-        }));
-        dialog.setOnDismissListener(v -> loginCodeInput = null);
+        });
+        dialog.setOnDismissListener(v -> {
+            smsSessionId = "";
+            smsPhone = "";
+        });
+        dialog.setContentView(sheet);
         dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int width = Math.min(dp(480), getResources().getDisplayMetrics().widthPixels - dp(32));
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+            window.setGravity(Gravity.CENTER);
+        }
     }
 
     private void showCaptchaDialog(String captchaId, CaptchaCallback callback) {
@@ -267,6 +300,10 @@ public final class MainActivity extends Activity {
 
     private void setAppShell() {
         LinearLayout root = vertical(background);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         LinearLayout toolbar = horizontal(surface);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(18), dp(10), dp(14), dp(10));
@@ -308,6 +345,7 @@ public final class MainActivity extends Activity {
         statusView.setPadding(dp(16), 0, dp(16), 0);
         root.addView(statusView, new LinearLayout.LayoutParams(-1, dp(30)));
         setContentView(root);
+        root.requestApplyInsets();
     }
 
     private void selectPage(String key) {
