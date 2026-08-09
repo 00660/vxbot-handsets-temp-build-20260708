@@ -184,7 +184,7 @@ public final class PanelImageDeliveryFlow {
                 BotLog.i(context, "panel.share.confirm.ready", "确认页分区已就绪 target=" + target
                         + " sendTo=" + current.sendTo.rect.flattenToString()
                         + " targetRect=" + current.target.rect.flattenToString()
-                        + " sendRect=" + current.send.rect.flattenToString()
+                        + " sendRect=" + describeRect(current.send)
                         + " attempts=" + attempts);
                 return true;
             }
@@ -203,14 +203,15 @@ public final class PanelImageDeliveryFlow {
             attempts++;
             ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
             Rect greenButton = current == null ? null : OcrHelper.findShareConfirmGreenSendButton(context, hs);
-            if (current != null && greenButton != null && overlapsSendLabel(greenButton, current.send.rect)) {
+            if (current != null && greenButton != null
+                    && (current.send == null || overlapsSendLabel(greenButton, current.send.rect))) {
                 hs.tap(greenButton.centerX(), greenButton.centerY());
                 BotLog.i(context, "panel.share.send.green.tap", "点击绿色发送按钮 target=" + target
-                        + " sendRect=" + current.send.rect.flattenToString()
+                        + " sendRect=" + describeRect(current.send)
                         + " greenRect=" + greenButton.flattenToString() + " attempts=" + attempts);
                 return true;
             }
-            if (current != null) {
+            if (current != null && current.send != null) {
                 stableFrames = sameConfirmState(previous, current) ? stableFrames + 1 : 1;
                 previous = current;
                 if (stableFrames >= STABLE_FRAME_COUNT) {
@@ -337,7 +338,7 @@ public final class PanelImageDeliveryFlow {
                 send = item;
             }
         }
-        return sendTo != null && target != null && send != null
+        return sendTo != null && target != null
                 ? new ConfirmState(sendTo, target, send)
                 : null;
     }
@@ -414,8 +415,11 @@ public final class PanelImageDeliveryFlow {
     private boolean sameConfirmState(ConfirmState first, ConfirmState second) {
         return first != null && second != null
                 && sameVisualItem(first.sendTo, second.sendTo)
-                && sameVisualItem(first.target, second.target)
-                && sameVisualItem(first.send, second.send);
+                && sameVisualItem(first.target, second.target);
+    }
+
+    private String describeRect(OcrHelper.OcrItem item) {
+        return item == null ? "none" : item.rect.flattenToString();
     }
 
     private String groupNameKey(String value) {
