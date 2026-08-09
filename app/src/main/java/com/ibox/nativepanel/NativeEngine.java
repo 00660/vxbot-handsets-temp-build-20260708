@@ -1829,21 +1829,21 @@ public final class NativeEngine {
                     putQuietly(strategy, "status", "verification_required");
                     putQuietly(strategy, "enabled", true);
                     putQuietly(strategy, "nextCheckAt", "");
-                    addEvent(strategy, "verification_required", failure);
+                    addEventQuietly(strategy, "verification_required", failure);
                 } else if (failure.contains("价格") && (failure.contains("下限") || failure.contains("上限") || failure.contains("整数"))) {
                     putQuietly(strategy, "enabled", false);
                     putQuietly(strategy, "status", "price_out_of_range");
                     putQuietly(strategy, "nextCheckAt", "");
-                    addEvent(strategy, "price_range_blocked", failure);
+                    addEventQuietly(strategy, "price_range_blocked", failure);
                 } else if (failure.contains("交易密码")) {
                     putQuietly(strategy, "status", "needs_sell_password");
                     putQuietly(strategy, "nextCheckAt", "");
-                    addEvent(strategy, "password_required", failure);
+                    addEventQuietly(strategy, "password_required", failure);
                 } else if (failure.contains("暂不支持") || failure.contains("账号不存在")) {
                     putQuietly(strategy, "enabled", false);
                     putQuietly(strategy, "status", "blocked");
                     putQuietly(strategy, "nextCheckAt", "");
-                    addEvent(strategy, "blocked", failure);
+                    addEventQuietly(strategy, "blocked", failure);
                 } else {
                     int failures = Math.min(6, Math.max(0, strategy.optInt("consecutiveFailures", 0)) + 1);
                     long delay = Math.min(60_000L, 1000L * (1L << Math.min(5, failures)));
@@ -1852,7 +1852,7 @@ public final class NativeEngine {
                     putQuietly(strategy, "lastFailureAt", Instant.now().toString());
                     putQuietly(strategy, "lastRetryAfterMs", delay);
                     putQuietly(strategy, "nextCheckAt", Instant.ofEpochMilli(System.currentTimeMillis() + delay).toString());
-                    addEvent(strategy, "retry_scheduled", failure);
+                    addEventQuietly(strategy, "retry_scheduled", failure);
                 }
             }
             putQuietly(strategy, "lastCheckAt", Instant.now().toString());
@@ -3044,6 +3044,14 @@ public final class NativeEngine {
         }
         events.put(objectOf("type", type, "message", detail, "time", Instant.now().toString()));
         while (events.length() > 20) events.remove(0);
+    }
+
+    private static void addEventQuietly(JSONObject target, String type, String detail) {
+        try {
+            addEvent(target, type, detail);
+        } catch (JSONException ignored) {
+            // 状态记录失败不能覆盖正在处理的原始任务异常。
+        }
     }
 
     private static JSONObject ok(Object data) throws JSONException {
