@@ -42,6 +42,9 @@ final class Wm {
     }
 
     byte[] setRotation(int rotation) {
+        if (rotation != 0) {
+            return err("rotation-locked-portrait");
+        }
         try {
             Object iwm = Binders.asInterface(
                     "android.view.IWindowManager$Stub", Binders.service("window"));

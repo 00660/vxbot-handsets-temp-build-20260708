@@ -818,6 +818,10 @@ public final class Server {
             writeErrAndTerminator(out, "BLOCKED:protected-package:" + WECHAT_PACKAGE);
             return;
         }
+        if (isRotationMutationShell(tail)) {
+            writeErrAndTerminator(out, "BLOCKED:rotation-locked-portrait");
+            return;
+        }
         java.util.List<String> argv = new java.util.ArrayList<>();
         for (String t : tail.split("\\s+")) argv.add(t);
         h.shellExec.run(argv, out);
@@ -839,6 +843,14 @@ public final class Server {
                 || value.contains("killall")
                 || value.contains("pkill")
                 || value.contains("kill ");
+    }
+
+    private static boolean isRotationMutationShell(String command) {
+        String value = command.toLowerCase(Locale.ROOT);
+        return value.contains("settings put")
+                        && (value.contains("accelerometer_rotation") || value.contains("user_rotation"))
+                || value.contains("wm user-rotation")
+                || value.contains("cmd window user-rotation");
     }
 
     private static final class CommandAudit {

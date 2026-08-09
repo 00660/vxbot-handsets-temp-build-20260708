@@ -67,6 +67,8 @@ public final class Main {
             h.shellExec = new ShellExec();
             h.wm = new Wm((android.hardware.display.DisplayManager)
                     sysCtx.getSystemService(android.content.Context.DISPLAY_SERVICE));
+            System.err.println("hsd rotation lock: "
+                    + new String(h.wm.setRotation(0), java.nio.charset.StandardCharsets.UTF_8));
             h.lifecycle = new Lifecycle();
             h.uiEvents = new UiEvents(ua);
             h.nodes = new NodeActions(ua);

@@ -47,6 +47,9 @@ final class SettingsApi {
     }
 
     byte[] put(String namespace, String key, String value) {
+        if (isRotationSetting(namespace, key) && !"0".equals(value == null ? "" : value.trim())) {
+            return err("rotation-locked-portrait");
+        }
         if (direct.tryPut(namespace, key, value)) {
             return "ok".getBytes(StandardCharsets.UTF_8);
         }
@@ -92,5 +95,12 @@ final class SettingsApi {
 
     private static byte[] err(String tail) {
         return ("ERR:" + tail).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static boolean isRotationSetting(String namespace, String key) {
+        if (!"system".equalsIgnoreCase(namespace)) {
+            return false;
+        }
+        return "accelerometer_rotation".equals(key) || "user_rotation".equals(key);
     }
 }
