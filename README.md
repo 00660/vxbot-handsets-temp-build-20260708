@@ -1,6 +1,6 @@
 # iBox Native Android
 
-这是独立运行的 iBox 原生 Android 客户端。APK 内没有 WebView、没有 5000 面板地址，也不会转发到容器；主导航、账号、合成、行情、量化、交易、抽奖、首发和设置均使用 Android 原生控件绘制。
+这是独立运行的 iBox 原生 Android 客户端。面板自身没有 WebView、没有 5000 面板地址，也不会转发到容器；主导航、账号、合成、行情、量化、交易、抽奖、首发和设置均使用 Android 原生控件绘制。短信与任务验证码保留官方 GeeTest Android SDK，其内部验证页面由服务商 SDK 提供。
 
 当前版本包含：
 

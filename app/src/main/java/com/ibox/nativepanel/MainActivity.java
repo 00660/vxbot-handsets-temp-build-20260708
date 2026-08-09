@@ -2,16 +2,17 @@ package com.ibox.nativepanel;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -21,16 +22,13 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -82,6 +80,11 @@ public final class MainActivity extends Activity {
     private final List<Button> navButtons = new ArrayList<>();
     private String smsSessionId = "";
     private String smsPhone = "";
+    private int bottomSystemInset;
+    private TextView transientMessage;
+    private final Runnable dismissTransientMessage = () -> {
+        if (transientMessage != null) transientMessage.setVisibility(View.GONE);
+    };
 
     private interface CaptchaCallback {
         void onResult(JSONObject result);
@@ -101,7 +104,6 @@ public final class MainActivity extends Activity {
         setAppShell();
         showAccounts();
         loadAccounts();
-        requestNotificationPermission();
         if (engine.store().getAccounts().length() > 0 && backgroundSyncEnabled()) startPanelSyncService();
     }
 
@@ -132,7 +134,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showLoginDialog() {
-        Dialog dialog = new Dialog(this);
+        Dialog dialog = new Dialog(this, R.style.ProjectDialogTheme);
         dialog.setCanceledOnTouchOutside(true);
 
         LinearLayout sheet = vertical(surface);
@@ -301,7 +303,9 @@ public final class MainActivity extends Activity {
     private void setAppShell() {
         LinearLayout root = vertical(background);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
+            bottomSystemInset = insets.getSystemWindowInsetBottom();
             view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            updateTransientMessageMargin();
             return insets;
         });
         LinearLayout toolbar = horizontal(surface);
@@ -334,6 +338,7 @@ public final class MainActivity extends Activity {
         root.addView(navScroll, new LinearLayout.LayoutParams(-1, dp(58)));
 
         ScrollView scroll = new ScrollView(this);
+        styleScroll(scroll);
         scroll.setFillViewport(true);
         content = vertical(Color.TRANSPARENT);
         content.setPadding(dp(16), dp(14), dp(16), dp(18));
@@ -589,12 +594,13 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmRemoveAccount(String phone) {
-        new AlertDialog.Builder(this).setTitle("移除账号").setMessage("移除后会暂停该账号未完成任务。")
-                .setNegativeButton("取消", null).setPositiveButton("确认移除", (dialog, which) ->
-                        request("移除账号", "POST", "/native/accounts/" + Uri.encode(phone) + "/remove", null, result -> {
-                            if (phone.equals(selectedPhone)) selectedPhone = engine.store().getSelectedPhone();
-                            loadAccounts();
-                        })).show();
+        showProjectDialog("移除账号", text("移除后会暂停该账号未完成任务。", 14, muted, Typeface.NORMAL), "确认移除", dialog -> {
+            dialog.dismiss();
+            request("移除账号", "POST", "/native/accounts/" + Uri.encode(phone) + "/remove", null, result -> {
+                if (phone.equals(selectedPhone)) selectedPhone = engine.store().getSelectedPhone();
+                loadAccounts();
+            });
+        });
     }
 
     private void showSynthesis() {
@@ -671,9 +677,7 @@ public final class MainActivity extends Activity {
         form.addView(text(first(activity, "title", "name", "activityName", syntheticId), 15, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
         form.addView(count, new LinearLayout.LayoutParams(-1, dp(46)));
         String title = scheduled ? "加入合成定时任务" : "立即提交合成";
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(form)
-                .setNegativeButton("取消", null).setPositiveButton("确认", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog(title, form, "确认", dialog -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("syntheticId", syntheticId);
@@ -690,8 +694,7 @@ public final class MainActivity extends Activity {
                 else showJsonDialog("合成结果", result.optJSONObject("data"));
                 showSynthesis();
             });
-        }));
-        dialog.show();
+        });
     }
 
     private void showMarket() {
@@ -795,9 +798,7 @@ public final class MainActivity extends Activity {
         EditText fall = numberInput("下跌阈值 %", number(watch, "fallThresholdPercent", "3"));
         form.addView(rise, marginParams(-1, dp(48), 0, 0, 0, dp(10)));
         form.addView(fall, new LinearLayout.LayoutParams(-1, dp(48)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("行情提醒阈值").setView(form)
-                .setNegativeButton("取消", null).setPositiveButton("保存", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog("行情提醒阈值", form, "保存", dialog -> {
             double riseValue = parseDouble(rise.getText().toString(), -1);
             double fallValue = parseDouble(fall.getText().toString(), -1);
             if (riseValue < .1 || riseValue > 100 || fallValue < .1 || fallValue > 100) {
@@ -810,8 +811,7 @@ public final class MainActivity extends Activity {
                 dialog.dismiss();
                 loadWatches(target);
             });
-        }));
-        dialog.show();
+        });
     }
 
     private void cancelWatch(String id, LinearLayout target) {
@@ -917,12 +917,12 @@ public final class MainActivity extends Activity {
         scroll.addView(form, new ScrollView.LayoutParams(-1, -2));
         String title = first(target, "name", "title", "groupId", "id");
         form.addView(text(title, 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(12)));
-        Spinner mode = spinner(new String[]{"monitor", "live"}, existing == null ? "monitor" : existing.optString("executionMode", "monitor"));
+        OptionField mode = optionField("执行方式", new String[]{"monitor", "live"}, existing == null ? "monitor" : existing.optString("executionMode", "monitor"));
         form.addView(labelled("执行方式", mode));
-        CheckBox buyEnabled = check("启用买入", existing == null || existing.optJSONObject("buy") == null || existing.optJSONObject("buy").optBoolean("enabled", true));
+        ProjectToggle buyEnabled = toggle("启用买入", existing == null || existing.optJSONObject("buy") == null || existing.optJSONObject("buy").optBoolean("enabled", true));
         EditText buyPrice = numberInput("最高买入价", existing == null ? moneyValue(first(target, "floorPrice", "price")) : number(existing.optJSONObject("buy"), "maxPrice", ""));
         form.addView(buyEnabled); form.addView(buyPrice, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        CheckBox sellEnabled = check("启用卖出", existing != null && existing.optJSONObject("sell") != null && existing.optJSONObject("sell").optBoolean("enabled", false));
+        ProjectToggle sellEnabled = toggle("启用卖出", existing != null && existing.optJSONObject("sell") != null && existing.optJSONObject("sell").optBoolean("enabled", false));
         EditText sellTrigger = numberInput("卖出触发行情价", existing == null ? "" : number(existing.optJSONObject("sell"), "minPrice", ""));
         EditText sellPrice = numberInput("寄售价（整数）", existing == null ? "" : number(existing.optJSONObject("sell"), "sellPrice", ""));
         form.addView(sellEnabled); form.addView(sellTrigger, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(sellPrice, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
@@ -931,15 +931,14 @@ public final class MainActivity extends Activity {
         EditText volatility = numberInput("单周期最大波动 %", existing == null ? "0" : number(existing, "volatilityLimitPercent", "0"));
         EditText cooldown = numberInput("触发后冷却分钟", existing == null ? "10" : number(existing, "cooldownMinutes", "10"));
         EditText interval = numberInput("监控间隔", existing == null ? "15" : number(existing, "intervalValue", "15"));
-        Spinner intervalUnit = spinner(new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
+        OptionField intervalUnit = optionField("间隔单位", new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
         EditText password = passwordInput("交易密码（真实执行时填写）");
         form.addView(maxPosition, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(minProfit, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(volatility, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(cooldown, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(labelled("间隔单位", intervalUnit)); form.addView(password, marginParams(-1, dp(46), 0, 0, 0, 0));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(existing == null ? "配置量化策略" : "修改量化策略").setView(scroll).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, "保存", dialog -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("phone", selectedPhone); body.put("groupId", first(target, "groupId", "id")); body.put("title", title); body.put("cover", first(target, "cover", "image"));
-                body.put("executionMode", mode.getSelectedItem().toString()); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.getSelectedItem().toString());
+                body.put("executionMode", mode.value()); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.value());
                 body.put("maxPosition", intValue(maxPosition, 1)); body.put("minNetProfit", doubleValue(minProfit, 0)); body.put("volatilityLimitPercent", doubleValue(volatility, 0)); body.put("cooldownMinutes", intValue(cooldown, 10));
                 JSONObject buy = new JSONObject(); buy.put("enabled", buyEnabled.isChecked()); buy.put("maxPrice", doubleValue(buyPrice, 0)); buy.put("quantity", 1); body.put("buy", buy);
                 JSONObject sell = new JSONObject(); sell.put("enabled", sellEnabled.isChecked()); sell.put("minPrice", doubleValue(sellTrigger, 0)); sell.put("sellPrice", intValue(sellPrice, 0)); sell.put("quantity", 1); body.put("sell", sell);
@@ -948,8 +947,7 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) { }
             String path = existing == null ? "/native/quant/strategies" : "/native/quant/strategies/" + Uri.encode(existing.optString("id"));
             request("保存策略", existing == null ? "POST" : "PUT", path, body, result -> { dialog.dismiss(); selectPage("quant"); });
-        }));
-        dialog.show();
+        });
     }
 
     private void quantAction(String id, String action, ViewGroup target) {
@@ -1008,9 +1006,7 @@ public final class MainActivity extends Activity {
         EditText max = numberInput("区间最高价", moneyValue(first(item, "floorPrice", "price")));
         form.addView(min, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         form.addView(max, new LinearLayout.LayoutParams(-1, dp(46)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("配置捡漏任务").setView(form)
-                .setNegativeButton("取消", null).setPositiveButton("保存并启动", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog("配置捡漏任务", form, "保存并启动", dialog -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("phone", selectedPhone);
@@ -1027,33 +1023,30 @@ public final class MainActivity extends Activity {
                 toast("捡漏任务已保存");
                 showTrade();
             });
-        }));
-        dialog.show();
+        });
     }
 
     private void showTradeDialog(JSONObject item) {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
         ScrollView scroll = new ScrollView(this); LinearLayout form = vertical(Color.TRANSPARENT); scroll.addView(form, new ScrollView.LayoutParams(-1, -2));
-        Spinner type = spinner(new String[]{"wanted", "consignment"}, "wanted"); form.addView(labelled("任务类型", type));
+        OptionField type = optionField("任务类型", new String[]{"wanted", "consignment"}, "wanted"); form.addView(labelled("任务类型", type));
         EditText price = numberInput("价格", moneyValue(first(item, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText trigger = numberInput("寄售触发行价（寄售时填写）", ""); form.addView(trigger, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText quantity = numberInput("数量", "1"); form.addView(quantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText interval = numberInput("监控间隔（秒）", "5"); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText paymentCode = numberInput("求购支付通道编号", ""); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        CheckBox agreement = check("我已阅读并同意交易服务协议", false); form.addView(agreement, marginParams(-1, -2, 0, 0, 0, dp(4)));
+        ProjectToggle agreement = toggle("我已阅读并同意交易服务协议", false); form.addView(agreement, marginParams(-1, -2, 0, 0, 0, dp(4)));
         EditText password = passwordInput("寄售交易密码"); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("创建交易任务").setView(scroll).setNegativeButton("取消", null).setPositiveButton("提交", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog("创建交易任务", scroll, "提交", dialog -> {
             JSONObject body = new JSONObject();
             try {
-                String taskType = type.getSelectedItem().toString(); body.put("type", taskType); body.put("phone", selectedPhone); body.put("groupId", first(item, "groupId", "id")); body.put("digitalCollectionId", first(item, "digitalCollectionId", "collectionId", "id")); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
+                String taskType = type.value(); body.put("type", taskType); body.put("phone", selectedPhone); body.put("groupId", first(item, "groupId", "id")); body.put("digitalCollectionId", first(item, "digitalCollectionId", "collectionId", "id")); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
                 body.put("price", doubleValue(price, 0)); body.put("quantity", intValue(quantity, 1)); body.put("autoStart", true);
                 body.put("paymentPlatformCode", intValue(paymentCode, 0)); body.put("agreementAccepted", agreement.isChecked());
                 if ("consignment".equals(taskType)) { body.put("triggerPrice", doubleValue(trigger, 0)); body.put("monitorIntervalValue", intValue(interval, 5)); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim()); }
             } catch (Exception ignored) { }
             request("创建交易任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
-        }));
-        dialog.show();
+        });
     }
 
     private void loadTradeTasks(LinearLayout target) {
@@ -1105,19 +1098,16 @@ public final class MainActivity extends Activity {
             if (!id.isEmpty() && allowCancel) {
                 Button cancel = button("取消任务", false);
                 cancel.setTextColor(danger);
-                cancel.setOnClickListener(v -> new AlertDialog.Builder(this)
-                        .setTitle("取消任务")
-                        .setMessage("取消后不会再按计划执行，是否继续？")
-                        .setNegativeButton("返回", null)
-                        .setPositiveButton("确认取消", (dialog, which) -> {
-                            String path = prefix.startsWith("合成")
-                                    ? "/native/synthesis/tasks/" + Uri.encode(id) + "/cancel"
-                                    : "/native/first-sales/tasks/" + Uri.encode(id) + "/cancel";
-                            request("取消" + prefix, "POST", path, null, result -> {
-                                target.removeAllViews();
-                                if (prefix.startsWith("合成")) showSynthesis(); else showFirstSale();
-                            });
-                        }).show());
+                cancel.setOnClickListener(v -> showProjectDialog("取消任务", text("取消后不会再按计划执行，是否继续？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
+                    dialog.dismiss();
+                    String path = prefix.startsWith("合成")
+                            ? "/native/synthesis/tasks/" + Uri.encode(id) + "/cancel"
+                            : "/native/first-sales/tasks/" + Uri.encode(id) + "/cancel";
+                    request("取消" + prefix, "POST", path, null, result -> {
+                        target.removeAllViews();
+                        if (prefix.startsWith("合成")) showSynthesis(); else showFirstSale();
+                    });
+                }));
                 row.addView(cancel, new LinearLayout.LayoutParams(-1, dp(40)));
             } else if (!id.isEmpty() && (prefix.equals("交易") || prefix.equals("捡漏"))) {
                 boolean enabled = task.optBoolean("enabled", false);
@@ -1147,8 +1137,10 @@ public final class MainActivity extends Activity {
                 }
                 Button delete = button("删除", false);
                 delete.setTextColor(danger);
-                delete.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("删除任务").setMessage("确认删除这条任务？")
-                        .setNegativeButton("取消", null).setPositiveButton("删除", (dialog, which) -> request("删除任务", "DELETE", base + Uri.encode(id), null, result -> showTrade())).show());
+                delete.setOnClickListener(v -> showProjectDialog("删除任务", text("确认删除这条任务？", 14, muted, Typeface.NORMAL), "删除", dialog -> {
+                    dialog.dismiss();
+                    request("删除任务", "DELETE", base + Uri.encode(id), null, result -> showTrade());
+                }));
                 actions.addView(delete, marginParams(dp(76), dp(40), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
             } else if (!id.isEmpty() && !prefix.contains("订单")) {
@@ -1274,12 +1266,11 @@ public final class MainActivity extends Activity {
     private void showFirstSaleDialog(JSONObject item) {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
         LinearLayout form = vertical(Color.TRANSPARENT);
-        Spinner mode = spinner(new String[]{"scheduled", "immediate"}, "scheduled");
+        OptionField mode = optionField("提交方式", new String[]{"scheduled", "immediate"}, "scheduled");
         EditText count = numberInput("购买数量", "1"); EditText paymentCode = numberInput("支付通道编号", "");
         form.addView(labelled("提交方式", mode));
         form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, new LinearLayout.LayoutParams(-1, dp(46)));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("加入首发抢购").setView(form).setNegativeButton("取消", null).setPositiveButton("保存任务", null).create();
-        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x -> {
+        showProjectDialog("加入首发抢购", form, "保存任务", dialog -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("groupId", first(item, "groupId", "id"));
@@ -1288,14 +1279,13 @@ public final class MainActivity extends Activity {
                 body.put("num", intValue(count, 1));
                 body.put("paymentPlatformCode", intValue(paymentCode, 0));
                 body.put("sourcePhone", selectedPhone);
-                boolean immediate = "immediate".equals(mode.getSelectedItem().toString());
+                boolean immediate = "immediate".equals(mode.value());
                 body.put("startAt", immediate ? java.time.Instant.now().toString() : first(item, "startAt", "startTime", "onSaleTime", "saleTime"));
             } catch (Exception ignored) {
             }
-            boolean immediate = "immediate".equals(mode.getSelectedItem().toString());
+            boolean immediate = "immediate".equals(mode.value());
             request(immediate ? "立即提交首发" : "保存首发任务", "POST", "/native/first-sales/tasks", body, result -> { dialog.dismiss(); toast(immediate ? "首发任务已提交" : "首发任务已保存"); showFirstSale(); });
-        }));
-        dialog.show();
+        });
     }
 
     private void showSettings() {
@@ -1306,7 +1296,7 @@ public final class MainActivity extends Activity {
         content.addView(runtime, marginParams(-1, -2, 0, 0, 0, dp(12)));
 
         LinearLayout bark = card(); bark.addView(text("Bark 通知", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
-        CheckBox enabled = check("启用推送", false); bark.addView(enabled);
+        ProjectToggle enabled = toggle("启用推送", false); bark.addView(enabled);
         EditText server = input("服务地址"); EditText key = passwordInput("设备密钥"); EditText hour = numberInput("每日汇总小时（0-23）", "9");
         bark.addView(server, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(key, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(hour, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         LinearLayout barkActions = horizontal(Color.TRANSPARENT); Button load = button("读取", false); Button save = button("保存", true); Button test = button("测试", false);
@@ -1318,7 +1308,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout backgroundCard = card();
         backgroundCard.addView(text("后台同步", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
-        CheckBox backgroundSync = check("保持状态通知", backgroundSyncEnabled());
+        ProjectToggle backgroundSync = toggle("保持状态通知", backgroundSyncEnabled());
         backgroundCard.addView(backgroundSync);
         String lastSummary = preferences.getString("last_sync_summary", "尚未同步");
         backgroundCard.addView(text("前台服务执行行情监控、任务调度和状态通知\n最近：" + lastSummary, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(2), 0, dp(8)));
@@ -1341,14 +1331,69 @@ public final class MainActivity extends Activity {
         load.performClick();
     }
 
-    private void fillBark(JSONObject result, CheckBox enabled, EditText server, EditText key, EditText hour) {
+    private void fillBark(JSONObject result, ProjectToggle enabled, EditText server, EditText key, EditText hour) {
         JSONObject data = result.optJSONObject("data"); if (data == null) data = result;
         enabled.setChecked(data.optBoolean("enabled", false)); server.setText(data.optString("server", "")); key.setText(data.optString("deviceKey", "")); hour.setText(String.valueOf(data.optInt("dailySummaryHour", 9)));
     }
 
     private void showJsonDialog(String title, JSONObject data) {
         ScrollView scroll = new ScrollView(this); TextView body = text(pretty(data), 12, ink, Typeface.NORMAL); body.setTextIsSelectable(true); body.setPadding(dp(4), dp(4), dp(4), dp(4)); scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
-        new AlertDialog.Builder(this).setTitle(title).setView(scroll).setPositiveButton("关闭", null).show();
+        showProjectDialog(title, scroll, null, null);
+    }
+
+    private Dialog showProjectDialog(String title, View body, String actionLabel, Consumer<Dialog> action) {
+        Dialog dialog = new Dialog(this, R.style.ProjectDialogTheme);
+        dialog.setCanceledOnTouchOutside(true);
+
+        LinearLayout sheet = vertical(surface);
+        sheet.setPadding(dp(20), dp(18), dp(20), dp(20));
+        sheet.setBackground(shape(surface, 0xffe5eeeb, 16));
+
+        LinearLayout header = horizontal(Color.TRANSPARENT);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(text(title, 20, ink, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(44), 1));
+        Button close = button("×", false);
+        close.setTextSize(22);
+        close.setPadding(0, 0, 0, 0);
+        close.setTextColor(ink);
+        close.setBackground(ripple(0x1965c68b, shape(0xffedf4f1, 0, 22)));
+        close.setContentDescription("关闭弹层");
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        sheet.addView(header, marginParams(-1, dp(44), 0, 0, 0, dp(14)));
+
+        if (body != null) {
+            if (body instanceof ScrollView) styleScroll((ScrollView) body);
+            int bodyHeight = body instanceof ScrollView ? dialogScrollHeight() : ViewGroup.LayoutParams.WRAP_CONTENT;
+            sheet.addView(body, marginParams(-1, bodyHeight, 0, 0, 0, actionLabel == null ? 0 : dp(14)));
+        }
+        if (actionLabel != null && action != null) {
+            Button submit = button(actionLabel, true);
+            submit.setOnClickListener(v -> action.accept(dialog));
+            sheet.addView(submit, new LinearLayout.LayoutParams(-1, dp(48)));
+        }
+
+        dialog.setContentView(sheet);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            int width = Math.min(dp(520), getResources().getDisplayMetrics().widthPixels - dp(32));
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT);
+            window.setGravity(Gravity.CENTER);
+        }
+        return dialog;
+    }
+
+    private int dialogScrollHeight() {
+        int available = getResources().getDisplayMetrics().heightPixels - dp(196);
+        return Math.max(dp(160), Math.min(dp(460), available));
+    }
+
+    private void styleScroll(ScrollView scroll) {
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setVerticalFadingEdgeEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
     }
 
     private void request(String label, String method, String path, JSONObject body, Consumer<JSONObject> successCallback) {
@@ -1387,8 +1432,108 @@ public final class MainActivity extends Activity {
 
     private LinearLayout labelled(String title, View view) { LinearLayout box = vertical(Color.TRANSPARENT); box.addView(text(title, 12, muted, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4))); box.addView(view, marginParams(-1, dp(46), 0, 0, 0, dp(8))); return box; }
 
-    private CheckBox check(String label, boolean checked) { CheckBox box = new CheckBox(this); box.setText(label); box.setTextColor(ink); box.setTextSize(13); box.setChecked(checked); box.setMinHeight(dp(44)); return box; }
-    private Spinner spinner(String[] values, String selected) { Spinner spinner = new Spinner(this); ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values); spinner.setAdapter(adapter); for (int i = 0; i < values.length; i++) if (values[i].equals(selected)) spinner.setSelection(i); return spinner; }
+    private ProjectToggle toggle(String label, boolean checked) { return new ProjectToggle(label, checked); }
+
+    private OptionField optionField(String title, String[] values, String selected) { return new OptionField(title, values, selected); }
+
+    private void showOptionDialog(OptionField field) {
+        LinearLayout options = vertical(Color.TRANSPARENT);
+        final Dialog[] dialog = new Dialog[1];
+        for (String value : field.values) {
+            Button option = button(optionLabel(value), value.equals(field.value()));
+            option.setContentDescription(field.title + "：" + optionLabel(value));
+            option.setOnClickListener(v -> {
+                field.setValue(value);
+                if (dialog[0] != null) dialog[0].dismiss();
+            });
+            options.addView(option, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        }
+        dialog[0] = showProjectDialog("选择" + field.title, options, null, null);
+    }
+
+    private String optionLabel(String value) {
+        if ("monitor".equals(value)) return "仅监控";
+        if ("live".equals(value)) return "真实执行";
+        if ("seconds".equals(value)) return "秒";
+        if ("minutes".equals(value)) return "分钟";
+        if ("hours".equals(value)) return "小时";
+        if ("wanted".equals(value)) return "求购";
+        if ("consignment".equals(value)) return "寄售";
+        if ("scheduled".equals(value)) return "定时提交";
+        if ("immediate".equals(value)) return "立即提交";
+        return value;
+    }
+
+    private interface ToggleChangeListener {
+        void onCheckedChanged(ProjectToggle toggle, boolean checked);
+    }
+
+    private final class ProjectToggle extends LinearLayout {
+        private final String label;
+        private final TextView state;
+        private boolean checked;
+        private ToggleChangeListener listener;
+
+        ProjectToggle(String label, boolean checked) {
+            super(MainActivity.this);
+            this.label = label;
+            setGravity(Gravity.CENTER_VERTICAL);
+            setMinimumHeight(dp(48));
+            TextView name = text(label, 13, ink, Typeface.NORMAL);
+            addView(name, new LinearLayout.LayoutParams(0, dp(40), 1));
+            state = text("", 12, Color.WHITE, Typeface.BOLD);
+            state.setGravity(Gravity.CENTER);
+            addView(state, new LinearLayout.LayoutParams(dp(46), dp(32)));
+            setClickable(true);
+            setFocusable(true);
+            setBackground(ripple(0x1965c68b, shape(Color.TRANSPARENT, 0, 10)));
+            setOnClickListener(v -> setChecked(!this.checked));
+            setChecked(checked);
+        }
+
+        boolean isChecked() { return checked; }
+
+        void setChecked(boolean value) {
+            boolean changed = checked != value;
+            checked = value;
+            state.setText(value ? "开启" : "关闭");
+            state.setTextColor(value ? Color.WHITE : muted);
+            state.setBackground(shape(value ? primary : surface, value ? 0 : 0xffdce8e4, 10));
+            setContentDescription(label + (value ? "，已开启" : "，已关闭"));
+            if (changed && listener != null) listener.onCheckedChanged(this, value);
+        }
+
+        void setOnCheckedChangeListener(ToggleChangeListener listener) { this.listener = listener; }
+    }
+
+    private final class OptionField extends Button {
+        private final String title;
+        private final String[] values;
+        private String selected;
+
+        OptionField(String title, String[] values, String selected) {
+            super(MainActivity.this);
+            this.title = title;
+            this.values = values;
+            setAllCaps(false);
+            setTextSize(14);
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            setGravity(Gravity.CENTER_VERTICAL);
+            setPadding(dp(13), 0, dp(13), 0);
+            styleButton(this, false);
+            setValue(selected);
+            setOnClickListener(v -> showOptionDialog(this));
+        }
+
+        String value() { return selected; }
+
+        void setValue(String value) {
+            selected = value;
+            setText(optionLabel(value) + " \u2304");
+            setContentDescription(title + "，当前" + optionLabel(value));
+        }
+    }
+
     private EditText numberInput(String hint, String value) { EditText input = input(hint); input.setText(value == null ? "" : value); input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL); return input; }
     private EditText passwordInput(String hint) { EditText input = input(hint); input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD); return input; }
     private EditText input(String hint) { EditText input = new EditText(this); input.setHint(hint); input.setHintTextColor(0xff8795a0); input.setTextColor(ink); input.setTextSize(14); input.setSingleLine(true); input.setPadding(dp(13), 0, dp(13), 0); input.setBackground(shape(surface, 0xffdbe7e4, 12)); return input; }
@@ -1399,10 +1544,37 @@ public final class MainActivity extends Activity {
     private TextView empty(String value) { TextView view = text(value, 13, muted, Typeface.NORMAL); view.setGravity(Gravity.CENTER); view.setPadding(dp(12), dp(24), dp(12), dp(24)); view.setBackground(shape(surface, 0xffe5eeeb, 16)); return view; }
     private TextView text(String value, float size, int color, int style) { TextView view = new TextView(this); view.setText(value == null ? "" : value); view.setTextSize(size); view.setTextColor(color); view.setTypeface(Typeface.DEFAULT, style); view.setLineSpacing(dp(2), 1f); return view; }
     private Button button(String value, boolean active) { Button button = new Button(this); button.setAllCaps(false); button.setText(value); button.setTextSize(13); button.setTypeface(Typeface.DEFAULT, Typeface.BOLD); button.setMinHeight(dp(42)); button.setPadding(dp(10), 0, dp(10), 0); styleButton(button, active); return button; }
-    private void styleButton(Button button, boolean active) { button.setTextColor(active ? Color.WHITE : ink); button.setBackground(shape(active ? primary : surface, active ? primary : 0xffdce8e4, 12)); button.setElevation(active ? dp(1) : 0); }
+    private void styleButton(Button button, boolean active) { button.setTextColor(active ? Color.WHITE : ink); button.setBackground(ripple(active ? 0x33ffffff : 0x1965c68b, shape(active ? primary : surface, active ? primary : 0xffdce8e4, 12))); button.setElevation(active ? dp(1) : 0); }
     private GradientDrawable shape(int fill, int stroke, int radius) { GradientDrawable drawable = new GradientDrawable(); drawable.setColor(fill); if (stroke != 0) drawable.setStroke(dp(1), stroke); drawable.setCornerRadius(dp(radius)); return drawable; }
+    private RippleDrawable ripple(int color, GradientDrawable content) { return new RippleDrawable(ColorStateList.valueOf(color), content, null); }
     private LinearLayout.LayoutParams marginParams(int width, int height, int left, int top, int right, int bottom) { LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(width, height); params.setMargins(left, top, right, bottom); return params; }
-    private void toast(String message) { if (!isFinishing()) Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
+    private void toast(String message) {
+        if (isFinishing() || isDestroyed()) return;
+        if (transientMessage == null) {
+            transientMessage = text("", 13, Color.WHITE, Typeface.BOLD);
+            transientMessage.setGravity(Gravity.CENTER);
+            transientMessage.setMaxLines(2);
+            transientMessage.setPadding(dp(16), dp(11), dp(16), dp(11));
+            transientMessage.setBackground(shape(ink, 0, 12));
+            transientMessage.setElevation(dp(8));
+            transientMessage.setVisibility(View.GONE);
+            addContentView(transientMessage, transientMessageParams());
+        }
+        transientMessage.removeCallbacks(dismissTransientMessage);
+        transientMessage.setText(message == null || message.isEmpty() ? "操作完成" : message);
+        transientMessage.setVisibility(View.VISIBLE);
+        transientMessage.postDelayed(dismissTransientMessage, 2600);
+    }
+
+    private FrameLayout.LayoutParams transientMessageParams() {
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+        params.setMargins(dp(16), 0, dp(16), bottomSystemInset + dp(44));
+        return params;
+    }
+
+    private void updateTransientMessageMargin() {
+        if (transientMessage != null) transientMessage.setLayoutParams(transientMessageParams());
+    }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private String value(JSONObject object, String key, String fallback) { return object == null ? fallback : object.optString(key, fallback); }

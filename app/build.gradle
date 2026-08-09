@@ -10,8 +10,20 @@ android {
         applicationId "com.ibox.nativepanel"
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName "0.3.0-native-direct"
+        versionCode 4
+        versionName "0.3.1-native-direct"
+    }
+
+    signingConfigs {
+        debug {
+            def signingPath = System.getenv("IBOX_KEYSTORE_PATH")
+            if (signingPath != null && !signingPath.isEmpty()) {
+                storeFile file(signingPath)
+                storePassword System.getenv("IBOX_KEYSTORE_PASSWORD")
+                keyAlias "iboxnative"
+                keyPassword System.getenv("IBOX_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {

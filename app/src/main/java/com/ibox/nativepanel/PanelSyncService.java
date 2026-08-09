@@ -91,7 +91,7 @@ public final class PanelSyncService extends Service {
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        return builder.setSmallIcon(android.R.drawable.ic_popup_sync)
+        return builder.setSmallIcon(R.drawable.ic_status_sync)
                 .setContentTitle("iBox 原生面板")
                 .setContentText(text)
                 .setOngoing(true)

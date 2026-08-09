@@ -33,7 +33,16 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Prepare stable APK signing key
+        env:
+          IBOX_ANDROID_KEYSTORE_B64: ${{ secrets.IBOX_ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$IBOX_ANDROID_KEYSTORE_B64"
+          printf '%s' "$IBOX_ANDROID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/ibox-native.p12"
       - name: Build debug APK
+        env:
+          IBOX_KEYSTORE_PATH: ${{ runner.temp }}/ibox-native.p12
+          IBOX_KEYSTORE_PASSWORD: ${{ secrets.IBOX_ANDROID_SIGNING_PASSWORD }}
         run: gradle :app:assembleDebug --stacktrace
       - name: Upload APK
         uses: actions/upload-artifact@v4
