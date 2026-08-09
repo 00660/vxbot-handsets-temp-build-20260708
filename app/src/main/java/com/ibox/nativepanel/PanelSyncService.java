@@ -31,7 +31,8 @@ public final class PanelSyncService extends Service {
         createChannel();
         startForeground(NOTIFICATION_ID, notification("正在启动本机任务引擎"));
         engine = new NativeEngine(this);
-        scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler = Executors.newScheduledThreadPool(2);
+        scheduler.scheduleWithFixedDelay(this::tick, 0, 25, TimeUnit.MILLISECONDS);
         scheduler.scheduleWithFixedDelay(this::sync, 0, 1, TimeUnit.SECONDS);
     }
 
@@ -56,7 +57,6 @@ public final class PanelSyncService extends Service {
         if (stopped) return;
         SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
         try {
-            engine.tick();
             JSONObject state = engine.backgroundSummary();
             int watchCount = state.optInt("watchCount", 0);
             int quantCount = state.optInt("quantCount", 0);
@@ -71,6 +71,15 @@ public final class PanelSyncService extends Service {
         } catch (Exception error) {
             String message = error.getMessage();
             update("同步失败" + (message == null || message.isEmpty() ? "" : " · " + message));
+        }
+    }
+
+    private void tick() {
+        if (stopped) return;
+        try {
+            engine.tick();
+        } catch (Exception ignored) {
+            // Individual task state records the error; the status worker stays alive.
         }
     }
 

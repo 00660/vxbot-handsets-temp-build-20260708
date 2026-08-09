@@ -275,6 +275,30 @@ public final class IBoxDirectClient {
         return requestAuthenticated(account, method, url, body, query, null, encryptedBody, operation);
     }
 
+    /** Adds the GeeTest result using the order API protocol: query parameters plus Verify-Flag. */
+    public JSONObject requestAuthenticatedWithCaptcha(
+            Account account,
+            String method,
+            String url,
+            JSONObject body,
+            JSONObject query,
+            CaptchaResult captcha,
+            boolean encryptedBody,
+            String operation
+    ) throws Exception {
+        if (captcha == null || !captcha.isComplete()) {
+            return requestAuthenticated(account, method, url, body, query, null, encryptedBody, operation);
+        }
+        JSONObject actualQuery = query == null ? new JSONObject() : new JSONObject(query.toString());
+        actualQuery.put("lot_number", captcha.lotNumber);
+        actualQuery.put("captcha_output", captcha.captchaOutput);
+        actualQuery.put("pass_token", captcha.passToken);
+        actualQuery.put("gen_time", captcha.genTime);
+        JSONObject headers = new JSONObject();
+        headers.put("Verify-Flag", "true");
+        return requestAuthenticated(account, method, url, body, actualQuery, headers, encryptedBody, operation);
+    }
+
     /**
      * Same as {@link #requestAuthenticated(Account, String, String, JSONObject, JSONObject, boolean, String)}
      * with optional protocol headers, used by order endpoints after GeeTest succeeds.
