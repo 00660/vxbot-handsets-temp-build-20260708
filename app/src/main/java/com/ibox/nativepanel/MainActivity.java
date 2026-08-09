@@ -57,7 +57,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-/** Native iBox panel client. The page never embeds the 5000 HTML document. */
+/** Native iBox panel client. The page never embeds a panel web document. */
 public final class MainActivity extends Activity {
     private static final String PREFS = "ibox_native_panel";
     private static final String[] PAGE_KEYS = {
