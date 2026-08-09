@@ -17,12 +17,18 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-/** 面板图片投递专用流程。其它图片、视频和群发链路不复用这里的目标选择逻辑。 */
+/**
+ * 面板图片的独立投递流程。
+ *
+ * 每个可见页面阶段都要求连续两帧 OCR 证据后才进入下一步，避免页面尚未绘制完成时误点。
+ */
 public final class PanelImageDeliveryFlow {
-    private static final long SELECT_TIMEOUT_MS = 15000L;
+    private static final int STABLE_FRAME_COUNT = 2;
+    private static final long SHARE_LIST_TIMEOUT_MS = 30000L;
     private static final long TARGET_TIMEOUT_MS = 30000L;
-    private static final long CONFIRM_TIMEOUT_MS = 15000L;
-    private static final long SUBMIT_TIMEOUT_MS = 7000L;
+    private static final long CONFIRM_TIMEOUT_MS = 30000L;
+    private static final long SEND_TIMEOUT_MS = 30000L;
+    private static final long SUBMIT_TIMEOUT_MS = 15000L;
 
     private static final class ShareAsset {
         final Uri contentUri;
@@ -38,47 +44,70 @@ public final class PanelImageDeliveryFlow {
         }
     }
 
+    private static final class ConfirmState {
+        final OcrHelper.OcrItem sendTo;
+        final OcrHelper.OcrItem target;
+        final OcrHelper.OcrItem send;
+
+        ConfirmState(OcrHelper.OcrItem sendTo, OcrHelper.OcrItem target, OcrHelper.OcrItem send) {
+            this.sendTo = sendTo;
+            this.target = target;
+            this.send = send;
+        }
+    }
+
     public boolean shareExistingImage(Context context, BotConfig config, File file, String target) {
-        long started = SystemClock.uptimeMillis();
+        long startedAt = SystemClock.uptimeMillis();
         HsClient hs = new HsClient(config == null ? 9010 : config.hsPort);
         ShareAsset asset = null;
         boolean sent = false;
+        String targetKey = groupNameKey(target);
         try {
-            if (target == null || target.trim().isEmpty()) {
+            if (targetKey.isEmpty()) {
                 BotLog.e(context, "panel.image.abort", "面板图片目标为空");
                 return false;
             }
+
             asset = createShareAsset(context, file);
-            closeRemainder(context, hs, "panel-before-start");
             if (!startShareIntent(context, asset)) {
                 return false;
             }
-            if (!waitSelectPage(context, config, hs, SELECT_TIMEOUT_MS)) {
-                BotLog.e(context, "panel.share.select.timeout", "面板分享页未就绪 target=" + target);
+            if (!waitForRecentChats(context, config, hs)) {
+                BotLog.e(context, "panel.share.list.timeout", "分享页最近聊天未就绪 target=" + target);
                 return false;
             }
-            if (!selectTargetByDirectOcr(context, config, hs, target.trim())) {
-                BotLog.e(context, "panel.share.target.failed", "分享页目标 OCR 失败 target=" + target);
+
+            OcrHelper.OcrItem selected = waitForUniqueTarget(context, config, hs, targetKey, target);
+            if (selected == null) {
+                BotLog.e(context, "panel.share.target.timeout", "最近聊天中未找到唯一目标 target=" + target);
                 return false;
             }
-            if (!waitConfirmPage(context, config, hs, CONFIRM_TIMEOUT_MS, target.trim())) {
-                BotLog.e(context, "panel.share.confirm.failed", "点击目标后未确认 target=" + target);
+            hs.tap(selected.centerX, selected.centerY);
+            BotLog.i(context, "panel.share.target.tap", "点击最近聊天目标 target=" + target
+                    + " rect=" + selected.rect.flattenToString());
+
+            if (!waitForConfirmPage(context, config, hs, targetKey, target)) {
+                BotLog.e(context, "panel.share.confirm.timeout", "确认页未就绪 target=" + target);
                 return false;
             }
-            sent = clickSendAndWait(context, config, hs, target.trim());
-            BotLog.write(context, sent ? "SUCCESS" : "ERROR", "panel.image.share.done",
-                    (sent ? "面板图片已发送" : "面板图片发送失败")
-                            + " target=" + target
-                            + " costMs=" + (SystemClock.uptimeMillis() - started));
-            return sent;
+            if (!tapStableGreenSend(context, config, hs, targetKey, target)) {
+                BotLog.e(context, "panel.share.send.timeout", "确认页绿色发送按钮未就绪 target=" + target);
+                return false;
+            }
+            if (!waitForConfirmExit(context, config, hs, targetKey)) {
+                BotLog.e(context, "panel.share.submit.timeout", "点击发送后确认页未退出 target=" + target);
+                return false;
+            }
+
+            sent = true;
+            BotLog.write(context, "SUCCESS", "panel.image.share.done", "面板图片已发送 target="
+                    + target + " costMs=" + (SystemClock.uptimeMillis() - startedAt));
+            return true;
         } catch (Exception error) {
             BotLog.e(context, "panel.image.share.error", "面板图片分享异常 target=" + target
                     + " error=" + error.getMessage());
             return false;
         } finally {
-            if (!sent) {
-                closeRemainder(context, hs, "panel-share-failed");
-            }
             cleanupShareAsset(context, asset);
         }
     }
@@ -98,265 +127,262 @@ public final class PanelImageDeliveryFlow {
                         Intent.FLAG_GRANT_READ_URI_PERMISSION);
             }
             context.startActivity(intent);
-            BotLog.i(context, "panel.share.intent.start", "已打开微信图片分享页");
+            BotLog.i(context, "panel.share.intent.start", "已拉起微信图片分享页");
             return true;
         } catch (Exception error) {
-            BotLog.e(context, "panel.share.intent.error", error.getMessage());
+            BotLog.e(context, "panel.share.intent.error", "拉起微信图片分享页失败: " + error.getMessage());
             return false;
         }
     }
 
-    private boolean waitSelectPage(Context context, BotConfig config, HsClient hs, long timeoutMs) {
-        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+    private boolean waitForRecentChats(Context context, BotConfig config, HsClient hs) {
+        long deadline = SystemClock.uptimeMillis() + SHARE_LIST_TIMEOUT_MS;
+        OcrHelper.OcrItem previous = null;
+        int stableFrames = 0;
+        int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
+            attempts++;
             OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (isSelectPage(screen)) {
-                SystemClock.sleep(Math.max(1200L, selectPoll(config) * 5));
-                return true;
+            OcrHelper.OcrItem recentChats = findRecentChatsHeader(screen);
+            if (recentChats != null) {
+                stableFrames = sameVisualItem(previous, recentChats) ? stableFrames + 1 : 1;
+                previous = recentChats;
+                if (stableFrames >= STABLE_FRAME_COUNT) {
+                    BotLog.i(context, "panel.share.list.ready", "最近聊天已稳定 rect="
+                            + recentChats.rect.flattenToString() + " attempts=" + attempts);
+                    return true;
+                }
+            } else {
+                previous = null;
+                stableFrames = 0;
             }
             SystemClock.sleep(selectPoll(config));
         }
         return false;
     }
 
-    private boolean isSelectPage(OcrHelper.Screen screen) {
-        return find(screen, text -> {
-            String value = clean(text);
-            return value.contains("选择聊天") || value.contains("选择一个聊天")
-                    || value.contains("最近聊天");
-        }, 0f, 1f, 0f, 0.35f) != null;
-    }
-
-    private boolean selectTargetByDirectOcr(Context context, BotConfig config, HsClient hs, String target) throws Exception {
+    private OcrHelper.OcrItem waitForUniqueTarget(Context context, BotConfig config, HsClient hs,
+                                                   String targetKey, String target) {
         long deadline = SystemClock.uptimeMillis() + TARGET_TIMEOUT_MS;
-        int attempt = 0;
+        OcrHelper.OcrItem previous = null;
+        int stableFrames = 0;
+        int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
-            attempt++;
+            attempts++;
             OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (screen == null) {
-                SystemClock.sleep(selectPoll(config));
-                continue;
-            }
-            OcrHelper.OcrItem recentChats = null;
-            for (OcrHelper.OcrItem item : screen.items) {
-                if (item.centerY < screen.height * 0.20f || item.centerY > screen.height * 0.70f
-                        || !clean(item.text).contains("最近聊天")) {
-                    continue;
+            OcrHelper.OcrItem recentChats = findRecentChatsHeader(screen);
+            OcrHelper.OcrItem candidate = findUniqueTargetBelowRecentChats(screen, recentChats, targetKey);
+            if (candidate != null) {
+                stableFrames = sameVisualItem(previous, candidate) ? stableFrames + 1 : 1;
+                previous = candidate;
+                if (stableFrames >= STABLE_FRAME_COUNT) {
+                    BotLog.i(context, "panel.share.target.ready", "最近聊天目标已稳定 target=" + target
+                            + " text=" + candidate.text + " rect=" + candidate.rect.flattenToString()
+                            + " attempts=" + attempts);
+                    return candidate;
                 }
-                long itemArea = (long) item.rect.width() * item.rect.height();
-                long bestArea = recentChats == null
-                        ? Long.MAX_VALUE
-                        : (long) recentChats.rect.width() * recentChats.rect.height();
-                if (recentChats == null || itemArea < bestArea) {
-                    recentChats = item;
-                }
+            } else {
+                previous = null;
+                stableFrames = 0;
             }
-            if (recentChats == null) {
-                BotLog.i(context, "panel.share.recent_chats.wait",
-                        "等待最近聊天列表 target=" + target + " attempt=" + attempt);
-                SystemClock.sleep(Math.max(450L, confirmPoll(config)));
-                continue;
-            }
-            int minY = recentChats.rect.bottom + Math.max(8, Math.round(screen.height * 0.005f));
-            if (attempt == 1) {
-                BotLog.i(context, "panel.share.recent_chats.anchor",
-                        "最近聊天边界 rect=" + recentChats.rect.flattenToString() + " minY=" + minY);
-            }
-            String wanted = normalize(target);
-            OcrHelper.OcrItem exact = null;
-            OcrHelper.OcrItem fuzzy = null;
-            boolean exactAmbiguous = false;
-            boolean fuzzyAmbiguous = false;
-            for (OcrHelper.OcrItem item : screen.items) {
-                if (item.centerY < minY || item.centerY > screen.height - 80
-                        || !matchesTarget(item.text, target)) {
-                    continue;
-                }
-                String value = normalize(item.text);
-                if (wanted.equals(value)) {
-                    if (exact == null) {
-                        exact = item;
-                    } else if (!sameRow(exact, item)) {
-                        exactAmbiguous = true;
-                    } else if (item.rect.width() > exact.rect.width()) {
-                        exact = item;
-                    }
-                } else if (fuzzy == null) {
-                    fuzzy = item;
-                } else if (!sameRow(fuzzy, item)) {
-                    fuzzyAmbiguous = true;
-                } else if (item.rect.width() > fuzzy.rect.width()) {
-                    fuzzy = item;
-                }
-            }
-            OcrHelper.OcrItem candidate = !exactAmbiguous && exact != null
-                    ? exact
-                    : (!exactAmbiguous && !fuzzyAmbiguous ? fuzzy : null);
-            if (candidate == null) {
-                BotLog.i(context, "panel.share.target.wait", "等待唯一目标 OCR target=" + target
-                        + " attempt=" + attempt + " exactAmbiguous=" + exactAmbiguous
-                        + " fuzzyAmbiguous=" + fuzzyAmbiguous
-                        + " snippets=" + screen.snippets);
-                SystemClock.sleep(Math.max(450L, confirmPoll(config)));
-                continue;
-            }
-            hs.tap(candidate.centerX, candidate.centerY);
-            BotLog.i(context, "panel.share.target.tap", "点击分享页目标 target=" + target
-                    + " text=" + candidate.text + " x=" + candidate.centerX + " y=" + candidate.centerY
-                    + " attempt=" + attempt);
-            return true;
+            SystemClock.sleep(selectPoll(config));
         }
-        BotLog.e(context, "panel.share.target.timeout", "分享页目标 OCR 超时 target=" + target);
-        return false;
+        return null;
     }
 
-    private boolean sameRow(OcrHelper.OcrItem first, OcrHelper.OcrItem second) {
-        return first != null && second != null
-                && Math.abs(first.centerY - second.centerY) <= 36
-                && Math.abs(first.centerX - second.centerX) <= 120;
-    }
-
-    private boolean waitConfirmPage(Context context, BotConfig config, HsClient hs,
-                                    long timeoutMs, String target) {
-        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+    private boolean waitForConfirmPage(Context context, BotConfig config, HsClient hs,
+                                       String targetKey, String target) {
+        long deadline = SystemClock.uptimeMillis() + CONFIRM_TIMEOUT_MS;
+        ConfirmState previous = null;
+        int stableFrames = 0;
+        int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (isConfirmPage(screen) && confirmContainsTarget(screen, target)) {
-                BotLog.i(context, "panel.share.confirm.ready", "确认页目标已稳定 target=" + target);
-                return true;
+            attempts++;
+            ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
+            if (current != null) {
+                stableFrames = sameConfirmState(previous, current) ? stableFrames + 1 : 1;
+                previous = current;
+                if (stableFrames >= STABLE_FRAME_COUNT) {
+                    BotLog.i(context, "panel.share.confirm.ready", "确认页已稳定 target=" + target
+                            + " attempts=" + attempts);
+                    return true;
+                }
+            } else {
+                previous = null;
+                stableFrames = 0;
             }
             SystemClock.sleep(confirmPoll(config));
         }
         return false;
     }
 
-    private boolean clickSendAndWait(Context context, BotConfig config, HsClient hs, String target) throws Exception {
-        long deadline = SystemClock.uptimeMillis() + CONFIRM_TIMEOUT_MS;
+    private boolean tapStableGreenSend(Context context, BotConfig config, HsClient hs,
+                                       String targetKey, String target) throws Exception {
+        long deadline = SystemClock.uptimeMillis() + SEND_TIMEOUT_MS;
+        ConfirmState previous = null;
+        int stableFrames = 0;
+        int attempts = 0;
         while (SystemClock.uptimeMillis() < deadline) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (!isConfirmPage(screen) || !confirmContainsTarget(screen, target)) {
-                SystemClock.sleep(confirmPoll(config));
-                continue;
-            }
-            Rect green = OcrHelper.findShareConfirmGreenSendButton(context, hs);
-            if (green != null) {
-                hs.tap(green.centerX(), green.centerY());
-            } else {
-                OcrHelper.OcrItem send = find(screen, text -> "发送".equals(clean(text)),
-                        0f, 1f, 0.45f, 1f);
-                if (send == null) {
-                    SystemClock.sleep(sendPoll(config));
-                    continue;
+            attempts++;
+            ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
+            Rect greenButton = current == null ? null : OcrHelper.findShareConfirmGreenSendButton(context, hs);
+            boolean sendMatchesGreenButton = current != null && greenButton != null
+                    && greenButton.contains(current.send.centerX, current.send.centerY);
+            if (sendMatchesGreenButton) {
+                stableFrames = sameConfirmState(previous, current) ? stableFrames + 1 : 1;
+                previous = current;
+                if (stableFrames >= STABLE_FRAME_COUNT) {
+                    hs.tap(current.send.centerX, current.send.centerY);
+                    BotLog.i(context, "panel.share.send.tap", "点击 OCR 发送按钮 target=" + target
+                            + " sendRect=" + current.send.rect.flattenToString()
+                            + " greenRect=" + greenButton.flattenToString() + " attempts=" + attempts);
+                    return true;
                 }
-                hs.tap(send.centerX, send.centerY);
+            } else {
+                previous = null;
+                stableFrames = 0;
             }
-            BotLog.i(context, "panel.share.send.tap", "点击确认页发送 target=" + target);
-            return waitSubmit(context, config, hs);
+            SystemClock.sleep(sendPoll(config));
         }
         return false;
     }
 
-    private boolean waitSubmit(Context context, BotConfig config, HsClient hs) {
+    private boolean waitForConfirmExit(Context context, BotConfig config, HsClient hs, String targetKey) {
         long deadline = SystemClock.uptimeMillis() + SUBMIT_TIMEOUT_MS;
+        int absentFrames = 0;
         while (SystemClock.uptimeMillis() < deadline) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (!isConfirmPage(screen)) {
-                return true;
+            ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
+            if (current == null) {
+                absentFrames++;
+                if (absentFrames >= STABLE_FRAME_COUNT) {
+                    return true;
+                }
+            } else {
+                absentFrames = 0;
             }
             SystemClock.sleep(submitPoll(config));
         }
-        BotLog.e(context, "panel.share.submit.timeout", "点击发送后确认页未退出");
         return false;
     }
 
-    private boolean isConfirmPage(OcrHelper.Screen screen) {
-        if (screen == null) {
-            return false;
+    private OcrHelper.OcrItem findRecentChatsHeader(OcrHelper.Screen screen) {
+        if (screen == null || screen.height <= 0) {
+            return null;
         }
-        boolean header = find(screen, text -> {
-            String value = clean(text);
-            return value.contains("发送给") || value.contains("发送到");
-        }, 0f, 1f, 0.45f, 0.82f) != null;
-        OcrHelper.OcrItem send = find(screen, text -> "发送".equals(clean(text)),
-                0f, 1f, 0.45f, 1f);
-        OcrHelper.OcrItem cancel = find(screen, text -> "取消".equals(clean(text)),
-                0f, 1f, 0.45f, 1f);
-        return header || (send != null && cancel != null);
-    }
-
-    private boolean confirmContainsTarget(OcrHelper.Screen screen, String target) {
-        if (!isConfirmPage(screen)) {
-            return false;
-        }
+        OcrHelper.OcrItem result = null;
+        int minY = Math.round(screen.height * 0.15f);
+        int maxY = Math.round(screen.height * 0.60f);
         for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerY < screen.height * 0.15f || item.centerY > screen.height * 0.82f) {
+            if (item.centerY < minY || item.centerY > maxY || !"最近聊天".equals(textKey(item.text))) {
                 continue;
             }
-            if (matchesTarget(item.text, target)) {
-                return true;
+            if (result != null) {
+                return null;
+            }
+            result = item;
+        }
+        return result;
+    }
+
+    private OcrHelper.OcrItem findUniqueTargetBelowRecentChats(OcrHelper.Screen screen,
+                                                                 OcrHelper.OcrItem recentChats,
+                                                                 String targetKey) {
+        if (screen == null || recentChats == null || targetKey.isEmpty()) {
+            return null;
+        }
+        int minY = recentChats.rect.bottom + Math.max(8, Math.round(screen.height * 0.005f));
+        int maxY = screen.height - Math.max(96, Math.round(screen.height * 0.10f));
+        OcrHelper.OcrItem result = null;
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < minY || item.centerY > maxY || !targetKey.equals(groupNameKey(item.text))) {
+                continue;
+            }
+            if (result != null) {
+                return null;
+            }
+            result = item;
+        }
+        return result;
+    }
+
+    private ConfirmState findConfirmState(OcrHelper.Screen screen, String targetKey) {
+        if (screen == null || screen.height <= 0) {
+            return null;
+        }
+        OcrHelper.OcrItem sendTo = null;
+        OcrHelper.OcrItem target = null;
+        OcrHelper.OcrItem send = null;
+        int minContentY = Math.round(screen.height * 0.15f);
+        int maxContentY = Math.round(screen.height * 0.88f);
+        int minSendY = Math.round(screen.height * 0.45f);
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (item.centerY < minContentY || item.centerY > maxContentY) {
+                continue;
+            }
+            String key = textKey(item.text);
+            if (key.contains("发送给")) {
+                if (sendTo != null) {
+                    return null;
+                }
+                sendTo = item;
+            }
+            if (targetKey.equals(groupNameKey(item.text))) {
+                if (target != null) {
+                    return null;
+                }
+                target = item;
+            }
+            if (item.centerY >= minSendY && "发送".equals(key)) {
+                if (send != null) {
+                    return null;
+                }
+                send = item;
             }
         }
-        return false;
+        return sendTo != null && target != null && send != null
+                ? new ConfirmState(sendTo, target, send)
+                : null;
     }
 
-    private boolean matchesTarget(String text, String target) {
-        String value = normalize(text);
-        String wanted = normalize(target);
-        if (value.isEmpty() || wanted.isEmpty()) {
-            return false;
-        }
-        if (value.equals(wanted) || value.contains(wanted) || wanted.contains(value)) {
-            return true;
-        }
-        return NameNormalizer.looseNameMatch(value, wanted);
+    private boolean sameVisualItem(OcrHelper.OcrItem first, OcrHelper.OcrItem second) {
+        return first != null && second != null
+                && textKey(first.text).equals(textKey(second.text))
+                && Math.abs(first.centerX - second.centerX) <= 48
+                && Math.abs(first.centerY - second.centerY) <= 48;
     }
 
-    private String normalize(String text) {
-        if (text == null) {
+    private boolean sameConfirmState(ConfirmState first, ConfirmState second) {
+        return first != null && second != null
+                && sameVisualItem(first.sendTo, second.sendTo)
+                && sameVisualItem(first.target, second.target)
+                && sameVisualItem(first.send, second.send);
+    }
+
+    private String groupNameKey(String value) {
+        if (value == null) {
             return "";
         }
-        return NameNormalizer.nameKey(text.replaceAll("[（(]\\s*\\d+\\s*(?:人|[Aa])?\\s*[）)]", ""));
+        return NameNormalizer.nameKey(value.replaceAll("[（(]\\s*\\d+\\s*人\\s*[）)]", ""));
     }
 
-    private String clean(String text) {
-        return normalize(text).replace("Q", "").replace("q", "");
+    private String textKey(String value) {
+        return NameNormalizer.nameKey(value);
     }
 
     private long selectPoll(BotConfig config) {
-        return config == null ? 350L : Math.max(250L, config.shareSelectPollMs);
+        return config == null ? 250L : Math.max(200L, config.shareSelectPollMs);
     }
 
     private long confirmPoll(BotConfig config) {
-        return config == null ? 350L : Math.max(250L, config.shareConfirmPollMs);
+        return config == null ? 250L : Math.max(200L, config.shareConfirmPollMs);
     }
 
     private long sendPoll(BotConfig config) {
-        return config == null ? 300L : Math.max(250L, config.shareSendButtonPollMs);
+        return config == null ? 250L : Math.max(200L, config.shareSendButtonPollMs);
     }
 
     private long submitPoll(BotConfig config) {
-        return config == null ? 450L : Math.max(350L, config.shareSubmitPollMs);
-    }
-
-    private OcrHelper.OcrItem find(OcrHelper.Screen screen, TextMatcher matcher,
-                                   float minX, float maxX, float minY, float maxY) {
-        if (screen == null || matcher == null) {
-            return null;
-        }
-        for (OcrHelper.OcrItem item : screen.items) {
-            if (item.centerX < screen.width * minX || item.centerX > screen.width * maxX
-                    || item.centerY < screen.height * minY || item.centerY > screen.height * maxY) {
-                continue;
-            }
-            if (matcher.matches(item.text)) {
-                return item;
-            }
-        }
-        return null;
-    }
-
-    private interface TextMatcher {
-        boolean matches(String text);
+        return config == null ? 350L : Math.max(250L, config.shareSubmitPollMs);
     }
 
     private ShareAsset createShareAsset(Context context, File file) throws Exception {
@@ -371,17 +397,22 @@ public final class PanelImageDeliveryFlow {
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, mime);
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/VXBotPanel");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/VXBotPanel");
                 values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 uri = context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-                if (uri == null) throw new IllegalStateException("media insert failed");
+                if (uri == null) {
+                    throw new IllegalStateException("media insert failed");
+                }
                 copyFile(context, file, uri);
                 ContentValues done = new ContentValues();
                 done.put(MediaStore.Images.Media.IS_PENDING, 0);
                 context.getContentResolver().update(uri, done, null, null);
                 return new ShareAsset(uri, mime, name, true);
             } catch (Exception error) {
-                if (uri != null) context.getContentResolver().delete(uri, null, null);
+                if (uri != null) {
+                    context.getContentResolver().delete(uri, null, null);
+                }
                 BotLog.w(context, "panel.share.asset.fallback", error.getMessage());
             }
         }
@@ -390,27 +421,27 @@ public final class PanelImageDeliveryFlow {
     }
 
     private void copyFile(Context context, File file, Uri uri) throws Exception {
-        try (InputStream in = new FileInputStream(file);
-             OutputStream out = context.getContentResolver().openOutputStream(uri)) {
-            if (out == null) throw new IllegalStateException("media output unavailable");
+        try (InputStream input = new FileInputStream(file);
+             OutputStream output = context.getContentResolver().openOutputStream(uri)) {
+            if (output == null) {
+                throw new IllegalStateException("media output unavailable");
+            }
             byte[] buffer = new byte[64 * 1024];
             int read;
-            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+            while ((read = input.read(buffer)) > 0) {
+                output.write(buffer, 0, read);
+            }
         }
     }
 
     private void cleanupShareAsset(Context context, ShareAsset asset) {
-        if (asset == null || !asset.publicMedia || asset.contentUri == null) return;
-        try { context.getContentResolver().delete(asset.contentUri, null, null); }
-        catch (Exception error) { BotLog.w(context, "panel.share.asset.cleanup.fail", error.getMessage()); }
-    }
-
-    private void closeRemainder(Context context, HsClient hs, String reason) {
-        for (int i = 0; i < 3; i++) {
-            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
-            if (!isSelectPage(screen) && !isConfirmPage(screen)) return;
-            try { hs.key("BACK"); } catch (Exception ignored) { return; }
-            SystemClock.sleep(450L);
+        if (asset == null || !asset.publicMedia || asset.contentUri == null) {
+            return;
+        }
+        try {
+            context.getContentResolver().delete(asset.contentUri, null, null);
+        } catch (Exception error) {
+            BotLog.w(context, "panel.share.asset.cleanup.fail", error.getMessage());
         }
     }
 }
