@@ -179,6 +179,7 @@ public final class NativeEngine {
 
         if ("/retired-market/tasks".equals(route.path) && "GET".equals(verb)) return ok(objectOf("tasks", retiredTasks()));
         if ("/retired-market/tasks".equals(route.path) && "POST".equals(verb)) return createTradeTask(body, "retired_market");
+        if ("/retired-market/purchases".equals(route.path) && "POST".equals(verb)) return createImmediatePurchase(body);
         if (route.path.startsWith("/retired-market/tasks/") && route.path.contains("/captcha/")) return taskCaptcha("retired_market", route, verb, body);
         if (route.path.startsWith("/retired-market/tasks/") && route.path.endsWith("/enable") && "POST".equals(verb)) return setTradeEnabled(route.segment(3), true, "retired_market");
         if (route.path.startsWith("/retired-market/tasks/") && route.path.endsWith("/disable") && "POST".equals(verb)) return setTradeEnabled(route.segment(3), false, "retired_market");
@@ -1208,6 +1209,52 @@ public final class NativeEngine {
         return result;
     }
 
+    private JSONObject createImmediatePurchase(JSONObject body) throws Exception {
+        JSONObject task = copy(body);
+        String phone = first(task, "phone", "sourcePhone");
+        String groupId = first(task, "groupId", "collectionId", "id");
+        double maxPrice = decimal(task.opt("maxPrice"), Double.NaN);
+        if (phone.isEmpty() || !phone.matches("\\d{11}")) throw new NativeException("立即买入缺少有效账号");
+        if (!groupId.matches("\\d+")) throw new NativeException("立即买入藏品编号无效");
+        if (!Double.isFinite(maxPrice) || maxPrice <= 0d) throw new NativeException("立即买入最高价无效");
+
+        IBoxDirectClient.Account account = account(phone);
+        JSONObject candidate = currentPurchaseCandidate(account, groupId, "", maxPrice);
+        String now = Instant.now().toString();
+        task.put("id", UUID.randomUUID().toString());
+        task.put("localType", "retired_market");
+        task.put("executionMode", "immediate_purchase");
+        task.put("phone", phone);
+        task.put("groupId", groupId);
+        task.put("title", first(task, "title", "name", "groupName", "groupId"));
+        task.put("enabled", true);
+        task.put("status", "scheduled");
+        task.put("pendingDigitalCollectionId", candidate.optString("digitalCollectionId"));
+        task.put("pendingPrice", candidate.opt("price"));
+        task.put("createdAt", now);
+        task.put("updatedAt", now);
+        task.put("events", new JSONArray());
+        addEvent(task, "immediate_purchase", "已确认当前挂单，正在创建订单");
+
+        JSONArray tasks = store.getTradeTasks();
+        tasks.put(task);
+        if (!store.saveTradeTasks(tasks)) throw new NativeException("立即买入任务保存失败");
+        try {
+            processImmediatePurchaseTask(task);
+        } catch (Exception error) {
+            String failure = message(error);
+            task.put("lastResult", failure);
+            task.put("lastCheckAt", Instant.now().toString());
+            task.put("enabled", captchaRequired(error));
+            task.put("status", captchaRequired(error) ? "verification_required" : "failed");
+            task.put("updatedAt", Instant.now().toString());
+            store.saveTradeTasks(tasks);
+            throw error;
+        }
+        store.saveTradeTasks(tasks);
+        return ok(task);
+    }
+
     private JSONArray marketTradeTasks() {
         JSONArray all = store.getTradeTasks();
         JSONArray result = new JSONArray();
@@ -1999,7 +2046,8 @@ public final class NativeEngine {
                     || !taskDue(task, "monitorIntervalValue", "monitorIntervalUnit", fallbackSeconds, now)) continue;
             try {
                 if ("retired_market".equals(task.optString("localType"))) {
-                    processRetiredMarketTask(task);
+                    if ("immediate_purchase".equals(task.optString("executionMode"))) processImmediatePurchaseTask(task);
+                    else processRetiredMarketTask(task);
                 } else {
                     processMarketTradeTask(task);
                 }
@@ -2008,6 +2056,9 @@ public final class NativeEngine {
                 putQuietly(task, "lastResult", failure);
                 if (captchaRequired(error)) {
                     putQuietly(task, "status", "verification_required");
+                } else if ("immediate_purchase".equals(task.optString("executionMode"))) {
+                    putQuietly(task, "enabled", false);
+                    putQuietly(task, "status", "failed");
                 } else if (failure.contains("寄售价格") || failure.contains("价格低于平台") || failure.contains("价格高于平台")) {
                     putQuietly(task, "enabled", false);
                     putQuietly(task, "status", "price_out_of_range");
@@ -2126,6 +2177,42 @@ public final class NativeEngine {
         task.put("lastResult", "payment_pending");
         task.put("lockedAt", Instant.now().toString());
         sendBark("iBox 捡漏订单待支付", task.optString("title") + " · ¥" + candidate.optString("price") + "，等待钱包支付。", "active");
+    }
+
+    private void processImmediatePurchaseTask(JSONObject task) throws Exception {
+        IBoxDirectClient.Account account = account(task.optString("phone"));
+        String groupId = task.optString("groupId");
+        String digitalCollectionId = task.optString("pendingDigitalCollectionId");
+        double maxPrice = decimal(task.opt("maxPrice"), Double.NaN);
+        JSONObject candidate = currentPurchaseCandidate(account, groupId, digitalCollectionId, maxPrice);
+        int paymentCode = paymentPlatformCode(account, 1, 0);
+        JSONObject request = objectOf(
+                "digitalCollectionId", integer(candidate.opt("digitalCollectionId"), 0),
+                "paymentPlatformCode", paymentCode
+        );
+        JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_PURCHASE_CONSIGNMENT_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(task.optJSONObject("captcha")), true, "立即买入");
+        String orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
+        if (orderUuid.isEmpty()) throw new NativeException("立即买入未返回订单编号");
+
+        String cashier = "";
+        String cashierError = "";
+        try {
+            cashier = cashierLink(account, orderUuid, 0);
+        } catch (Exception error) {
+            cashierError = message(error);
+        }
+        task.put("resolvedPaymentPlatformCode", paymentCode);
+        task.put("lockedDigitalCollectionId", candidate.optString("digitalCollectionId"));
+        task.put("lockedPrice", candidate.opt("price"));
+        task.put("orderUuid", orderUuid);
+        task.put("cashierLink", cashier);
+        task.put("paymentStatus", cashier.isEmpty() ? "unavailable" : "pending");
+        task.put("enabled", false);
+        task.put("status", "payment_pending");
+        task.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
+        task.put("lockedAt", Instant.now().toString());
+        task.put("updatedAt", Instant.now().toString());
+        addEvent(task, "payment_pending", "订单已创建，等待钱包支付");
     }
 
     private boolean tryQuantBuy(JSONObject strategy, IBoxDirectClient.Account account, JSONObject candidate) throws Exception {
@@ -2918,6 +3005,32 @@ public final class NativeEngine {
             }
         }
         return result;
+    }
+
+    private JSONObject currentPurchaseCandidate(IBoxDirectClient.Account account, String groupId, String expectedDigitalCollectionId, double maxPrice) throws Exception {
+        if (!Double.isFinite(maxPrice) || maxPrice <= 0d) throw new NativeException("立即买入最高价无效");
+        JSONObject detail = loadMarketTradeDetail(account, groupId);
+        if (explicitFalse(detail.opt("enablePurchase"))) throw new NativeException("当前藏品暂不支持购买");
+        String expected = expectedDigitalCollectionId == null ? "" : expectedDigitalCollectionId.trim();
+        JSONObject candidate = null;
+        double lowest = Double.NaN;
+        JSONArray listings = marketListings(account, groupId);
+        for (int index = 0; index < listings.length(); index++) {
+            JSONObject listing = listings.optJSONObject(index);
+            if (listing == null || listing.optBoolean("locked", false)) continue;
+            String collectionId = listing.optString("digitalCollectionId");
+            if (collectionId.isEmpty() || (!expected.isEmpty() && !expected.equals(collectionId))) continue;
+            double price = decimal(listing.opt("price"), Double.NaN);
+            if (!Double.isFinite(price) || price <= 0d || price > maxPrice) continue;
+            if (candidate == null || price < lowest) {
+                candidate = listing;
+                lowest = price;
+            }
+        }
+        if (candidate == null) {
+            throw new NativeException(expected.isEmpty() ? "当前价格范围内没有可购买挂单" : "目标挂单已变化，请重新确认");
+        }
+        return candidate;
     }
 
     private static String listingKey(JSONObject listing) {

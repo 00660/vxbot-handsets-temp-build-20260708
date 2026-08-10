@@ -1048,9 +1048,11 @@ public final class MainActivity extends Activity {
                 Button configure = button("交易任务", false); configure.setOnClickListener(v -> showTradeDialog(item));
                 Button preflight = button("预检", false); preflight.setOnClickListener(v -> showTradePreflight(item));
                 Button retired = button("捡漏", false); retired.setOnClickListener(v -> showRetiredDialog(item));
+                Button purchase = button("立即买入", true); purchase.setOnClickListener(v -> showImmediatePurchaseDialog(item));
                 actions.addView(configure, new LinearLayout.LayoutParams(0, dp(42), 1));
                 actions.addView(preflight, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
                 actions.addView(retired, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
+                actions.addView(purchase, marginParams(dp(84), dp(42), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2)); target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
         });
@@ -1085,6 +1087,30 @@ public final class MainActivity extends Activity {
             request("保存捡漏任务", "POST", "/native/retired-market/tasks", body, result -> {
                 dialog.dismiss();
                 toast("捡漏任务已保存");
+                showTrade();
+            });
+        });
+    }
+
+    private void showImmediatePurchaseDialog(JSONObject item) {
+        if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
+        LinearLayout form = vertical(Color.TRANSPARENT);
+        EditText maxPrice = numberInput("最高买入价", moneyValue(first(item, "floorPrice", "price")));
+        form.addView(maxPrice, new LinearLayout.LayoutParams(-1, dp(46)));
+        showProjectDialog("立即买入当前挂单", form, "创建待支付订单", dialog -> {
+            JSONObject body = new JSONObject();
+            try {
+                body.put("phone", selectedPhone);
+                body.put("groupId", first(item, "groupId", "id"));
+                body.put("title", first(item, "name", "title"));
+                body.put("cover", first(item, "cover", "image"));
+                body.put("maxPrice", doubleValue(maxPrice, 0));
+            } catch (Exception ignored) {
+            }
+            request("创建待支付订单", "POST", "/native/retired-market/purchases", body, result -> {
+                dialog.dismiss();
+                JSONObject task = result.optJSONObject("data");
+                toast("payment_pending".equals(task == null ? "" : task.optString("status")) ? "订单已创建，等待钱包支付" : "订单状态已更新");
                 showTrade();
             });
         });
@@ -1213,7 +1239,7 @@ public final class MainActivity extends Activity {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) continue;
             String status = task.optString("status", "");
-            String type = retired ? "捡漏" : tradeTypeLabel(task.optString("type", ""));
+            String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
             row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
             String amount;
