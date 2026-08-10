@@ -2219,11 +2219,11 @@ public final class NativeEngine {
         JSONObject candidate = null;
         for (int index = 0; index < listings.length(); index++) {
             JSONObject listing = listings.optJSONObject(index);
-            if (listing == null || listing.optBoolean("locked", false)) continue;
+            if (listing == null || listing.optBoolean("locked", false) || contains(baseline, listingKey(listing))) continue;
             double price = decimal(listing.opt("price"), Double.NaN);
-            if (Double.isFinite(price) && price >= min && price <= max
-                    && (candidate == null || price < decimal(candidate.opt("price"), Double.NaN))) {
+            if (Double.isFinite(price) && price >= min && price <= max) {
                 candidate = listing;
+                break;
             }
         }
         task.put("lastCheckAt", Instant.now().toString());
