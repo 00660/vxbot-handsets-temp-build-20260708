@@ -97,7 +97,8 @@ public final class MainActivity extends Activity {
     private final LruCache<String, Bitmap> coverCache = new LruCache<>(48);
     private LinearLayout marketWatchBox;
     private LinearLayout tradeTaskBox;
-    private LinearLayout tradeCompletedTaskBox;
+    private TextView tradePendingSourceTitle;
+    private LinearLayout tradePendingSourceBox;
     private LinearLayout tradeOrderBox;
     private final Runnable dismissTransientMessage = () -> {
         if (transientMessage != null) transientMessage.setVisibility(View.GONE);
@@ -113,9 +114,8 @@ public final class MainActivity extends Activity {
     private final Runnable tradeRefresh = new Runnable() {
         @Override
         public void run() {
-            if (!"trade".equals(currentPage) || tradeTaskBox == null || tradeCompletedTaskBox == null || tradeOrderBox == null || isFinishing() || isDestroyed()) return;
-            loadTradeTasks(tradeTaskBox, tradeCompletedTaskBox, false);
-            loadOrders(tradeOrderBox, false);
+            if (!"trade".equals(currentPage) || tradeTaskBox == null || tradePendingSourceBox == null || tradeOrderBox == null || isFinishing() || isDestroyed()) return;
+            loadTradeDashboard(false);
             refreshHandler.postDelayed(this, 15_000L);
         }
     };
@@ -839,7 +839,8 @@ public final class MainActivity extends Activity {
     private void stopTradeRefresh() {
         refreshHandler.removeCallbacks(tradeRefresh);
         tradeTaskBox = null;
-        tradeCompletedTaskBox = null;
+        tradePendingSourceTitle = null;
+        tradePendingSourceBox = null;
         tradeOrderBox = null;
     }
 
@@ -1051,12 +1052,15 @@ public final class MainActivity extends Activity {
         find.setOnClickListener(v -> searchTrade(query.getText().toString(), results));
         addSectionTitle("交易任务");
         tradeTaskBox = vertical(Color.TRANSPARENT); content.addView(tradeTaskBox, marginParams(-1, -2, 0, 0, 0, dp(12)));
-        addSectionTitle("已完成任务");
-        tradeCompletedTaskBox = vertical(Color.TRANSPARENT); content.addView(tradeCompletedTaskBox, marginParams(-1, -2, 0, 0, 0, dp(12)));
-        loadTradeTasks(tradeTaskBox, tradeCompletedTaskBox);
+        tradePendingSourceTitle = text("待支付来源", 17, ink, Typeface.BOLD);
+        tradePendingSourceTitle.setVisibility(View.GONE);
+        content.addView(tradePendingSourceTitle, marginParams(-1, -2, 0, 0, 0, dp(8)));
+        tradePendingSourceBox = vertical(Color.TRANSPARENT);
+        tradePendingSourceBox.setVisibility(View.GONE);
+        content.addView(tradePendingSourceBox, marginParams(-1, -2, 0, 0, 0, dp(12)));
         addSectionTitle("订单记录");
         tradeOrderBox = vertical(Color.TRANSPARENT); content.addView(tradeOrderBox, new LinearLayout.LayoutParams(-1, -2));
-        loadOrders(tradeOrderBox);
+        loadTradeDashboard(true);
         refreshHandler.postDelayed(tradeRefresh, 15_000L);
     }
 
@@ -1210,34 +1214,51 @@ public final class MainActivity extends Activity {
         return name + " · 编号 " + id + (quantity.isEmpty() ? "" : " · 可用 " + quantity + " 件");
     }
 
-    private void loadTradeTasks(LinearLayout target, LinearLayout completedTarget) {
-        loadTradeTasks(target, completedTarget, true);
-    }
-
-    private void loadTradeTasks(LinearLayout target, LinearLayout completedTarget, boolean showLoading) {
-        if (showLoading) renderLoading(target, "交易任务同步中");
-        if (showLoading) renderLoading(completedTarget, "已完成任务同步中");
+    private void loadTradeDashboard(boolean showLoading) {
+        final LinearLayout taskTarget = tradeTaskBox;
+        final TextView sourceTitle = tradePendingSourceTitle;
+        final LinearLayout sourceTarget = tradePendingSourceBox;
+        final LinearLayout orderTarget = tradeOrderBox;
+        if (taskTarget == null || sourceTitle == null || sourceTarget == null || orderTarget == null) return;
+        if (showLoading) renderLoading(taskTarget, "交易任务同步中");
+        if (showLoading) renderLoading(orderTarget, "订单同步中");
+        if (showLoading) {
+            sourceTitle.setVisibility(View.GONE);
+            sourceTarget.setVisibility(View.GONE);
+            sourceTarget.removeAllViews();
+        }
         final JSONArray[] tradeTasks = new JSONArray[1];
         final JSONArray[] retiredTasks = new JSONArray[1];
-        final boolean[] completed = new boolean[2];
-        final boolean[] failed = new boolean[2];
+        final JSONObject[] ordersData = new JSONObject[1];
+        final boolean[] completed = new boolean[3];
+        final boolean[] failed = new boolean[3];
         Runnable render = () -> {
-            if (!completed[0] || !completed[1]) return;
-            target.removeAllViews();
-            completedTarget.removeAllViews();
+            if (!completed[0] || !completed[1] || !completed[2]) return;
+            taskTarget.removeAllViews();
+            orderTarget.removeAllViews();
+            sourceTitle.setVisibility(View.GONE);
+            sourceTarget.setVisibility(View.GONE);
+            sourceTarget.removeAllViews();
             if (failed[0] && failed[1]) {
-                renderRetry(target, "交易任务同步失败", () -> loadTradeTasks(target, completedTarget));
-                completedTarget.addView(empty("已完成任务同步失败"));
+                renderRetry(taskTarget, "交易任务同步失败", () -> loadTradeDashboard(true));
+            } else {
+                int visible = renderTradeTaskRows(tradeTasks[0], false, taskTarget);
+                visible += renderTradeTaskRows(retiredTasks[0], true, taskTarget);
+                if (visible == 0) taskTarget.addView(empty("暂无市场交易任务"));
+            }
+            if (failed[2]) {
+                renderRetry(orderTarget, "订单同步失败", () -> loadTradeDashboard(true));
                 return;
             }
-            int visible = renderTradeTaskRows(tradeTasks[0], false, target);
-            visible += renderTradeTaskRows(retiredTasks[0], true, target);
-            if (visible == 0) {
-                target.addView(empty("暂无市场交易任务"));
+            renderPlatformOrders(ordersData[0], orderTarget);
+            if (failed[0] && failed[1]) return;
+            Set<String> pendingOrderIds = pendingOrderIds(ordersData[0]);
+            int sourceCount = renderPendingTaskSources(tradeTasks[0], false, pendingOrderIds, sourceTarget);
+            sourceCount += renderPendingTaskSources(retiredTasks[0], true, pendingOrderIds, sourceTarget);
+            if (sourceCount > 0) {
+                sourceTitle.setVisibility(View.VISIBLE);
+                sourceTarget.setVisibility(View.VISIBLE);
             }
-            int completedCount = renderCompletedTradeTaskRows(tradeTasks[0], false, completedTarget);
-            completedCount += renderCompletedTradeTaskRows(retiredTasks[0], true, completedTarget);
-            if (completedCount == 0) completedTarget.addView(empty("暂无已完成任务"));
         };
         request("同步交易任务", "GET", "/native/market/trade/tasks", null, result -> {
             tradeTasks[0] = findArray(result.optJSONObject("data"), "tasks", "items", "list");
@@ -1255,6 +1276,15 @@ public final class MainActivity extends Activity {
         }, () -> {
             failed[1] = true;
             completed[1] = true;
+            render.run();
+        });
+        request("同步订单", "GET", "/native/orders?refresh=1", null, result -> {
+            ordersData[0] = result.optJSONObject("data");
+            completed[2] = true;
+            render.run();
+        }, () -> {
+            failed[2] = true;
+            completed[2] = true;
             render.run();
         });
     }
@@ -1331,14 +1361,30 @@ public final class MainActivity extends Activity {
         return rendered;
     }
 
-    private int renderCompletedTradeTaskRows(JSONArray tasks, boolean retired, LinearLayout target) {
+    private Set<String> pendingOrderIds(JSONObject data) {
+        Set<String> result = new HashSet<>();
+        if (data == null) return result;
+        JSONArray pending = pendingOrders(mergeOrderGroups(
+                findArray(data, "collectionPendingOrders"),
+                findArray(data, "wantedPendingOrders"),
+                findArray(data, "pendingOrders", "pending")
+        ));
+        for (int i = 0; i < pending.length(); i++) {
+            JSONObject order = pending.optJSONObject(i);
+            String orderUuid = first(order, "orderUuid", "orderUUId", "orderNumber", "id");
+            if (!orderUuid.isEmpty()) result.add(orderUuid);
+        }
+        return result;
+    }
+
+    private int renderPendingTaskSources(JSONArray tasks, boolean retired, Set<String> pendingOrderIds, LinearLayout target) {
         if (tasks == null) return 0;
         int rendered = 0;
         for (int i = 0; i < tasks.length(); i++) {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) continue;
             String status = task.optString("status", "");
-            if (!isTerminalTaskStatus(status)) continue;
+            if (!"payment_pending".equals(status) || !pendingOrderIds.contains(task.optString("orderUuid"))) continue;
             String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
             row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
@@ -1352,11 +1398,9 @@ public final class MainActivity extends Activity {
                 amount = money(first(task, "price")) + " · " + Math.max(1, intValue(first(task, "quantity"), 1)) + " 件";
             }
             String metadata = "账号 " + first(task, "phone", "sourcePhone", "-") + " · " + amount;
-            if ("payment_pending".equals(status)) metadata += "\n已创建待支付订单，支付入口在订单记录";
-            else if ("submitted".equals(status)) metadata += "\n已提交至平台";
-            else metadata += "\n任务已结束";
-            String completedAt = first(task, "lockedAt", "submittedAt", "updatedAt");
-            if (!completedAt.isEmpty()) metadata += " · " + time(completedAt);
+            metadata += "\n已创建待支付订单，支付入口在订单记录";
+            String lockedAt = first(task, "lockedAt", "submittedAt", "updatedAt");
+            if (!lockedAt.isEmpty()) metadata += " · " + time(lockedAt);
             row.addView(text(metadata, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
             target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             rendered++;
