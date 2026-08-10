@@ -2994,7 +2994,9 @@ public final class NativeEngine {
             if (entry == null) continue;
             JSONObject collection = entry.optJSONObject("digitalCollection");
             JSONObject normalized = new JSONObject();
-            normalized.put("id", ownedCollectionId(entry, groupId));
+            String instanceId = ownedCollectionId(entry, groupId);
+            normalized.put("id", instanceId);
+            normalized.put("instanceId", instanceId);
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
             normalized.put("locked", integer(first(entry, "lockStatus", "lockedStatus"), 0) > 0);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title"));
@@ -3015,10 +3017,6 @@ public final class NativeEngine {
         for (int index = 0; index < assets.length(); index++) {
             JSONObject asset = assets.optJSONObject(index);
             if (asset != null && requested.equals(asset.optString("id"))) return requested;
-        }
-        if (requested.equals(task.optString("groupId")) && assets.length() == 1) {
-            JSONObject onlyAsset = assets.optJSONObject(0);
-            if (onlyAsset != null && onlyAsset.optString("id").matches("\\d+")) return onlyAsset.optString("id");
         }
         throw new NativeException("所选持仓资产已不可寄售，请重新读取资产");
     }

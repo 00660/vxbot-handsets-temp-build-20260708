@@ -1198,7 +1198,9 @@ public final class MainActivity extends Activity {
             try {
                 body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
                 body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true); body.put("immediate", true);
-                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
+                String instanceId = selectedAsset[0].optString("instanceId");
+                if (!instanceId.matches("\\d+")) { toast("所选持仓缺少实例编号，请重新读取资产"); return; }
+                body.put("digitalCollectionId", instanceId); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
             request("提交寄售", "POST", "/native/market/trade/tasks", body, result -> {
                 dialog.dismiss();
@@ -1219,7 +1221,7 @@ public final class MainActivity extends Activity {
         final Dialog[] picker = new Dialog[1];
         for (int index = 0; index < assets.length(); index++) {
             JSONObject asset = assets.optJSONObject(index);
-            if (asset == null || first(asset, "id").isEmpty()) continue;
+            if (asset == null || first(asset, "instanceId").isEmpty()) continue;
             Button choice = button(assetLabel(asset), false);
             choice.setGravity(Gravity.CENTER_VERTICAL);
             choice.setOnClickListener(v -> {
@@ -1234,8 +1236,8 @@ public final class MainActivity extends Activity {
 
     private String assetLabel(JSONObject asset) {
         if (asset == null) return "当前账号没有可寄售资产";
-        String name = first(asset, "name", "title", "id");
-        String id = first(asset, "id");
+        String name = first(asset, "name", "title", "instanceId");
+        String id = first(asset, "instanceId");
         String quantity = first(asset, "quantity", "holdNum", "count");
         return name + " · 编号 " + id + (quantity.isEmpty() ? "" : " · 可用 " + quantity + " 件");
     }
