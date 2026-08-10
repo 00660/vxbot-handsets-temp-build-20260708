@@ -3020,8 +3020,7 @@ public final class NativeEngine {
         for (int index = 0; index < source.length(); index++) {
             JSONObject entry = source.optJSONObject(index);
             if (entry == null) continue;
-            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2
-                    && integer(first(entry, "consignmentStatus"), -1) == 1) return true;
+            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2) return true;
         }
         return false;
     }
