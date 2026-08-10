@@ -519,7 +519,13 @@ public final class MainActivity extends Activity {
             double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
             LinearLayout row = vertical(Color.TRANSPARENT);
             row.setPadding(0, dp(12), 0, dp(12));
-            if (i > 0) row.setBackgroundColor(0xfff5f7f6);
+            row.setClickable(true);
+            row.setFocusable(true);
+            row.setBackground(ripple(0x1965c68b, shape(i > 0 ? 0xfff5f7f6 : Color.TRANSPARENT, 0, 6)));
+            row.setOnLongClickListener(v -> {
+                showAssetCostDialog(phone, id, name, unitCost);
+                return true;
+            });
             LinearLayout header = horizontal(Color.TRANSPARENT);
             header.setGravity(Gravity.CENTER_VERTICAL);
             ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), name);
@@ -543,12 +549,8 @@ public final class MainActivity extends Activity {
             String performance = Double.isFinite(profit)
                     ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
                     : "录入单件成本后计算真实收益率";
-            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(36), 1));
-            Button editCost = button(hasCost ? "修改成本" : "录入成本", false);
-            editCost.setTextSize(12);
-            editCost.setOnClickListener(v -> showAssetCostDialog(phone, id, name, unitCost));
-            footer.addView(editCost, new LinearLayout.LayoutParams(dp(88), dp(36)));
-            row.addView(footer, marginParams(-1, dp(36), 0, dp(8), 0, 0));
+            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(-1, dp(32)));
+            row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
     }
@@ -1949,9 +1951,6 @@ public final class MainActivity extends Activity {
 
     private LinearLayout metricGrid(JSONObject data, JSONArray items, String phone) {
         LinearLayout grid = vertical(Color.TRANSPARENT);
-        boolean marketAvailable = data != null && data.optBoolean("marketAvailable", false);
-        double estimatedValue = parseDouble(first(data, "estimatedValue"), Double.NaN);
-        double pricedQuantity = parseDouble(first(data, "pricedQuantity"), 0d);
         double costBasis = 0d;
         double costQuantity = 0d;
         double pricedCostValue = 0d;
@@ -1972,24 +1971,20 @@ public final class MainActivity extends Activity {
         boolean hasReturn = costQuantity > 0d && pricedCostValue >= 0d;
         double floatingProfit = hasReturn ? pricedCostValue - costBasis : Double.NaN;
         double returnRate = hasReturn && costBasis > 0d ? floatingProfit / costBasis * 100d : Double.NaN;
-        String estimate = Double.isFinite(estimatedValue) ? money(String.valueOf(estimatedValue)) : (marketAvailable ? "暂无报价" : "--");
         String cost = costQuantity > 0d ? money(String.valueOf(costBasis)) : "待录入";
         String profit = Double.isFinite(floatingProfit) ? signedMoney(floatingProfit) : "--";
         String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "--";
-        String coverage = compactNumber(costQuantity) + "/" + compactNumber(pricedQuantity) + " 件已录成本";
         String[][] values = {
-                {"藏品总数", first(data, "total", "totalCount", "count")},
-                {"市值估算", estimate},
-                {"已录成本", cost},
-                {"浮动收益", profit},
-                {"收益率", rate},
-                {"成本覆盖", coverage}
+                {"持仓数量", first(data, "total", "totalCount", "count")},
+                {"持仓成本", cost},
+                {"未实现收益", profit},
+                {"收益率", rate}
         };
         for (int index = 0; index < values.length; index += 2) {
             LinearLayout row = horizontal(Color.TRANSPARENT);
             row.setWeightSum(2f);
-            addMetricCell(row, values[index][0], values[index][1], index == 3 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : index == 4 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, false);
-            addMetricCell(row, values[index + 1][0], values[index + 1][1], index + 1 == 3 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : index + 1 == 4 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, true);
+            addMetricCell(row, values[index][0], values[index][1], index == 2 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : ink, false);
+            addMetricCell(row, values[index + 1][0], values[index + 1][1], index + 1 == 3 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, true);
             grid.addView(row, marginParams(-1, dp(62), 0, index == 0 ? 0 : dp(6), 0, 0));
         }
         return grid;
