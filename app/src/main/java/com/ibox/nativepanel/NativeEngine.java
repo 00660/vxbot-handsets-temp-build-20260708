@@ -2,7 +2,6 @@ package com.ibox.nativepanel;
 
 import android.content.Context;
 import android.net.Uri;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -1390,6 +1389,9 @@ public final class NativeEngine {
             String priceError = marketTradeConsignmentPriceError(decimal(task.opt("price"), Double.NaN), config);
             if (!priceError.isEmpty()) throw new NativeException(priceError);
             JSONArray owned = ownedCollections(account, task.optString("groupId"));
+            if (owned.length() == 0 && hasActiveConsignment(account, task.optString("groupId"))) {
+                throw new NativeException("当前藏品正在寄售中");
+            }
             String collectionId = resolveOwnedCollectionId(owned, task);
             result.put("owned", owned);
             result.put("digitalCollectionId", collectionId);
@@ -2888,7 +2890,12 @@ public final class NativeEngine {
     private JSONObject marketTradeAssets(String phone, String groupId) throws Exception {
         if (groupId == null || !groupId.trim().matches("\\d+")) throw new NativeException("交易藏品编号无效");
         IBoxDirectClient.Account account = account(phone);
-        return ok(objectOf("groupId", groupId, "items", ownedCollections(account, groupId)));
+        JSONArray items = ownedCollections(account, groupId);
+        return ok(objectOf(
+                "groupId", groupId,
+                "items", items,
+                "consigning", items.length() == 0 && hasActiveConsignment(account, groupId)
+        ));
     }
 
     private JSONObject marketTradeListings(String phone, String groupId) throws Exception {
@@ -2996,12 +3003,6 @@ public final class NativeEngine {
             JSONObject collection = entry.optJSONObject("digitalCollection");
             JSONObject normalized = new JSONObject();
             String instanceId = ownedCollectionId(entry, groupId);
-            Log.i("NativeEngine", "owned_asset group=" + groupId
-                    + " id=" + first(entry, "id")
-                    + " digitalCollectionId=" + first(entry, "digitalCollectionId")
-                    + " assetNo=" + first(entry, "assetNo")
-                    + " tokenId=" + first(entry, "tokenId")
-                    + " orderId=" + first(entry, "orderId"));
             normalized.put("id", instanceId);
             normalized.put("instanceId", instanceId);
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
@@ -3010,6 +3011,19 @@ public final class NativeEngine {
             if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false)) result.put(normalized);
         }
         return result;
+    }
+
+    private boolean hasActiveConsignment(IBoxDirectClient.Account account, String groupId) throws Exception {
+        JSONObject query = objectOf("pageNo", 1, "pageSize", 100, "lockStatus", 1);
+        JSONObject response = client.requestAuthenticated(account, "GET", OWNED_GROUP_URL + "/" + encodePath(groupId), null, query, false, "寄售状态");
+        JSONArray source = firstArray(data(response), "collectionAssets", "list", "records", "items", "rows", "data");
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject entry = source.optJSONObject(index);
+            if (entry == null) continue;
+            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2
+                    && integer(first(entry, "consignmentStatus"), -1) == 1) return true;
+        }
+        return false;
     }
 
     private static String ownedCollectionId(JSONObject entry, String groupId) {

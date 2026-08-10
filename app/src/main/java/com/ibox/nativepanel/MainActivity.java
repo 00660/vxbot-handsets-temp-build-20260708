@@ -1162,8 +1162,9 @@ public final class MainActivity extends Activity {
         String groupId = first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId");
         if (!groupId.matches("\\d+")) { toast("该持仓缺少藏品组编号"); return; }
         request("读取可寄售资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/market-trade/assets?groupId=" + Uri.encode(groupId), null, result -> {
-            JSONArray assets = findArray(result.optJSONObject("data"), "items", "assets", "list");
-            if (assets == null || assets.length() == 0) { toast("当前没有可寄售资产"); return; }
+            JSONObject data = result.optJSONObject("data");
+            JSONArray assets = findArray(data, "items", "assets", "list");
+            if (assets == null || assets.length() == 0) { toast(data != null && data.optBoolean("consigning", false) ? "当前藏品正在寄售中" : "当前没有可寄售资产"); return; }
             showAssetConsignmentDialog(phone, asset, assets);
         });
     }
