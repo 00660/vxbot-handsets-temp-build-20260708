@@ -821,8 +821,7 @@ public final class NativeEngine {
             JSONObject platform = new JSONObject();
             platform.put("code", first(entry, "paymentPlatformCode", "platformCode", "code"));
             platform.put("name", first(entry, "platformName", "paymentPlatformName", "name", "paymentType", "platformType"));
-            Object activationValue = entry.has("activationStatus") ? entry.opt("activationStatus")
-                    : entry.has("status") ? entry.opt("status") : entry.opt("isOpen");
+            Object activationValue = paymentPlatformActivationValue(entry);
             platform.put("activationStatus", activationValue instanceof Boolean ? (bool(activationValue) ? 1 : 0) : integer(activationValue, 0));
             platform.put("enabled", entry.optBoolean("enabled", entry.optBoolean("isEnabled", true)));
             platform.put("available", entry.optBoolean("available", entry.optBoolean("isAvailable", true)));
@@ -2844,8 +2843,7 @@ public final class NativeEngine {
             JSONObject item = platforms.optJSONObject(index);
             if (item == null) continue;
             int code = integer(first(item, "paymentPlatformCode", "platformCode", "code"), 0);
-            Object activationValue = item.has("activationStatus") ? item.opt("activationStatus")
-                    : item.has("status") ? item.opt("status") : item.opt("isOpen");
+            Object activationValue = paymentPlatformActivationValue(item);
             int activation = activationValue instanceof Boolean ? (bool(activationValue) ? 1 : 0) : integer(activationValue, 0);
             boolean enabled = item.optBoolean("enabled", item.optBoolean("isEnabled", true));
             boolean available = item.optBoolean("available", item.optBoolean("isAvailable", true));
@@ -2856,6 +2854,15 @@ public final class NativeEngine {
         if (requestedCode > 0) throw new NativeException("指定支付通道当前不可用");
         if (fallback <= 0) throw new NativeException("未找到可用支付通道");
         return fallback;
+    }
+
+    private static Object paymentPlatformActivationValue(JSONObject item) {
+        if (item == null) return JSONObject.NULL;
+        if (item.has("activationStatus")) return item.opt("activationStatus");
+        if (item.has("status")) return item.opt("status");
+        if (item.has("isOpen")) return item.opt("isOpen");
+        if (item.has("enabled")) return item.opt("enabled");
+        return item.opt("available");
     }
 
     private String cashierLink(IBoxDirectClient.Account account, String orderUuid, int initiatorType) throws Exception {
