@@ -3006,11 +3006,9 @@ public final class NativeEngine {
     }
 
     private static String ownedCollectionId(JSONObject entry, JSONObject collection, String groupId) {
-        String assetNo = first(entry, "assetNo");
-        if (assetNo.matches("\\d+")) return assetNo;
-        String nested = collection == null ? "" : first(collection, "id", "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
-        String entryId = first(entry, "id", "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
-        for (String candidate : new String[]{nested, entryId}) {
+        String entryId = first(entry, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
+        String nested = collection == null ? "" : first(collection, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
+        for (String candidate : new String[]{entryId, nested}) {
             if (candidate.matches("\\d+") && !candidate.equals(groupId)) return candidate;
         }
         return "";
