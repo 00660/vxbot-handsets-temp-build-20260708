@@ -395,6 +395,7 @@ public final class NativeEngine {
         ));
         JSONArray pendingOrders = new JSONArray();
         for (JSONObject order : pending) pendingOrders.put(order);
+        reconcileImmediatePurchaseTasks(account, collectionOrders.items);
         return ok(objectOf(
                 "phone", account.phone,
                 "collectionPendingOrders", collectionOrders.items,
@@ -429,7 +430,10 @@ public final class NativeEngine {
         result.put("orderUuid", deepString(order, "orderUuid", "orderUUId"));
         result.put("listingOrderItemId", deepString(order, "listingOrderItemId"));
         result.put("type", type);
-        result.put("groupId", first(order, "groupId", "digitalCollectionGroupId", "collectionGroupId"));
+        String groupId = first(order, "groupId", "digitalCollectionGroupId", "collectionGroupId");
+        if (groupId.isEmpty()) groupId = first(preview, "groupId", "digitalCollectionGroupId", "collectionGroupId");
+        if (groupId.isEmpty()) groupId = first(collection, "groupId", "digitalCollectionGroupId", "collectionGroupId");
+        result.put("groupId", groupId);
         String title = first(order, "name", "title", "productName", "digitalCollectionName");
         if (title.isEmpty()) title = assetName(preview);
         if (title.isEmpty()) title = assetName(collection);
@@ -448,6 +452,50 @@ public final class NativeEngine {
         result.put("phone", phone);
         result.put("source", "platform_order_service");
         return result;
+    }
+
+    private void reconcileImmediatePurchaseTasks(IBoxDirectClient.Account account, JSONArray pendingOrders) throws Exception {
+        JSONArray tasks = store.getTradeTasks();
+        boolean changed = false;
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null || !"retired_market".equals(task.optString("localType"))
+                    || !"immediate_purchase".equals(task.optString("executionMode"))
+                    || !account.phone.equals(task.optString("phone"))
+                    || !task.optString("orderUuid").isEmpty()
+                    || !"failed".equals(task.optString("status"))
+                    || !task.optString("lastResult").contains("未支付")) continue;
+            JSONObject matched = null;
+            for (int orderIndex = 0; orderIndex < pendingOrders.length(); orderIndex++) {
+                JSONObject order = pendingOrders.optJSONObject(orderIndex);
+                if (order != null && task.optString("groupId").equals(order.optString("groupId"))
+                        && !order.optString("orderUuid").isEmpty()) {
+                    matched = order;
+                    break;
+                }
+            }
+            if (matched == null) continue;
+            String orderUuid = matched.optString("orderUuid");
+            String cashier = "";
+            String cashierError = "";
+            try {
+                cashier = cashierLink(account, orderUuid, 0);
+            } catch (Exception error) {
+                cashierError = message(error);
+            }
+            task.put("orderUuid", orderUuid);
+            task.put("cashierLink", cashier);
+            task.put("paymentStatus", cashier.isEmpty() ? "unavailable" : "pending");
+            task.put("enabled", false);
+            task.put("status", "payment_pending");
+            task.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
+            task.put("lockedPrice", matched.opt("price"));
+            task.put("lockedAt", Instant.now().toString());
+            task.put("updatedAt", Instant.now().toString());
+            addEvent(task, "payment_pending", "已恢复平台待支付订单");
+            changed = true;
+        }
+        if (changed) store.saveTradeTasks(tasks);
     }
 
     private static void appendOrders(List<JSONObject> target, JSONArray source) {
@@ -1243,7 +1291,7 @@ public final class NativeEngine {
         task.put("groupId", groupId);
         task.put("title", first(task, "title", "name", "groupName", "groupId"));
         task.put("enabled", true);
-        task.put("status", "scheduled");
+        task.put("status", "submitting");
         task.put("pendingDigitalCollectionId", candidate.optString("digitalCollectionId"));
         task.put("pendingPrice", candidate.opt("price"));
         task.put("createdAt", now);
