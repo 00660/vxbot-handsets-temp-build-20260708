@@ -221,6 +221,21 @@ public final class IBoxDirectClient {
     public JSONObject searchMarkets(Account account, String name, int pageNo, int pageSize) throws Exception {
         requireAccount(account);
         String query = name == null ? "" : name.trim();
+        JSONArray items = normalizedMarketSearchItems(searchMarketRows(account, query, pageNo, pageSize), query, pageSize);
+        String fallbackQuery = marketSearchPrefix(query);
+        if (items.length() == 0 && !fallbackQuery.equals(query)) {
+            items = normalizedMarketSearchItems(searchMarketRows(account, fallbackQuery, pageNo, pageSize), query, pageSize);
+        }
+
+        JSONObject result = new JSONObject();
+        result.put("query", query);
+        result.put("marketAvailable", true);
+        result.put("marketUpdatedAt", nowIso());
+        result.put("items", items);
+        return result;
+    }
+
+    private JSONArray searchMarketRows(Account account, String query, int pageNo, int pageSize) throws Exception {
         JSONObject payload = authenticatedGet(
                 MARKET_URL + "?sortType=0&pageNo=" + encode(pageNo)
                         + "&segmentId=-1&sortField=2&name=" + encode(query)
@@ -228,7 +243,10 @@ public final class IBoxDirectClient {
                 account,
                 "行情搜索"
         );
-        JSONArray rows = assetList(payload);
+        return assetList(payload);
+    }
+
+    private static JSONArray normalizedMarketSearchItems(JSONArray rows, String query, int pageSize) throws JSONException {
         JSONArray items = new JSONArray();
         String needle = query.toLowerCase(Locale.ROOT);
         int maximum = Math.max(0, pageSize);
@@ -250,13 +268,17 @@ public final class IBoxDirectClient {
             normalized.put("floorPrice", floorPrice == null ? JSONObject.NULL : numericValue(floorPrice));
             items.put(normalized);
         }
+        return items;
+    }
 
-        JSONObject result = new JSONObject();
-        result.put("query", query);
-        result.put("marketAvailable", true);
-        result.put("marketUpdatedAt", nowIso());
-        result.put("items", items);
-        return result;
+    private static String marketSearchPrefix(String query) {
+        int end = query.length();
+        char[] separators = {'\u00b7', '\u2022', '\u30fb', '/', '|', '\uff5c', ' '};
+        for (char separator : separators) {
+            int index = query.indexOf(separator);
+            if (index > 0 && index < end) end = index;
+        }
+        return query.substring(0, end).trim();
     }
 
     /**
