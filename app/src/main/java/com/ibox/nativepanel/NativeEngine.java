@@ -1253,6 +1253,7 @@ public final class NativeEngine {
             preflightPlan = preflightMarketTradeTask(task);
             applyMarketTradePreflight(task, preflightPlan, false);
         }
+        task.remove("preflightOwned");
         JSONArray tasks = store.getTradeTasks();
         tasks.put(task);
         if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
@@ -1388,7 +1389,8 @@ public final class NativeEngine {
             JSONObject config = marketTradePublicConfig(account);
             String priceError = marketTradeConsignmentPriceError(decimal(task.opt("price"), Double.NaN), config);
             if (!priceError.isEmpty()) throw new NativeException(priceError);
-            JSONArray owned = ownedCollections(account, task.optString("groupId"));
+            JSONArray owned = task.optJSONArray("preflightOwned");
+            if (owned == null) owned = ownedCollections(account, task.optString("groupId"));
             String collectionId = resolveOwnedCollectionId(owned, task);
             result.put("owned", owned);
             result.put("digitalCollectionId", collectionId);
