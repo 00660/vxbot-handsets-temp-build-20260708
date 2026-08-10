@@ -493,35 +493,89 @@ public final class MainActivity extends Activity {
 
             JSONObject cache = account.optJSONObject("assetCache");
             JSONObject assetData = cache == null ? null : cache.optJSONObject("data");
-            card.addView(text("数字资产" + (cache != null && cache.optBoolean("stale", false) ? " · 缓存" : ""), 15, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
-            card.addView(metricGrid(assetData), marginParams(-1, -2, 0, 0, 0, dp(12)));
             JSONArray items = findArray(assetData, "items", "collections", "records", "list");
-            if (items != null && items.length() > 0) renderAssetRows(card, items);
+            card.addView(portfolioHeadline(assetData, cache != null && cache.optBoolean("stale", false)), marginParams(-1, -2, 0, 0, 0, dp(12)));
+            card.addView(metricGrid(assetData, items, phone), marginParams(-1, -2, 0, 0, 0, dp(14)));
+            if (items != null && items.length() > 0) renderAssetRows(card, items, phone);
             else card.addView(text(cache == null ? "资产同步中" : "暂无资产明细", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(4)));
             content.addView(card, marginParams(-1, -2, 0, 0, 0, dp(14)));
         }
     }
 
-    private void renderAssetRows(LinearLayout card, JSONArray items) {
+    private void renderAssetRows(LinearLayout card, JSONArray items, String phone) {
+        card.addView(text("持仓明细 · " + items.length(), 14, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4)));
         int limit = Math.min(8, items.length());
         for (int i = 0; i < limit; i++) {
             JSONObject item = items.optJSONObject(i);
             if (item == null) continue;
             String name = first(item, "name", "title", "collectionName", "digitalCollectionName", "id");
-            String price = money(first(item, "floorPrice", "price", "valuation", "marketPrice"));
-            String quantity = first(item, "quantity", "num", "count", "holdNum");
-            LinearLayout row = horizontal(Color.TRANSPARENT);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, dp(10), 0, dp(10));
+            String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
+            double quantity = Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 1d));
+            double floorPrice = parseDouble(first(item, "floorPrice", "price", "valuation", "marketPrice"), Double.NaN);
+            double unitCost = engine.store().getAssetCost(phone, id);
+            boolean hasCost = Double.isFinite(unitCost);
+            boolean hasPrice = Double.isFinite(floorPrice);
+            double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
+            double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
+            LinearLayout row = vertical(Color.TRANSPARENT);
+            row.setPadding(0, dp(12), 0, dp(12));
+            if (i > 0) row.setBackgroundColor(0xfff5f7f6);
+            LinearLayout header = horizontal(Color.TRANSPARENT);
+            header.setGravity(Gravity.CENTER_VERTICAL);
             ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), name);
-            row.addView(cover, marginParams(dp(54), dp(54), 0, 0, dp(12), 0));
+            header.addView(cover, marginParams(dp(52), dp(52), 0, 0, dp(12), 0));
             LinearLayout info = vertical(Color.TRANSPARENT);
             info.addView(text(name, 14, ink, Typeface.BOLD));
-            info.addView(text("数量 " + (quantity.isEmpty() ? "1" : quantity), 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
-            row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(text(price, 14, success, Typeface.BOLD), new LinearLayout.LayoutParams(-2, -2));
+            String position = "持仓 " + compactNumber(quantity) + " 件 · " + (hasCost ? "成本 " + money(String.valueOf(unitCost)) : "成本待录入");
+            info.addView(text(position, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
+            header.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout valuation = vertical(Color.TRANSPARENT);
+            TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : "地板待同步", 14, hasPrice ? success : muted, Typeface.BOLD);
+            floor.setGravity(Gravity.RIGHT);
+            valuation.addView(floor, new LinearLayout.LayoutParams(-1, -2));
+            TextView floorLabel = text("当前地板", 10, muted, Typeface.NORMAL);
+            floorLabel.setGravity(Gravity.RIGHT);
+            valuation.addView(floorLabel, marginParams(-1, -2, 0, dp(3), 0, 0));
+            header.addView(valuation, new LinearLayout.LayoutParams(dp(94), -2));
+            row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout footer = horizontal(Color.TRANSPARENT);
+            footer.setGravity(Gravity.CENTER_VERTICAL);
+            String performance = Double.isFinite(profit)
+                    ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
+                    : "录入单件成本后计算真实收益率";
+            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(36), 1));
+            Button editCost = button(hasCost ? "修改成本" : "录入成本", false);
+            editCost.setTextSize(12);
+            editCost.setOnClickListener(v -> showAssetCostDialog(phone, id, name, unitCost));
+            footer.addView(editCost, new LinearLayout.LayoutParams(dp(88), dp(36)));
+            row.addView(footer, marginParams(-1, dp(36), 0, dp(8), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
+    }
+
+    private void showAssetCostDialog(String phone, String assetId, String name, double existingCost) {
+        if (assetId.isEmpty()) {
+            toast("该藏品缺少可保存的编号");
+            return;
+        }
+        LinearLayout form = vertical(Color.TRANSPARENT);
+        form.addView(text("录入单件实际买入成本，用于计算未实现收益和收益率。数据仅保存在本机。", 13, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(10)));
+        EditText cost = numberInput("单件持仓成本", Double.isFinite(existingCost) ? moneyValue(String.valueOf(existingCost)) : "");
+        form.addView(cost, new LinearLayout.LayoutParams(-1, dp(46)));
+        showProjectDialog("持仓成本 · " + name, form, "保存成本", dialog -> {
+            double value = doubleValue(cost, Double.NaN);
+            if (!Double.isFinite(value) || value <= 0d) {
+                toast("请输入大于 0 的单件成本");
+                return;
+            }
+            if (!engine.store().saveAssetCost(phone, assetId, value)) {
+                toast("持仓成本保存失败");
+                return;
+            }
+            dialog.dismiss();
+            content.removeAllViews();
+            renderAccountCards();
+        });
     }
 
     private void syncAccountAssets() {
@@ -1875,14 +1929,80 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private LinearLayout metricGrid(JSONObject data) {
-        LinearLayout grid = horizontal(Color.TRANSPARENT); grid.setWeightSum(2f);
+    private LinearLayout portfolioHeadline(JSONObject data, boolean stale) {
+        LinearLayout headline = horizontal(Color.TRANSPARENT);
+        headline.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout value = vertical(Color.TRANSPARENT);
+        value.addView(text("组合市值", 12, muted, Typeface.BOLD));
+        String estimate = first(data, "estimatedValue");
         boolean marketAvailable = data != null && data.optBoolean("marketAvailable", false);
-        String estimatedValue = first(data, "estimatedValue");
-        String estimate = estimatedValue.isEmpty() ? (marketAvailable ? "暂无报价" : "--") : money(estimatedValue);
-        String[][] values = {{"藏品总数", first(data, "total", "totalCount", "count")}, {"市值估算", estimate}, {"已估值数量", first(data, "pricedQuantity")}, {"行情状态", marketAvailable ? "已连接" : "暂不可用"}};
-        for (String[] value : values) { LinearLayout box = vertical(0xfff0f8f4); box.setPadding(dp(10), dp(10), dp(10), dp(10)); box.addView(text(value[0], 11, muted, Typeface.NORMAL)); box.addView(text(value[1].isEmpty() ? "--" : value[1], 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0)); LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(68), 1f); params.setMargins(0, 0, dp(6), 0); grid.addView(box, params); }
+        value.addView(text(estimate.isEmpty() ? (marketAvailable ? "暂无报价" : "--") : money(estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
+        value.addView(text(stale ? "行情暂不可用 · 显示缓存" : "按当前地板价估算", 11, muted, Typeface.NORMAL));
+        headline.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView status = text(marketAvailable ? "行情已连接" : "行情不可用", 11, marketAvailable ? success : amber, Typeface.BOLD);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(10), 0, dp(10), 0);
+        status.setBackground(shape(marketAvailable ? 0xffe8f7ee : 0xfffff4df, 0, 18));
+        headline.addView(status, new LinearLayout.LayoutParams(-2, dp(32)));
+        return headline;
+    }
+
+    private LinearLayout metricGrid(JSONObject data, JSONArray items, String phone) {
+        LinearLayout grid = vertical(Color.TRANSPARENT);
+        boolean marketAvailable = data != null && data.optBoolean("marketAvailable", false);
+        double estimatedValue = parseDouble(first(data, "estimatedValue"), Double.NaN);
+        double pricedQuantity = parseDouble(first(data, "pricedQuantity"), 0d);
+        double costBasis = 0d;
+        double costQuantity = 0d;
+        double pricedCostValue = 0d;
+        int itemCount = items == null ? 0 : items.length();
+        for (int index = 0; index < itemCount; index++) {
+            JSONObject item = items.optJSONObject(index);
+            if (item == null) continue;
+            String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
+            double quantity = Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 1d));
+            double unitCost = engine.store().getAssetCost(phone, id);
+            double floorPrice = parseDouble(first(item, "floorPrice", "price", "valuation", "marketPrice"), Double.NaN);
+            if (Double.isFinite(unitCost)) {
+                costBasis += quantity * unitCost;
+                costQuantity += quantity;
+                if (Double.isFinite(floorPrice)) pricedCostValue += quantity * floorPrice;
+            }
+        }
+        boolean hasReturn = costQuantity > 0d && pricedCostValue >= 0d;
+        double floatingProfit = hasReturn ? pricedCostValue - costBasis : Double.NaN;
+        double returnRate = hasReturn && costBasis > 0d ? floatingProfit / costBasis * 100d : Double.NaN;
+        String estimate = Double.isFinite(estimatedValue) ? money(String.valueOf(estimatedValue)) : (marketAvailable ? "暂无报价" : "--");
+        String cost = costQuantity > 0d ? money(String.valueOf(costBasis)) : "待录入";
+        String profit = Double.isFinite(floatingProfit) ? signedMoney(floatingProfit) : "--";
+        String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "--";
+        String coverage = compactNumber(costQuantity) + "/" + compactNumber(pricedQuantity) + " 件已录成本";
+        String[][] values = {
+                {"藏品总数", first(data, "total", "totalCount", "count")},
+                {"市值估算", estimate},
+                {"已录成本", cost},
+                {"浮动收益", profit},
+                {"收益率", rate},
+                {"成本覆盖", coverage}
+        };
+        for (int index = 0; index < values.length; index += 2) {
+            LinearLayout row = horizontal(Color.TRANSPARENT);
+            row.setWeightSum(2f);
+            addMetricCell(row, values[index][0], values[index][1], index == 3 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : index == 4 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, false);
+            addMetricCell(row, values[index + 1][0], values[index + 1][1], index + 1 == 3 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : index + 1 == 4 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, true);
+            grid.addView(row, marginParams(-1, dp(62), 0, index == 0 ? 0 : dp(6), 0, 0));
+        }
         return grid;
+    }
+
+    private void addMetricCell(LinearLayout row, String label, String value, int valueColor, boolean last) {
+        LinearLayout cell = vertical(0xfff3f8f5);
+        cell.setPadding(dp(11), dp(8), dp(11), dp(7));
+        cell.addView(text(label, 11, muted, Typeface.NORMAL));
+        cell.addView(text(value == null || value.isEmpty() ? "--" : value, 15, valueColor, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
+        if (!last) params.setMargins(0, 0, dp(6), 0);
+        row.addView(cell, params);
     }
 
     private LinearLayout labelled(String title, View view) { LinearLayout box = vertical(Color.TRANSPARENT); box.addView(text(title, 12, muted, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4))); box.addView(view, marginParams(-1, dp(46), 0, 0, 0, dp(8))); return box; }
@@ -2067,6 +2187,9 @@ public final class MainActivity extends Activity {
     private String number(JSONObject object, String key, String fallback) { return object == null ? fallback : String.valueOf(object.opt(key) == null || object.opt(key) == JSONObject.NULL ? fallback : object.opt(key)); }
     private String money(String value) { if (value == null || value.isEmpty()) return "价格不可用"; try { return "¥" + String.format(Locale.US, "%.2f", Double.parseDouble(value)); } catch (Exception error) { return value; } }
     private String moneyValue(String value) { if (value == null || value.isEmpty()) return ""; try { return String.format(Locale.US, "%.2f", Double.parseDouble(value)); } catch (Exception error) { return value; } }
+    private String signedMoney(double value) { return (value >= 0d ? "+" : "-") + money(String.valueOf(Math.abs(value))); }
+    private String signedPercent(double value) { return (value >= 0d ? "+" : "") + String.format(Locale.US, "%.2f", value) + "%"; }
+    private String compactNumber(double value) { return value == Math.rint(value) ? String.valueOf((long) value) : String.format(Locale.US, "%.2f", value); }
     private String watchDelta(String changeValue, String percentValue) { double change = parseDouble(changeValue, Double.NaN); double percent = parseDouble(percentValue, Double.NaN); if (!Double.isFinite(change)) return "基准价"; String sign = change > 0d ? "+" : ""; String percentText = Double.isFinite(percent) ? " (" + (percent > 0d ? "+" : "") + String.format(Locale.US, "%.2f", percent) + "%)" : ""; return "变化 " + sign + String.format(Locale.US, "%.2f", change) + percentText; }
     private String time(String value) { if (value == null || value.isEmpty()) return "-"; try { return new SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date.from(java.time.Instant.parse(value))); } catch (Exception error) { return value.length() > 16 ? value.substring(0, 16).replace('T', ' ') : value; } }
     private double parseDouble(String value, double fallback) { try { return Double.parseDouble(value.trim()); } catch (Exception error) { return fallback; } }

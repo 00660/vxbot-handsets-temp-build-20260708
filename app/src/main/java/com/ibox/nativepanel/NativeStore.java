@@ -30,6 +30,7 @@ public final class NativeStore {
     private static final String KEY_SYNTHESIS_TASKS = "synthesis_tasks_json";
     private static final String KEY_LOTTERY_TASKS = "lottery_tasks_json";
     private static final String KEY_FIRST_SALE_TASKS = "first_sale_tasks_json";
+    private static final String KEY_ASSET_COSTS = "asset_costs_json";
     private static final String KEY_BARK_CONFIG = "bark_config_json";
     private static final Object LOCK = new Object();
 
@@ -165,9 +166,12 @@ public final class NativeStore {
                 JSONObject first = remaining.optJSONObject(0);
                 selectedPhone = first == null ? "" : first.optString("phone", "");
             }
+            JSONObject costs = readObject(KEY_ASSET_COSTS);
+            costs.remove(target);
             return preferences.edit()
                     .putString(KEY_ACCOUNTS, remaining.toString())
                     .putString(KEY_SELECTED_PHONE, selectedPhone)
+                    .putString(KEY_ASSET_COSTS, costs.toString())
                     .commit();
         }
     }
@@ -218,6 +222,40 @@ public final class NativeStore {
 
     public boolean saveFirstSaleTasks(JSONArray tasks) {
         return saveJsonArray(KEY_FIRST_SALE_TASKS, tasks);
+    }
+
+    public double getAssetCost(String phone, String assetId) {
+        synchronized (LOCK) {
+            JSONObject accountCosts = readObject(KEY_ASSET_COSTS).optJSONObject(trim(phone));
+            if (accountCosts == null) return Double.NaN;
+            Object raw = accountCosts.opt(trim(assetId));
+            if (raw == null || raw == JSONObject.NULL) return Double.NaN;
+            try {
+                double value = Double.parseDouble(String.valueOf(raw));
+                return Double.isFinite(value) && value > 0d ? value : Double.NaN;
+            } catch (NumberFormatException ignored) {
+                return Double.NaN;
+            }
+        }
+    }
+
+    public boolean saveAssetCost(String phone, String assetId, double unitCost) {
+        synchronized (LOCK) {
+            String normalizedPhone = trim(phone);
+            String normalizedAssetId = trim(assetId);
+            if (normalizedPhone.isEmpty() || normalizedAssetId.isEmpty()
+                    || !Double.isFinite(unitCost) || unitCost <= 0d) return false;
+            JSONObject costs = readObject(KEY_ASSET_COSTS);
+            JSONObject accountCosts = costs.optJSONObject(normalizedPhone);
+            if (accountCosts == null) accountCosts = new JSONObject();
+            try {
+                accountCosts.put(normalizedAssetId, unitCost);
+                costs.put(normalizedPhone, accountCosts);
+            } catch (JSONException ignored) {
+                return false;
+            }
+            return preferences.edit().putString(KEY_ASSET_COSTS, costs.toString()).commit();
+        }
     }
 
     public JSONObject getBarkConfig() {
