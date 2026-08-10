@@ -1468,6 +1468,7 @@ public final class NativeEngine {
 
     private static boolean marketTradePriceGate(JSONObject task, JSONObject detail) {
         if (task == null || !"consignment".equals(task.optString("type"))) return false;
+        if (task.optBoolean("immediate", false)) return false;
         double floor = detail == null ? Double.NaN : decimal(detail.opt("floorPrice"), Double.NaN);
         double trigger = decimal(task.opt("triggerPrice"), Double.NaN);
         return !Double.isFinite(floor) || !Double.isFinite(trigger) || floor < trigger;
