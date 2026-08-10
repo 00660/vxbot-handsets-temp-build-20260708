@@ -186,6 +186,7 @@ public final class IBoxDirectClient {
             normalized.put("groupId", groupId.isEmpty() ? id : groupId);
             normalized.put("name", assetName(item));
             normalized.put("quantity", numericValue(quantity));
+            normalized.put("consigning", item.optInt("consignmentStatus") == 1 && item.optInt("consignmentNum") > 0);
             normalized.put("cover", firstNonEmpty(assetCover(marketItem), assetCover(item)));
             Double floorPrice = marketPrice(marketItem);
             normalized.put("floorPrice", floorPrice == null ? JSONObject.NULL : numericValue(floorPrice));

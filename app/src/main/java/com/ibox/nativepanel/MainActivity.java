@@ -530,6 +530,7 @@ public final class MainActivity extends Activity {
             boolean hasCost = Double.isFinite(unitCost);
             boolean hasPrice = Double.isFinite(floorPrice);
             boolean delisted = "delisted".equals(item.optString("marketState"));
+            boolean consigning = item.optBoolean("consigning", false);
             double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
             double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
             LinearLayout row = vertical(Color.TRANSPARENT);
@@ -549,6 +550,7 @@ public final class MainActivity extends Activity {
             info.addView(text(name, 14, ink, Typeface.BOLD));
             String position = "持仓 " + compactNumber(quantity) + " 件 · 成本 " + (hasCost ? money(String.valueOf(unitCost)) : "--");
             info.addView(text(position, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
+            if (consigning) info.addView(text("寄售中", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
             header.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
             TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : (delisted ? "已退市" : "--"), 14, hasPrice ? success : muted, Typeface.BOLD);
@@ -565,9 +567,11 @@ public final class MainActivity extends Activity {
                     ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
                     : "未实现收益 --";
             footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
-            Button consignment = button("寄售", false);
-            consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
-            footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
+            if (!consigning) {
+                Button consignment = button("寄售", false);
+                consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
+                footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
+            }
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
