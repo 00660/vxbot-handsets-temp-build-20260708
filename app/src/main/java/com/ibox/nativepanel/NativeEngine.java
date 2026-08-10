@@ -935,6 +935,7 @@ public final class NativeEngine {
                 request,
                 null,
                 IBoxDirectClient.CaptchaResult.fromJson(captcha),
+                objectOf("Verify-Flag", "true"),
                 true,
                 "首发下单"
         );
@@ -1344,7 +1345,8 @@ public final class NativeEngine {
         double maximum = wanted == null ? Double.NaN : decimal(wanted.opt("highLimitPrice"), Double.NaN);
         if (Double.isFinite(minimum) && price < minimum) throw new NativeException("求购价格低于平台下限");
         if (Double.isFinite(maximum) && price > maximum) throw new NativeException("求购价格高于平台上限");
-        result.put("paymentPlatformCode", paymentPlatformCode(account, 2, requestedCode));
+        JSONArray allowedCodes = wanted == null ? new JSONArray() : firstArray(wanted, "paymentPlatformCodes", "platformCodes");
+        result.put("paymentPlatformCode", paymentPlatformCode(account, 2, requestedCode, allowedCodes));
         return result;
     }
 
@@ -2110,16 +2112,22 @@ public final class NativeEngine {
         if (!"wanted".equals(type)) throw new NativeException("交易任务类型无效");
         int paymentCode = plan.optInt("paymentPlatformCode", 0);
         if (paymentCode <= 0) throw new NativeException("求购预检未返回支付通道");
-        JSONObject request = objectOf(
-                "groupId", integer(task.opt("groupId"), 0),
-                "buyCount", Math.max(1, task.optInt("quantity", 1)),
-                "price", decimal(task.opt("price"), 0d),
-                "paymentPlatformCode", paymentCode
-        );
-        JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_ADVANCE_ORDER_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(task.optJSONObject("captcha")), true, "提交求购");
-        String orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
-        if (orderUuid.isEmpty()) throw new NativeException("求购订单未返回订单编号");
-        String cashier = cashierLink(account, orderUuid, 2);
+        String orderUuid = task.optString("orderUuid");
+        if (orderUuid.isEmpty()) {
+            JSONObject request = objectOf(
+                    "groupId", integer(task.opt("groupId"), 0),
+                    "buyCount", Math.max(1, task.optInt("quantity", 1)),
+                    "price", decimal(task.opt("price"), 0d),
+                    "paymentPlatformCode", paymentCode
+            );
+            JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_ADVANCE_ORDER_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(task.optJSONObject("captcha")), true, "提交求购");
+            orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
+            if (orderUuid.isEmpty()) throw new NativeException("求购订单未返回订单编号");
+            task.put("orderUuid", orderUuid);
+            task.put("paymentStatus", "created");
+        }
+        String cashier = task.optString("cashierLink");
+        if (cashier.isEmpty()) cashier = cashierLink(account, orderUuid, 2);
         task.put("orderUuid", orderUuid);
         task.put("cashierLink", cashier);
         task.put("paymentStatus", "pending");
@@ -2164,17 +2172,23 @@ public final class NativeEngine {
         JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_PURCHASE_CONSIGNMENT_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(task.optJSONObject("captcha")), true, "锁定捡漏订单");
         String orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
         if (orderUuid.isEmpty()) throw new NativeException("捡漏订单未返回订单编号");
-        String cashier = cashierLink(account, orderUuid, 0);
+        String cashier = "";
+        String cashierError = "";
+        try {
+            cashier = cashierLink(account, orderUuid, 0);
+        } catch (Exception error) {
+            cashierError = message(error);
+        }
         task.put("pendingDigitalCollectionId", "");
         task.put("pendingPrice", JSONObject.NULL);
         task.put("lockedDigitalCollectionId", candidate.optString("digitalCollectionId"));
         task.put("lockedPrice", candidate.opt("price"));
         task.put("orderUuid", orderUuid);
         task.put("cashierLink", cashier);
-        task.put("paymentStatus", "pending");
+        task.put("paymentStatus", cashier.isEmpty() ? "unavailable" : "pending");
         task.put("enabled", false);
         task.put("status", "payment_pending");
-        task.put("lastResult", "payment_pending");
+        task.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
         task.put("lockedAt", Instant.now().toString());
         sendBark("iBox 捡漏订单待支付", task.optString("title") + " · ¥" + candidate.optString("price") + "，等待钱包支付。", "active");
     }
@@ -2235,12 +2249,19 @@ public final class NativeEngine {
         JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_PURCHASE_CONSIGNMENT_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(strategy.optJSONObject("captcha")), true, "量化买入");
         String orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
         if (orderUuid.isEmpty()) throw new NativeException("量化买入未返回订单编号");
+        String cashier = "";
+        String cashierError = "";
+        try {
+            cashier = cashierLink(account, orderUuid, 0);
+        } catch (Exception error) {
+            cashierError = message(error);
+        }
         strategy.put("orderUuid", orderUuid);
-        strategy.put("cashierLink", cashierLink(account, orderUuid, 0));
-        strategy.put("paymentStatus", "pending");
+        strategy.put("cashierLink", cashier);
+        strategy.put("paymentStatus", cashier.isEmpty() ? "unavailable" : "pending");
         strategy.put("enabled", false);
         strategy.put("status", "payment_pending");
-        strategy.put("lastResult", "payment_pending");
+        strategy.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
         strategy.put("submittedAt", Instant.now().toString());
         return true;
     }
@@ -2946,13 +2967,19 @@ public final class NativeEngine {
     }
 
     private int paymentPlatformCode(IBoxDirectClient.Account account, int placeOrderMethod, int requestedCode) throws Exception {
+        return paymentPlatformCode(account, placeOrderMethod, requestedCode, new JSONArray());
+    }
+
+    private int paymentPlatformCode(IBoxDirectClient.Account account, int placeOrderMethod, int requestedCode, JSONArray allowedCodes) throws Exception {
         JSONObject response = client.requestAuthenticated(account, "GET", PAYMENT_PLATFORMS_URL, null, objectOf("placeOrderMethod", placeOrderMethod), false, "支付通道");
         JSONArray platforms = firstArray(data(response), "paymentPlatforms", "platforms", "paymentPlatformList", "paymentMethods", "list", "records", "items", "rows", "data");
+        boolean restrictAllowedCodes = allowedCodes != null && allowedCodes.length() > 0;
         int fallback = 0;
         for (int index = 0; index < platforms.length(); index++) {
             JSONObject item = platforms.optJSONObject(index);
             if (item == null) continue;
             int code = integer(first(item, "paymentPlatformCode", "platformCode", "code"), 0);
+            if (restrictAllowedCodes && !contains(allowedCodes, String.valueOf(code))) continue;
             Object activationValue = paymentPlatformActivationValue(item);
             int activation = activationValue instanceof Boolean ? (bool(activationValue) ? 1 : 0) : integer(activationValue, 0);
             boolean enabled = item.optBoolean("enabled", item.optBoolean("isEnabled", true));

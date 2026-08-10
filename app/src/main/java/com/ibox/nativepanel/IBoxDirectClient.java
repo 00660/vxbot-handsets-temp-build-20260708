@@ -308,15 +308,30 @@ public final class IBoxDirectClient {
             boolean encryptedBody,
             String operation
     ) throws Exception {
+        return requestAuthenticatedWithCaptcha(account, method, url, body, query, captcha, null, encryptedBody, operation);
+    }
+
+    /** Adds optional protocol headers together with GeeTest query parameters. */
+    public JSONObject requestAuthenticatedWithCaptcha(
+            Account account,
+            String method,
+            String url,
+            JSONObject body,
+            JSONObject query,
+            CaptchaResult captcha,
+            JSONObject extraHeaders,
+            boolean encryptedBody,
+            String operation
+    ) throws Exception {
         if (captcha == null || !captcha.isComplete()) {
-            return requestAuthenticated(account, method, url, body, query, null, encryptedBody, operation);
+            return requestAuthenticated(account, method, url, body, query, extraHeaders, encryptedBody, operation);
         }
         JSONObject actualQuery = query == null ? new JSONObject() : new JSONObject(query.toString());
         actualQuery.put("lot_number", captcha.lotNumber);
         actualQuery.put("captcha_output", captcha.captchaOutput);
         actualQuery.put("pass_token", captcha.passToken);
         actualQuery.put("gen_time", captcha.genTime);
-        JSONObject headers = new JSONObject();
+        JSONObject headers = extraHeaders == null ? new JSONObject() : new JSONObject(extraHeaders.toString());
         headers.put("Verify-Flag", "true");
         return requestAuthenticated(account, method, url, body, actualQuery, headers, encryptedBody, operation);
     }
