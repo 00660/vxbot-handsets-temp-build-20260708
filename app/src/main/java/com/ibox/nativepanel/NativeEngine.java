@@ -2804,7 +2804,9 @@ public final class NativeEngine {
             normalized.put("tokenId", first(entry, "tokenId"));
             if (normalized.optString("tokenId").isEmpty() && collection != null) normalized.put("tokenId", first(collection, "tokenId"));
             normalized.put("price", numericOrNull(first(entry, "price", "salePrice")));
-            normalized.put("locked", bool(entry.opt("locked")) || (collection != null && integer(first(collection, "lockStatus", "lockedStatus"), 0) > 0));
+            int orderStatus = integer(first(entry, "orderStatus", "status", "orderState"), -1);
+            int lockType = collection == null ? -1 : integer(first(collection, "lockType", "locktType"), -1);
+            normalized.put("locked", orderStatus == 3 && lockType == 3);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title", "digitalCollectionName"));
             normalized.put("cover", collection == null ? first(entry, "coverPicUrl", "coverUrl") : first(collection, "coverPicUrl", "coverUrl"));
             if (!normalized.optString("digitalCollectionId").isEmpty()) result.put(normalized);
