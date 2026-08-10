@@ -990,12 +990,21 @@ public final class MainActivity extends Activity {
                 row.addView(text("编号 " + first(item, "groupId", "id") + " · 地板 " + money(first(item, "floorPrice", "price")), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
                 Button configure = button("交易任务", false); configure.setOnClickListener(v -> showTradeDialog(item));
+                Button preflight = button("预检", false); preflight.setOnClickListener(v -> showTradePreflight(item));
                 Button retired = button("捡漏", false); retired.setOnClickListener(v -> showRetiredDialog(item));
                 actions.addView(configure, new LinearLayout.LayoutParams(0, dp(42), 1));
+                actions.addView(preflight, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
                 actions.addView(retired, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2)); target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
         });
+    }
+
+    private void showTradePreflight(JSONObject item) {
+        if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
+        String groupId = first(item, "groupId", "id");
+        request("读取交易预检", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/market-trade/" + Uri.encode(groupId) + "/preflight", null,
+                result -> showJsonDialog("交易预检", result.optJSONObject("data")));
     }
 
     private void showRetiredDialog(JSONObject item) {

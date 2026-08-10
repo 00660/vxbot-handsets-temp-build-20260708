@@ -115,6 +115,9 @@ public final class NativeEngine {
         if (route.path.startsWith("/accounts/") && route.path.endsWith("/market-trade/assets") && "GET".equals(verb)) {
             return marketTradeAssets(route.segment(2), route.query("groupId"));
         }
+        if (route.path.startsWith("/accounts/") && route.path.contains("/market-trade/") && route.path.endsWith("/preflight") && "GET".equals(verb)) {
+            return marketTradePreflight(route.segment(2), route.segment(4));
+        }
         if (route.path.startsWith("/accounts/") && route.path.contains("/market-trade/") && route.path.endsWith("/listings") && "GET".equals(verb)) {
             return marketTradeListings(route.segment(2), route.segment(4));
         }
@@ -2687,6 +2690,26 @@ public final class NativeEngine {
         if (groupId == null || !groupId.trim().matches("\\d+")) throw new NativeException("交易藏品编号无效");
         IBoxDirectClient.Account account = account(phone);
         return ok(loadMarketTradeDetail(account, groupId));
+    }
+
+    private JSONObject marketTradePreflight(String phone, String groupId) throws Exception {
+        if (groupId == null || !groupId.trim().matches("\\d+")) throw new NativeException("交易藏品编号无效");
+        IBoxDirectClient.Account account = account(phone);
+        JSONObject detail = loadMarketTradeDetail(account, groupId);
+        JSONArray listings = marketListings(account, groupId);
+        JSONArray owned = ownedCollections(account, groupId);
+        JSONObject priceRange = marketTradePublicConfig(account);
+        return ok(objectOf(
+                "detail", detail,
+                "listings", listings,
+                "listingCount", listings.length(),
+                "owned", owned,
+                "ownedQuantity", ownedQuantity(owned),
+                "wantedPaymentPlatformCode", paymentPlatformCode(account, 2, 0),
+                "consignmentPaymentPlatformCode", paymentPlatformCode(account, 1, 0),
+                "priceRange", priceRange,
+                "updatedAt", Instant.now().toString()
+        ));
     }
 
     private JSONObject loadMarketTradeDetail(IBoxDirectClient.Account account, String groupId) throws Exception {
