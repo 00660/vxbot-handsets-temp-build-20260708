@@ -189,6 +189,7 @@ public final class IBoxDirectClient {
             normalized.put("cover", firstNonEmpty(assetCover(marketItem), assetCover(item)));
             Double floorPrice = marketPrice(marketItem);
             normalized.put("floorPrice", floorPrice == null ? JSONObject.NULL : numericValue(floorPrice));
+            normalized.put("marketState", !marketAvailable ? "unavailable" : (floorPrice == null ? "delisted" : "listed"));
             if (floorPrice != null) {
                 estimatedValue += quantity * floorPrice;
                 pricedQuantity += quantity;

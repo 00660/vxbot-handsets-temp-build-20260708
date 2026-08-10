@@ -529,6 +529,7 @@ public final class MainActivity extends Activity {
             double unitCost = engine.store().getAssetCost(phone, id);
             boolean hasCost = Double.isFinite(unitCost);
             boolean hasPrice = Double.isFinite(floorPrice);
+            boolean delisted = "delisted".equals(item.optString("marketState"));
             double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
             double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
             LinearLayout row = vertical(Color.TRANSPARENT);
@@ -546,14 +547,14 @@ public final class MainActivity extends Activity {
             header.addView(cover, marginParams(dp(52), dp(52), 0, 0, dp(12), 0));
             LinearLayout info = vertical(Color.TRANSPARENT);
             info.addView(text(name, 14, ink, Typeface.BOLD));
-            String position = "持仓 " + compactNumber(quantity) + " 件 · " + (hasCost ? "成本 " + money(String.valueOf(unitCost)) : "成本待录入");
+            String position = "持仓 " + compactNumber(quantity) + " 件 · 成本 " + (hasCost ? money(String.valueOf(unitCost)) : "--");
             info.addView(text(position, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
             header.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
-            TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : "地板待同步", 14, hasPrice ? success : muted, Typeface.BOLD);
+            TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : (delisted ? "已退市" : "--"), 14, hasPrice ? success : muted, Typeface.BOLD);
             floor.setGravity(Gravity.RIGHT);
             valuation.addView(floor, new LinearLayout.LayoutParams(-1, -2));
-            TextView floorLabel = text("当前地板", 10, muted, Typeface.NORMAL);
+            TextView floorLabel = text(hasPrice ? "地板价" : "", 10, muted, Typeface.NORMAL);
             floorLabel.setGravity(Gravity.RIGHT);
             valuation.addView(floorLabel, marginParams(-1, -2, 0, dp(3), 0, 0));
             header.addView(valuation, new LinearLayout.LayoutParams(dp(94), -2));
@@ -562,7 +563,7 @@ public final class MainActivity extends Activity {
             footer.setGravity(Gravity.CENTER_VERTICAL);
             String performance = Double.isFinite(profit)
                     ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
-                    : "录入单件成本后计算真实收益率";
+                    : "未实现收益 --";
             footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
             Button consignment = button("寄售", false);
             consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
@@ -2103,15 +2104,20 @@ public final class MainActivity extends Activity {
         LinearLayout value = vertical(Color.TRANSPARENT);
         value.addView(text("组合市值", 12, muted, Typeface.BOLD));
         String estimate = first(data, "estimatedValue");
-        boolean marketAvailable = data != null && data.optBoolean("marketAvailable", false);
-        value.addView(text(estimate.isEmpty() ? (marketAvailable ? "暂无报价" : "--") : money(estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
-        value.addView(text(stale ? "行情暂不可用 · 显示缓存" : "按当前地板价估算", 11, muted, Typeface.NORMAL));
+        JSONArray items = findArray(data, "items", "collections", "records", "list");
+        String pricedQuantity = first(data, "pricedQuantity");
+        String valuationCoverage = "已估值 " + (pricedQuantity.isEmpty() ? "0" : compactNumber(parseDouble(pricedQuantity, 0d)))
+                + " / " + (items == null ? "0" : compactNumber(items.length()));
+        value.addView(text(estimate.isEmpty() ? "--" : money(estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
+        value.addView(text(valuationCoverage, 11, muted, Typeface.NORMAL));
         headline.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView status = text(marketAvailable ? "行情已连接" : "行情不可用", 11, marketAvailable ? success : amber, Typeface.BOLD);
-        status.setGravity(Gravity.CENTER);
-        status.setPadding(dp(10), 0, dp(10), 0);
-        status.setBackground(shape(marketAvailable ? 0xffe8f7ee : 0xfffff4df, 0, 18));
-        headline.addView(status, new LinearLayout.LayoutParams(-2, dp(32)));
+        if (stale) {
+            TextView status = text("缓存", 11, amber, Typeface.BOLD);
+            status.setGravity(Gravity.CENTER);
+            status.setPadding(dp(10), 0, dp(10), 0);
+            status.setBackground(shape(0xfffff4df, 0, 18));
+            headline.addView(status, new LinearLayout.LayoutParams(-2, dp(32)));
+        }
         return headline;
     }
 
@@ -2120,6 +2126,7 @@ public final class MainActivity extends Activity {
         double costBasis = 0d;
         double costQuantity = 0d;
         double pricedCostValue = 0d;
+        double pricedCostQuantity = 0d;
         int itemCount = items == null ? 0 : items.length();
         for (int index = 0; index < itemCount; index++) {
             JSONObject item = items.optJSONObject(index);
@@ -2131,10 +2138,13 @@ public final class MainActivity extends Activity {
             if (Double.isFinite(unitCost)) {
                 costBasis += quantity * unitCost;
                 costQuantity += quantity;
-                if (Double.isFinite(floorPrice)) pricedCostValue += quantity * floorPrice;
+                if (Double.isFinite(floorPrice)) {
+                    pricedCostValue += quantity * floorPrice;
+                    pricedCostQuantity += quantity;
+                }
             }
         }
-        boolean hasReturn = costQuantity > 0d && pricedCostValue >= 0d;
+        boolean hasReturn = costQuantity > 0d && Double.compare(pricedCostQuantity, costQuantity) == 0;
         double floatingProfit = hasReturn ? pricedCostValue - costBasis : Double.NaN;
         double returnRate = hasReturn && costBasis > 0d ? floatingProfit / costBasis * 100d : Double.NaN;
         String cost = costQuantity > 0d ? money(String.valueOf(costBasis)) : "待录入";
