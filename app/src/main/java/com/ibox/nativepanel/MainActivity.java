@@ -96,6 +96,8 @@ public final class MainActivity extends Activity {
     private final Set<String> assetSyncInFlight = new HashSet<>();
     private final LruCache<String, Bitmap> coverCache = new LruCache<>(48);
     private LinearLayout marketWatchBox;
+    private LinearLayout tradeTaskBox;
+    private LinearLayout tradeOrderBox;
     private final Runnable dismissTransientMessage = () -> {
         if (transientMessage != null) transientMessage.setVisibility(View.GONE);
     };
@@ -104,6 +106,15 @@ public final class MainActivity extends Activity {
         public void run() {
             if (!"market".equals(currentPage) || marketWatchBox == null || isFinishing() || isDestroyed()) return;
             loadWatches(marketWatchBox, true, false);
+            refreshHandler.postDelayed(this, 15_000L);
+        }
+    };
+    private final Runnable tradeRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (!"trade".equals(currentPage) || tradeTaskBox == null || tradeOrderBox == null || isFinishing() || isDestroyed()) return;
+            loadTradeTasks(tradeTaskBox, false);
+            loadOrders(tradeOrderBox, false);
             refreshHandler.postDelayed(this, 15_000L);
         }
     };
@@ -133,6 +144,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         stopMarketWatchRefresh();
+        stopTradeRefresh();
         if (io != null) io.shutdownNow();
         super.onDestroy();
     }
@@ -386,6 +398,7 @@ public final class MainActivity extends Activity {
     private void selectPage(String key) {
         if (content == null) return;
         if (!"market".equals(key)) stopMarketWatchRefresh();
+        if (!"trade".equals(key)) stopTradeRefresh();
         scrollContentToTop();
         currentPage = key;
         for (int i = 0; i < navButtons.size(); i++) {
@@ -822,6 +835,12 @@ public final class MainActivity extends Activity {
         marketWatchBox = null;
     }
 
+    private void stopTradeRefresh() {
+        refreshHandler.removeCallbacks(tradeRefresh);
+        tradeTaskBox = null;
+        tradeOrderBox = null;
+    }
+
     private void addWatch(JSONObject item, LinearLayout resultBox, EditText query, LinearLayout watchBox) {
         JSONObject body = new JSONObject();
         try {
@@ -1019,6 +1038,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showTrade() {
+        stopTradeRefresh();
         content.removeAllViews();
         LinearLayout search = horizontal(Color.TRANSPARENT);
         EditText query = input("输入藏品名称");
@@ -1028,11 +1048,12 @@ public final class MainActivity extends Activity {
         LinearLayout results = vertical(Color.TRANSPARENT); content.addView(results, marginParams(-1, -2, 0, 0, 0, dp(10)));
         find.setOnClickListener(v -> searchTrade(query.getText().toString(), results));
         addSectionTitle("交易任务");
-        LinearLayout tasks = vertical(Color.TRANSPARENT); content.addView(tasks, marginParams(-1, -2, 0, 0, 0, dp(12)));
-        loadTradeTasks(tasks);
+        tradeTaskBox = vertical(Color.TRANSPARENT); content.addView(tradeTaskBox, marginParams(-1, -2, 0, 0, 0, dp(12)));
+        loadTradeTasks(tradeTaskBox);
         addSectionTitle("订单记录");
-        LinearLayout orders = vertical(Color.TRANSPARENT); content.addView(orders, new LinearLayout.LayoutParams(-1, -2));
-        loadOrders(orders);
+        tradeOrderBox = vertical(Color.TRANSPARENT); content.addView(tradeOrderBox, new LinearLayout.LayoutParams(-1, -2));
+        loadOrders(tradeOrderBox);
+        refreshHandler.postDelayed(tradeRefresh, 15_000L);
     }
 
     private void searchTrade(String name, LinearLayout target) {
@@ -1186,7 +1207,11 @@ public final class MainActivity extends Activity {
     }
 
     private void loadTradeTasks(LinearLayout target) {
-        renderLoading(target, "交易任务同步中");
+        loadTradeTasks(target, true);
+    }
+
+    private void loadTradeTasks(LinearLayout target, boolean showLoading) {
+        if (showLoading) renderLoading(target, "交易任务同步中");
         final JSONArray[] tradeTasks = new JSONArray[1];
         final JSONArray[] retiredTasks = new JSONArray[1];
         final boolean[] completed = new boolean[2];
@@ -1198,12 +1223,11 @@ public final class MainActivity extends Activity {
                 renderRetry(target, "交易任务同步失败", () -> loadTradeTasks(target));
                 return;
             }
-            if ((tradeTasks[0] == null || tradeTasks[0].length() == 0) && (retiredTasks[0] == null || retiredTasks[0].length() == 0)) {
+            int visible = renderTradeTaskRows(tradeTasks[0], false, target);
+            visible += renderTradeTaskRows(retiredTasks[0], true, target);
+            if (visible == 0) {
                 target.addView(empty("暂无市场交易任务"));
-                return;
             }
-            renderTradeTaskRows(tradeTasks[0], false, target);
-            renderTradeTaskRows(retiredTasks[0], true, target);
         };
         request("同步交易任务", "GET", "/native/market/trade/tasks", null, result -> {
             tradeTasks[0] = findArray(result.optJSONObject("data"), "tasks", "items", "list");
@@ -1226,18 +1250,23 @@ public final class MainActivity extends Activity {
     }
 
     private void loadOrders(LinearLayout target) {
-        renderLoading(target, "订单同步中");
+        loadOrders(target, true);
+    }
+
+    private void loadOrders(LinearLayout target, boolean showLoading) {
+        if (showLoading) renderLoading(target, "订单同步中");
         request("同步订单", "GET", "/native/orders?refresh=1", null, result -> {
             target.removeAllViews();
             renderPlatformOrders(result.optJSONObject("data"), target);
         }, () -> renderRetry(target, "订单同步失败", () -> loadOrders(target)));
     }
 
-    private void renderTradeTaskRows(JSONArray tasks, boolean retired, LinearLayout target) {
-        if (tasks == null) return;
+    private int renderTradeTaskRows(JSONArray tasks, boolean retired, LinearLayout target) {
+        if (tasks == null) return 0;
+        int rendered = 0;
         for (int i = 0; i < tasks.length(); i++) {
             JSONObject task = tasks.optJSONObject(i);
-            if (task == null) continue;
+            if (task == null || "payment_pending".equals(task.optString("status"))) continue;
             String status = task.optString("status", "");
             String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
@@ -1245,7 +1274,7 @@ public final class MainActivity extends Activity {
             String amount;
             if (retired) {
                 amount = "价格 " + money(first(task, "minPrice")) + " 至 " + money(first(task, "maxPrice"));
-                if ("locked".equals(status) || "payment_pending".equals(status)) amount += " · 锁定 " + money(first(task, "lockedPrice"));
+                if ("locked".equals(status)) amount += " · 锁定 " + money(first(task, "lockedPrice"));
             } else if ("consignment".equals(task.optString("type"))) {
                 amount = "挂牌 " + money(first(task, "price")) + " · 行情不低于 " + money(first(task, "triggerPrice"));
             } else {
@@ -1264,10 +1293,6 @@ public final class MainActivity extends Activity {
                     Button verify = button("完成人机验证", true);
                     verify.setOnClickListener(v -> startTaskCaptcha(retired ? "捡漏" : "交易", id, first(task, "phone", "sourcePhone")));
                     actions.addView(verify, new LinearLayout.LayoutParams(0, dp(42), 1));
-                } else if ("payment_pending".equals(status)) {
-                    Button payment = button("进入支付", true);
-                    payment.setOnClickListener(v -> request("获取支付链接", "POST", base + Uri.encode(id) + "/payment", null, result -> openWallet(first(result.optJSONObject("data"), "cashierLink", "paymentUrl"))));
-                    actions.addView(payment, new LinearLayout.LayoutParams(0, dp(42), 1));
                 } else if ((retired && ("draft".equals(status) || "paused".equals(status) || "blocked".equals(status)))
                         || (!retired && ("draft".equals(status) || "paused".equals(status) || "blocked".equals(status)))) {
                     Button start = button("启动监控", false);
@@ -1290,7 +1315,9 @@ public final class MainActivity extends Activity {
                 row.addView(actions, marginParams(-1, -2, 0, dp(10), 0, 0));
             }
             target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+            rendered++;
         }
+        return rendered;
     }
 
     private void renderPlatformOrders(JSONObject data, LinearLayout target) {
@@ -1298,11 +1325,11 @@ public final class MainActivity extends Activity {
             target.addView(empty("暂无订单"));
             return;
         }
-        JSONArray pending = mergeOrderGroups(
+        JSONArray pending = pendingOrders(mergeOrderGroups(
                 findArray(data, "collectionPendingOrders"),
                 findArray(data, "wantedPendingOrders"),
                 findArray(data, "pendingOrders", "pending")
-        );
+        ));
         JSONArray sells = arrayOrEmpty(findArray(data, "sellOrders"));
         JSONArray buys = withoutPendingBuys(findArray(data, "buyOrders"));
         if (pending.length() == 0 && sells.length() == 0 && buys.length() == 0) {
@@ -1340,6 +1367,16 @@ public final class MainActivity extends Activity {
         return result;
     }
 
+    private JSONArray pendingOrders(JSONArray orders) {
+        JSONArray result = new JSONArray();
+        if (orders == null) return result;
+        for (int i = 0; i < orders.length(); i++) {
+            JSONObject order = orders.optJSONObject(i);
+            if (order != null && intValue(first(order, "orderStatus", "status", "orderState"), -1) == 0) result.put(order);
+        }
+        return result;
+    }
+
     private void renderOrderGroup(String title, JSONArray orders, boolean pending, LinearLayout target) {
         TextView heading = text(title + " · " + orders.length(), 14, ink, Typeface.BOLD);
         target.addView(heading, marginParams(-1, -2, 0, 0, 0, dp(8)));
@@ -1365,6 +1402,20 @@ public final class MainActivity extends Activity {
             header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
             header.addView(text(money(first(order, "price", "salePrice", "totalPrice", "amount")), 13, pending ? amber : success, Typeface.BOLD), new LinearLayout.LayoutParams(-2, -2));
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
+            if (pending && !orderId.isEmpty()) {
+                Button payment = button("进入支付", true);
+                payment.setOnClickListener(v -> {
+                    JSONObject body = new JSONObject();
+                    try {
+                        body.put("phone", first(order, "phone", selectedPhone));
+                        body.put("paymentInitiatorType", "collection_pending".equals(order.optString("type")) ? 0 : 2);
+                    } catch (Exception ignored) {
+                    }
+                    request("获取支付链接", "POST", "/native/orders/" + Uri.encode(orderId) + "/payment", body,
+                            result -> openWallet(first(result.optJSONObject("data"), "cashierLink", "paymentUrl")));
+                });
+                row.addView(payment, marginParams(-1, dp(40), 0, dp(10), 0, 0));
+            }
             String listingOrderItemId = first(order, "listingOrderItemId");
             if (!pending && !listingOrderItemId.isEmpty() && intValue(first(order, "orderType"), -1) == 2) {
                 Button cancel = button("取消寄售", false);
