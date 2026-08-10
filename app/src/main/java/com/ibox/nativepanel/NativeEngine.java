@@ -1225,9 +1225,7 @@ public final class NativeEngine {
                 String digitalCollectionId = first(task, "digitalCollectionId");
                 if (!digitalCollectionId.matches("\\d+")) throw new NativeException("寄售任务需要选择持仓资产");
                 double triggerPrice = decimal(task.opt("triggerPrice"), Double.NaN);
-                if (!task.optBoolean("immediate", false) && (!Double.isFinite(triggerPrice) || triggerPrice <= 0d)) {
-                    throw new NativeException("寄售任务需要触发行情价");
-                }
+                if (!Double.isFinite(triggerPrice) || triggerPrice <= 0d) throw new NativeException("寄售任务需要触发行情价");
                 if (task.optString("consignPassword").trim().isEmpty()) throw new NativeException("寄售任务需要交易密码");
             }
         } else {
@@ -1248,32 +1246,18 @@ public final class NativeEngine {
         task.put("createdAt", now);
         task.put("updatedAt", now);
         task.put("events", new JSONArray());
+        JSONObject preflightPlan = null;
         if ("retired_market".equals(kind)) {
             validateRetiredMarketTask(task);
         } else {
-            JSONObject plan = preflightMarketTradeTask(task);
-            applyMarketTradePreflight(task, plan, false);
+            preflightPlan = preflightMarketTradeTask(task);
+            applyMarketTradePreflight(task, preflightPlan, false);
         }
         JSONArray tasks = store.getTradeTasks();
         tasks.put(task);
         if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
         if (task.optBoolean("enabled", false)) {
-            if ("market_trade".equals(kind) && task.optBoolean("immediate", false)) {
-                try {
-                    processMarketTradeTask(task);
-                } catch (Exception error) {
-                    task.put("lastResult", message(error));
-                    task.put("lastCheckAt", Instant.now().toString());
-                    task.put("enabled", captchaRequired(error));
-                    task.put("status", captchaRequired(error) ? "verification_required" : "failed");
-                    task.put("updatedAt", Instant.now().toString());
-                    store.saveTradeTasks(tasks);
-                    if (!captchaRequired(error)) throw error;
-                }
-                if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
-            } else {
-                processTradeTasks();
-            }
+            processTradeTasks(task.optString("id"), preflightPlan);
             JSONObject updated = findTask(store.getTradeTasks(), task.optString("id"), kind);
             if (updated != null) task = updated;
         }
@@ -1482,7 +1466,6 @@ public final class NativeEngine {
 
     private static boolean marketTradePriceGate(JSONObject task, JSONObject detail) {
         if (task == null || !"consignment".equals(task.optString("type"))) return false;
-        if (task.optBoolean("immediate", false)) return false;
         double floor = detail == null ? Double.NaN : decimal(detail.opt("floorPrice"), Double.NaN);
         double trigger = decimal(task.opt("triggerPrice"), Double.NaN);
         return !Double.isFinite(floor) || !Double.isFinite(trigger) || floor < trigger;
@@ -2124,6 +2107,10 @@ public final class NativeEngine {
     }
 
     private void processTradeTasks() {
+        processTradeTasks("", null);
+    }
+
+    private void processTradeTasks(String preflightTaskId, JSONObject preflightPlan) {
         JSONArray tasks = store.getTradeTasks();
         boolean changed = false;
         long now = System.currentTimeMillis();
@@ -2139,7 +2126,7 @@ public final class NativeEngine {
                     if ("immediate_purchase".equals(task.optString("executionMode"))) processImmediatePurchaseTask(task);
                     else processRetiredMarketTask(task);
                 } else {
-                    processMarketTradeTask(task);
+                    processMarketTradeTask(task, task.optString("id").equals(preflightTaskId) ? preflightPlan : null);
                 }
             } catch (Exception error) {
                 String failure = message(error);
@@ -2168,9 +2155,13 @@ public final class NativeEngine {
     }
 
     private void processMarketTradeTask(JSONObject task) throws Exception {
+        processMarketTradeTask(task, null);
+    }
+
+    private void processMarketTradeTask(JSONObject task, JSONObject preflightPlan) throws Exception {
         IBoxDirectClient.Account account = account(task.optString("phone"));
         String type = task.optString("type");
-        JSONObject plan = preflightMarketTradeTask(task);
+        JSONObject plan = preflightPlan == null ? preflightMarketTradeTask(task) : preflightPlan;
         applyMarketTradePreflight(task, plan, true);
         JSONObject detail = plan.optJSONObject("detail");
         if (marketTradePriceGate(task, detail)) return;

@@ -1186,6 +1186,10 @@ public final class MainActivity extends Activity {
                 toast("寄售价格需为正整数");
                 return;
             }
+            if (!Double.isFinite(floorPrice) || floorPrice <= 0d) {
+                toast("当前无可用地板价，暂不能立即寄售");
+                return;
+            }
             if (password.getText().toString().trim().isEmpty()) {
                 toast("请输入寄售交易密码");
                 return;
@@ -1193,8 +1197,8 @@ public final class MainActivity extends Activity {
             JSONObject body = new JSONObject();
             try {
                 body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
-                body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true); body.put("immediate", true);
-                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("consignPassword", password.getText().toString().trim());
+                body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true);
+                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
             request("提交寄售", "POST", "/native/market/trade/tasks", body, result -> {
                 dialog.dismiss();
@@ -1202,10 +1206,10 @@ public final class MainActivity extends Activity {
                 if ("submitted".equals(task == null ? "" : task.optString("status"))) {
                     toast("寄售已提交");
                     showAccounts();
-                } else {
-                    toast("寄售需要人机验证");
-                    selectPage("trade");
+                    return;
                 }
+                toast(task == null ? "寄售任务未创建" : task.optString("lastResult", "寄售任务已启动"));
+                selectPage("trade");
             });
         });
     }
