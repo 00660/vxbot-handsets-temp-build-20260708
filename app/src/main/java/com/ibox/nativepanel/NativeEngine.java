@@ -2136,6 +2136,9 @@ public final class NativeEngine {
                 putQuietly(task, "lastResult", failure);
                 if (captchaRequired(error)) {
                     putQuietly(task, "status", "verification_required");
+                } else if (task.optBoolean("immediate", false)) {
+                    putQuietly(task, "enabled", false);
+                    putQuietly(task, "status", "failed");
                 } else if ("immediate_purchase".equals(task.optString("executionMode"))) {
                     putQuietly(task, "enabled", false);
                     putQuietly(task, "status", "failed");
@@ -2993,14 +2996,22 @@ public final class NativeEngine {
             if (entry == null) continue;
             JSONObject collection = entry.optJSONObject("digitalCollection");
             JSONObject normalized = new JSONObject();
-            normalized.put("id", first(entry, "digitalCollectionId", "digitalCollectionID", "collectionId", "id"));
-            if (normalized.optString("id").isEmpty() && collection != null) normalized.put("id", first(collection, "id"));
+            normalized.put("id", ownedCollectionId(entry, collection, groupId));
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
             normalized.put("locked", integer(first(entry, "lockStatus", "lockedStatus"), 0) > 0);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title"));
             if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false)) result.put(normalized);
         }
         return result;
+    }
+
+    private static String ownedCollectionId(JSONObject entry, JSONObject collection, String groupId) {
+        String nested = collection == null ? "" : first(collection, "id", "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
+        String entryId = first(entry, "id", "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
+        for (String candidate : new String[]{nested, entryId}) {
+            if (candidate.matches("\\d+") && !candidate.equals(groupId)) return candidate;
+        }
+        return "";
     }
 
     private static String resolveOwnedCollectionId(JSONArray assets, JSONObject task) throws NativeException {
