@@ -1225,7 +1225,9 @@ public final class NativeEngine {
                 String digitalCollectionId = first(task, "digitalCollectionId");
                 if (!digitalCollectionId.matches("\\d+")) throw new NativeException("寄售任务需要选择持仓资产");
                 double triggerPrice = decimal(task.opt("triggerPrice"), Double.NaN);
-                if (!Double.isFinite(triggerPrice) || triggerPrice <= 0d) throw new NativeException("寄售任务需要触发行情价");
+                if (!task.optBoolean("immediate", false) && (!Double.isFinite(triggerPrice) || triggerPrice <= 0d)) {
+                    throw new NativeException("寄售任务需要触发行情价");
+                }
                 if (task.optString("consignPassword").trim().isEmpty()) throw new NativeException("寄售任务需要交易密码");
             }
         } else {
@@ -1256,7 +1258,22 @@ public final class NativeEngine {
         tasks.put(task);
         if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
         if (task.optBoolean("enabled", false)) {
-            processTradeTasks();
+            if ("market_trade".equals(kind) && task.optBoolean("immediate", false)) {
+                try {
+                    processMarketTradeTask(task);
+                } catch (Exception error) {
+                    task.put("lastResult", message(error));
+                    task.put("lastCheckAt", Instant.now().toString());
+                    task.put("enabled", captchaRequired(error));
+                    task.put("status", captchaRequired(error) ? "verification_required" : "failed");
+                    task.put("updatedAt", Instant.now().toString());
+                    store.saveTradeTasks(tasks);
+                    if (!captchaRequired(error)) throw error;
+                }
+                if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
+            } else {
+                processTradeTasks();
+            }
             JSONObject updated = findTask(store.getTradeTasks(), task.optString("id"), kind);
             if (updated != null) task = updated;
         }
@@ -1388,7 +1405,7 @@ public final class NativeEngine {
             String priceError = marketTradeConsignmentPriceError(decimal(task.opt("price"), Double.NaN), config);
             if (!priceError.isEmpty()) throw new NativeException(priceError);
             JSONArray owned = ownedCollections(account, task.optString("groupId"));
-            String collectionId = resolveOwnedCollectionId(account, task);
+            String collectionId = resolveOwnedCollectionId(owned, task);
             result.put("owned", owned);
             result.put("digitalCollectionId", collectionId);
             result.put("publicConfig", config);
@@ -1465,6 +1482,7 @@ public final class NativeEngine {
 
     private static boolean marketTradePriceGate(JSONObject task, JSONObject detail) {
         if (task == null || !"consignment".equals(task.optString("type"))) return false;
+        if (task.optBoolean("immediate", false)) return false;
         double floor = detail == null ? Double.NaN : decimal(detail.opt("floorPrice"), Double.NaN);
         double trigger = decimal(task.opt("triggerPrice"), Double.NaN);
         return !Double.isFinite(floor) || !Double.isFinite(trigger) || floor < trigger;
@@ -2991,8 +3009,7 @@ public final class NativeEngine {
         return result;
     }
 
-    private String resolveOwnedCollectionId(IBoxDirectClient.Account account, JSONObject task) throws Exception {
-        JSONArray assets = ownedCollections(account, task.optString("groupId"));
+    private static String resolveOwnedCollectionId(JSONArray assets, JSONObject task) throws NativeException {
         String requested = task.optString("digitalCollectionId");
         if (requested.isEmpty()) throw new NativeException("寄售任务需要选择持仓资产");
         for (int index = 0; index < assets.length(); index++) {

@@ -1174,19 +1174,39 @@ public final class MainActivity extends Activity {
         Button assetPicker = button(assetLabel(selectedAsset[0]), false);
         assetPicker.setOnClickListener(v -> showOwnedAssetPicker(assets, selectedAsset, assetPicker));
         form.addView(labelled("寄售资产", assetPicker));
-        EditText price = numberInput("寄售价格", moneyValue(first(asset, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText trigger = numberInput("寄售触发行情价", ""); form.addView(trigger, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText interval = numberInput("监控间隔（秒）", "5"); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        double floorPrice = parseDouble(first(asset, "floorPrice", "price"), Double.NaN);
+        EditText price = numberInput("寄售价格", Double.isFinite(floorPrice) && floorPrice == Math.rint(floorPrice) ? compactNumber(floorPrice) : "");
+        price.setInputType(InputType.TYPE_CLASS_NUMBER);
+        form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText password = passwordInput("寄售交易密码"); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
-        showProjectDialog("创建寄售任务", form, "保存并启动", dialog -> {
+        showProjectDialog("确认寄售", form, "确认寄售", dialog -> {
             if (selectedAsset[0] == null) { toast("请选择可寄售资产"); return; }
+            double salePrice = doubleValue(price, Double.NaN);
+            if (!Double.isFinite(salePrice) || salePrice <= 0d || salePrice != Math.rint(salePrice)) {
+                toast("寄售价格需为正整数");
+                return;
+            }
+            if (password.getText().toString().trim().isEmpty()) {
+                toast("请输入寄售交易密码");
+                return;
+            }
             JSONObject body = new JSONObject();
             try {
                 body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
-                body.put("price", doubleValue(price, 0)); body.put("quantity", 1); body.put("autoStart", true);
-                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", doubleValue(trigger, 0)); body.put("monitorIntervalValue", intValue(interval, 5)); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
+                body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true); body.put("immediate", true);
+                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
-            request("创建寄售任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
+            request("提交寄售", "POST", "/native/market/trade/tasks", body, result -> {
+                dialog.dismiss();
+                JSONObject task = result.optJSONObject("data");
+                if ("submitted".equals(task == null ? "" : task.optString("status"))) {
+                    toast("寄售已提交");
+                    showAccounts();
+                } else {
+                    toast("寄售需要人机验证");
+                    selectPage("trade");
+                }
+            });
         });
     }
 
