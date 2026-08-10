@@ -1198,7 +1198,7 @@ public final class MainActivity extends Activity {
             try {
                 body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
                 body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true); body.put("immediate", true);
-                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim()); body.put("preflightOwned", assets);
+                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
             request("提交寄售", "POST", "/native/market/trade/tasks", body, result -> {
                 dialog.dismiss();

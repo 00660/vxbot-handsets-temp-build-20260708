@@ -1253,7 +1253,6 @@ public final class NativeEngine {
             preflightPlan = preflightMarketTradeTask(task);
             applyMarketTradePreflight(task, preflightPlan, false);
         }
-        task.remove("preflightOwned");
         JSONArray tasks = store.getTradeTasks();
         tasks.put(task);
         if (!store.saveTradeTasks(tasks)) throw new NativeException("交易任务保存失败");
@@ -1389,8 +1388,7 @@ public final class NativeEngine {
             JSONObject config = marketTradePublicConfig(account);
             String priceError = marketTradeConsignmentPriceError(decimal(task.opt("price"), Double.NaN), config);
             if (!priceError.isEmpty()) throw new NativeException(priceError);
-            JSONArray owned = task.optJSONArray("preflightOwned");
-            if (owned == null) owned = ownedCollections(account, task.optString("groupId"));
+            JSONArray owned = ownedCollections(account, task.optString("groupId"));
             String collectionId = resolveOwnedCollectionId(owned, task);
             result.put("owned", owned);
             result.put("digitalCollectionId", collectionId);
@@ -2996,7 +2994,7 @@ public final class NativeEngine {
             if (entry == null) continue;
             JSONObject collection = entry.optJSONObject("digitalCollection");
             JSONObject normalized = new JSONObject();
-            normalized.put("id", ownedCollectionId(entry, collection, groupId));
+            normalized.put("id", ownedCollectionId(entry, groupId));
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
             normalized.put("locked", integer(first(entry, "lockStatus", "lockedStatus"), 0) > 0);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title"));
@@ -3005,12 +3003,9 @@ public final class NativeEngine {
         return result;
     }
 
-    private static String ownedCollectionId(JSONObject entry, JSONObject collection, String groupId) {
-        String entryId = first(entry, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
-        String nested = collection == null ? "" : first(collection, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
-        for (String candidate : new String[]{entryId, nested}) {
-            if (candidate.matches("\\d+") && !candidate.equals(groupId)) return candidate;
-        }
+    private static String ownedCollectionId(JSONObject entry, String groupId) {
+        String instanceId = first(entry, "id");
+        if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
         return "";
     }
 
@@ -3020,6 +3015,10 @@ public final class NativeEngine {
         for (int index = 0; index < assets.length(); index++) {
             JSONObject asset = assets.optJSONObject(index);
             if (asset != null && requested.equals(asset.optString("id"))) return requested;
+        }
+        if (requested.equals(task.optString("groupId")) && assets.length() == 1) {
+            JSONObject onlyAsset = assets.optJSONObject(0);
+            if (onlyAsset != null && onlyAsset.optString("id").matches("\\d+")) return onlyAsset.optString("id");
         }
         throw new NativeException("所选持仓资产已不可寄售，请重新读取资产");
     }
