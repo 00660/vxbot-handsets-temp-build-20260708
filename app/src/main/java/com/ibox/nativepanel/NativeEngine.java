@@ -2,6 +2,7 @@ package com.ibox.nativepanel;
 
 import android.content.Context;
 import android.net.Uri;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -2995,6 +2996,12 @@ public final class NativeEngine {
             JSONObject collection = entry.optJSONObject("digitalCollection");
             JSONObject normalized = new JSONObject();
             String instanceId = ownedCollectionId(entry, groupId);
+            Log.i("NativeEngine", "owned_asset group=" + groupId
+                    + " id=" + first(entry, "id")
+                    + " digitalCollectionId=" + first(entry, "digitalCollectionId")
+                    + " assetNo=" + first(entry, "assetNo")
+                    + " tokenId=" + first(entry, "tokenId")
+                    + " orderId=" + first(entry, "orderId"));
             normalized.put("id", instanceId);
             normalized.put("instanceId", instanceId);
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
