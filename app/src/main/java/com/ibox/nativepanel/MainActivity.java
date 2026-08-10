@@ -563,7 +563,10 @@ public final class MainActivity extends Activity {
             String performance = Double.isFinite(profit)
                     ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
                     : "录入单件成本后计算真实收益率";
-            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(-1, dp(32)));
+            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
+            Button consignment = button("寄售", false);
+            consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
+            footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
@@ -1074,24 +1077,15 @@ public final class MainActivity extends Activity {
                 LinearLayout row = card(); row.addView(text(first(item, "name", "title", "groupId", "id"), 15, ink, Typeface.BOLD));
                 row.addView(text("编号 " + first(item, "groupId", "id") + " · 地板 " + money(first(item, "floorPrice", "price")), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
                 LinearLayout actions = horizontal(Color.TRANSPARENT);
-                Button configure = button("交易任务", false); configure.setOnClickListener(v -> showTradeDialog(item));
-                Button preflight = button("预检", false); preflight.setOnClickListener(v -> showTradePreflight(item));
+                Button wanted = button("求购", false); wanted.setOnClickListener(v -> showWantedTaskDialog(item));
                 Button retired = button("捡漏", false); retired.setOnClickListener(v -> showRetiredDialog(item));
                 Button purchase = button("立即买入", true); purchase.setOnClickListener(v -> showImmediatePurchaseDialog(item));
-                actions.addView(configure, new LinearLayout.LayoutParams(0, dp(42), 1));
-                actions.addView(preflight, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
+                actions.addView(wanted, new LinearLayout.LayoutParams(0, dp(42), 1));
                 actions.addView(retired, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
                 actions.addView(purchase, marginParams(dp(84), dp(42), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2)); target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
         });
-    }
-
-    private void showTradePreflight(JSONObject item) {
-        if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
-        String groupId = first(item, "groupId", "id");
-        request("读取交易预检", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/market-trade/" + Uri.encode(groupId) + "/preflight", null,
-                result -> showJsonDialog("交易预检", result.optJSONObject("data")));
     }
 
     private void showRetiredDialog(JSONObject item) {
@@ -1145,46 +1139,53 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private void showTradeDialog(JSONObject item) {
+    private void showWantedTaskDialog(JSONObject item) {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
-        String groupId = first(item, "groupId", "id");
-        request("读取可寄售资产", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/market-trade/assets?groupId=" + Uri.encode(groupId), null, result -> {
-            JSONObject data = result.optJSONObject("data");
-            showTradeDialog(item, findArray(data, "items", "assets", "list"));
-        }, () -> showTradeDialog(item, new JSONArray()));
-    }
-
-    private void showTradeDialog(JSONObject item, JSONArray sourceAssets) {
-        JSONArray ownedAssets = sourceAssets == null ? new JSONArray() : sourceAssets;
-        final JSONObject[] selectedAsset = new JSONObject[]{ownedAssets.optJSONObject(0)};
         LinearLayout form = vertical(Color.TRANSPARENT);
-        OptionField type = optionField("任务类型", new String[]{"wanted", "consignment"}, "wanted"); form.addView(labelled("任务类型", type));
-        EditText price = numberInput("价格", moneyValue(first(item, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText trigger = numberInput("寄售触发行价（寄售时填写）", ""); form.addView(trigger, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        Button assetPicker = button(assetLabel(selectedAsset[0]), false);
-        assetPicker.setEnabled(selectedAsset[0] != null);
-        if (selectedAsset[0] == null) assetPicker.setAlpha(0.55f);
-        assetPicker.setOnClickListener(v -> showOwnedAssetPicker(ownedAssets, selectedAsset, assetPicker));
-        form.addView(labelled("寄售资产", assetPicker));
+        EditText price = numberInput("求购价格", moneyValue(first(item, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText quantity = numberInput("数量", "1"); form.addView(quantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText interval = numberInput("监控间隔（秒）", "5"); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         EditText paymentCode = numberInput("求购支付通道编号", ""); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         ProjectToggle agreement = toggle("我已阅读并同意交易服务协议", false); form.addView(agreement, marginParams(-1, -2, 0, 0, 0, dp(4)));
-        EditText password = passwordInput("寄售交易密码"); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
-        showProjectDialog("创建交易任务", form, "提交", dialog -> {
-            String taskType = type.value();
-            if ("consignment".equals(taskType) && selectedAsset[0] == null) {
-                toast("当前账号没有可寄售资产");
-                return;
-            }
+        showProjectDialog("创建求购任务", form, "保存并启动", dialog -> {
             JSONObject body = new JSONObject();
             try {
-                body.put("type", taskType); body.put("phone", selectedPhone); body.put("groupId", first(item, "groupId", "id")); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
+                body.put("type", "wanted"); body.put("phone", selectedPhone); body.put("groupId", first(item, "groupId", "id")); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
                 body.put("price", doubleValue(price, 0)); body.put("quantity", intValue(quantity, 1)); body.put("autoStart", true);
                 body.put("paymentPlatformCode", intValue(paymentCode, 0)); body.put("agreementAccepted", agreement.isChecked());
-                if ("consignment".equals(taskType)) { body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", doubleValue(trigger, 0)); body.put("monitorIntervalValue", intValue(interval, 5)); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim()); }
             } catch (Exception ignored) { }
             request("创建交易任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
+        });
+    }
+
+    private void showAssetConsignmentDialog(String phone, JSONObject asset) {
+        String groupId = first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId");
+        if (!groupId.matches("\\d+")) { toast("该持仓缺少藏品组编号"); return; }
+        request("读取可寄售资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/market-trade/assets?groupId=" + Uri.encode(groupId), null, result -> {
+            JSONArray assets = findArray(result.optJSONObject("data"), "items", "assets", "list");
+            if (assets == null || assets.length() == 0) { toast("当前没有可寄售资产"); return; }
+            showAssetConsignmentDialog(phone, asset, assets);
+        });
+    }
+
+    private void showAssetConsignmentDialog(String phone, JSONObject asset, JSONArray assets) {
+        final JSONObject[] selectedAsset = new JSONObject[]{assets.optJSONObject(0)};
+        LinearLayout form = vertical(Color.TRANSPARENT);
+        Button assetPicker = button(assetLabel(selectedAsset[0]), false);
+        assetPicker.setOnClickListener(v -> showOwnedAssetPicker(assets, selectedAsset, assetPicker));
+        form.addView(labelled("寄售资产", assetPicker));
+        EditText price = numberInput("寄售价格", moneyValue(first(asset, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        EditText trigger = numberInput("寄售触发行情价", ""); form.addView(trigger, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        EditText interval = numberInput("监控间隔（秒）", "5"); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        EditText password = passwordInput("寄售交易密码"); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
+        showProjectDialog("创建寄售任务", form, "保存并启动", dialog -> {
+            if (selectedAsset[0] == null) { toast("请选择可寄售资产"); return; }
+            JSONObject body = new JSONObject();
+            try {
+                body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
+                body.put("price", doubleValue(price, 0)); body.put("quantity", 1); body.put("autoStart", true);
+                body.put("digitalCollectionId", selectedAsset[0].optString("id")); body.put("triggerPrice", doubleValue(trigger, 0)); body.put("monitorIntervalValue", intValue(interval, 5)); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
+            } catch (Exception ignored) { }
+            request("创建寄售任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
         });
     }
 
