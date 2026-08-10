@@ -995,8 +995,29 @@ public final class NativeEngine {
             activity.put("accounts", accounts);
             activities.put(activity);
         }
-        store.saveLotteryTasks(activities);
+        store.saveLotteryTasks(keepLatestEndedLottery(activities));
         lastLotteryRefreshAt = now;
+    }
+
+    private static JSONArray keepLatestEndedLottery(JSONArray activities) {
+        JSONArray visible = new JSONArray();
+        JSONObject latestEnded = null;
+        long latestEndedAt = Long.MIN_VALUE;
+        for (int index = 0; index < activities.length(); index++) {
+            JSONObject activity = activities.optJSONObject(index);
+            if (activity == null) continue;
+            if (!"ended".equals(activity.optString("phase"))) {
+                visible.put(activity);
+                continue;
+            }
+            long endedAt = epoch(activity.optString("endedAt", activity.optString("endTime")));
+            if (latestEnded == null || endedAt > latestEndedAt) {
+                latestEnded = activity;
+                latestEndedAt = endedAt;
+            }
+        }
+        if (latestEnded != null) visible.put(latestEnded);
+        return visible;
     }
 
     private JSONObject setLotteryEnabled(String id, boolean enabled) throws Exception {
