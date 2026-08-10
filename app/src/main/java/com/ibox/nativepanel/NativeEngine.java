@@ -2698,14 +2698,16 @@ public final class NativeEngine {
         JSONArray listings = marketListings(account, groupId);
         JSONArray owned = ownedCollections(account, groupId);
         JSONObject priceRange = marketTradePublicConfig(account);
+        JSONObject wantedPayment = paymentPlatformAvailability(account, 2);
+        JSONObject consignmentPayment = paymentPlatformAvailability(account, 1);
         return ok(objectOf(
                 "detail", detail,
                 "listings", listings,
                 "listingCount", listings.length(),
                 "owned", owned,
                 "ownedQuantity", ownedQuantity(owned),
-                "wantedPaymentPlatformCode", paymentPlatformCode(account, 2, 0),
-                "consignmentPaymentPlatformCode", paymentPlatformCode(account, 1, 0),
+                "wantedPayment", wantedPayment,
+                "consignmentPayment", consignmentPayment,
                 "priceRange", priceRange,
                 "updatedAt", Instant.now().toString()
         ));
@@ -2863,6 +2865,14 @@ public final class NativeEngine {
         if (item.has("isOpen")) return item.opt("isOpen");
         if (item.has("enabled")) return item.opt("enabled");
         return item.opt("available");
+    }
+
+    private JSONObject paymentPlatformAvailability(IBoxDirectClient.Account account, int placeOrderMethod) throws Exception {
+        try {
+            return objectOf("available", true, "code", paymentPlatformCode(account, placeOrderMethod, 0));
+        } catch (Exception error) {
+            return objectOf("available", false, "code", JSONObject.NULL, "message", message(error));
+        }
     }
 
     private String cashierLink(IBoxDirectClient.Account account, String orderUuid, int initiatorType) throws Exception {
