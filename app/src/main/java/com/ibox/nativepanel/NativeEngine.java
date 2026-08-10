@@ -506,6 +506,20 @@ public final class NativeEngine {
     }
 
     private JSONObject searchMarket(String phone, String name, int pageNo, int pageSize) throws Exception {
+        String query = name == null ? "" : name.trim();
+        if (query.matches("\\d+")) {
+            IBoxDirectClient.Account account = phone == null || phone.trim().isEmpty() ? firstAccount() : account(phone);
+            JSONObject detail = loadMarketTradeDetail(account, query);
+            JSONObject lowest = lowestListing(marketListings(account, query));
+            JSONObject item = objectOf(
+                    "id", query,
+                    "groupId", query,
+                    "name", first(detail, "name", "title", "groupName", "digitalCollectionName"),
+                    "cover", first(detail, "cover", "coverPicUrl", "coverUrl"),
+                    "floorPrice", lowest == null ? numericOrNull(first(detail, "floorPrice", "price")) : lowest.opt("price")
+            );
+            return ok(objectOf("items", new JSONArray().put(item), "total", 1, "pageNo", 1, "pageSize", 1));
+        }
         return ok(searchMarketsWithFallback(phone, name, Math.max(pageNo, 1), clamp(pageSize, 1, 100)));
     }
 
