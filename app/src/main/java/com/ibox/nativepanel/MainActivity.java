@@ -1298,7 +1298,7 @@ public final class MainActivity extends Activity {
                     Button start = button("启动监控", false);
                     start.setOnClickListener(v -> request("启动任务", "POST", base + Uri.encode(id) + "/enable", null, result -> showTrade()));
                     actions.addView(start, new LinearLayout.LayoutParams(0, dp(42), 1));
-                } else if ((retired && "scheduled".equals(status)) || (!retired && ("scheduled".equals(status) || "waiting_price".equals(status)))) {
+                } else if ("scheduled".equals(status) || "waiting_price".equals(status)) {
                     Button pause = button("暂停", false);
                     pause.setOnClickListener(v -> request("暂停任务", "POST", base + Uri.encode(id) + "/disable", null, result -> showTrade()));
                     actions.addView(pause, new LinearLayout.LayoutParams(0, dp(42), 1));
@@ -2345,6 +2345,7 @@ public final class MainActivity extends Activity {
         if (retired) {
             if ("draft".equals(status)) return "待启动";
             if ("scheduled".equals(status)) return "监控中";
+            if ("waiting_price".equals(status)) return "监控中·等待行情";
             if ("paused".equals(status)) return "已暂停";
             if ("blocked".equals(status)) return "不可锁单";
             if ("verification_required".equals(status)) return "需人机验证";
