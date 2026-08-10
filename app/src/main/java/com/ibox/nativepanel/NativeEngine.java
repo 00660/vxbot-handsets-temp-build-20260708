@@ -1381,7 +1381,6 @@ public final class NativeEngine {
     private JSONObject validateRetiredMarketTask(JSONObject task) throws Exception {
         IBoxDirectClient.Account account = account(task.optString("phone"));
         JSONObject detail = loadMarketTradeDetail(account, task.optString("groupId"));
-        if (explicitFalse(detail.opt("enablePurchase"))) throw new NativeException("当前藏品暂不支持捡漏购买");
         JSONArray listings = marketListings(account, task.optString("groupId"));
         JSONArray baseline = new JSONArray();
         for (int index = 0; index < listings.length(); index++) {
@@ -2156,8 +2155,6 @@ public final class NativeEngine {
         IBoxDirectClient.Account account = account(task.optString("phone"));
         JSONArray baseline = task.optJSONArray("baselineListingKeys");
         if (baseline == null || task.optString("baselineEmptyAt").isEmpty()) throw new NativeException("捡漏监控基线缺失，请重新预检任务");
-        JSONObject detail = loadMarketTradeDetail(account, task.optString("groupId"));
-        if (explicitFalse(detail.opt("enablePurchase"))) throw new NativeException("当前藏品暂不支持捡漏购买");
         JSONArray listings = marketListings(account, task.optString("groupId"));
         double min = decimal(task.opt("minPrice"), 0d);
         double max = decimal(task.opt("maxPrice"), Double.NaN);
@@ -2858,8 +2855,9 @@ public final class NativeEngine {
 
     private JSONObject loadMarketTradeDetail(IBoxDirectClient.Account account, String groupId) throws Exception {
         JSONObject detailResponse = client.requestAuthenticated(account, "GET", MARKET_GROUP_URL + "/" + encodePath(groupId), null, null, false, "交易详情");
-        JSONObject source = object(data(detailResponse));
-        JSONObject group = source.optJSONObject("digitalCollectionGroup");
+        JSONObject root = object(data(detailResponse));
+        JSONObject source = root;
+        JSONObject group = root.optJSONObject("digitalCollectionGroup");
         if (group != null) source = merge(copy(group), source);
         JSONObject wanted = new JSONObject();
         try {
@@ -2879,8 +2877,8 @@ public final class NativeEngine {
             }
         }
         double floor = latest == null ? decimal(source.opt("floorPrice"), Double.NaN) : decimal(latest.opt("floorPrice"), Double.NaN);
-        Object consignment = source.has("enableConsignment") ? source.opt("enableConsignment") : JSONObject.NULL;
-        Object purchase = source.has("enablePurchase") ? source.opt("enablePurchase") : JSONObject.NULL;
+        Object consignment = root.has("enableConsignment") ? root.opt("enableConsignment") : JSONObject.NULL;
+        Object purchase = root.has("enablePurchase") ? root.opt("enablePurchase") : JSONObject.NULL;
         Object wantedEnabled = wanted.has("enablePurchase") ? wanted.opt("enablePurchase") : purchase;
         return objectOf(
                 "groupId", groupId,
@@ -3050,8 +3048,6 @@ public final class NativeEngine {
 
     private JSONObject currentPurchaseCandidate(IBoxDirectClient.Account account, String groupId, String expectedDigitalCollectionId, double maxPrice) throws Exception {
         if (!Double.isFinite(maxPrice) || maxPrice <= 0d) throw new NativeException("立即买入最高价无效");
-        JSONObject detail = loadMarketTradeDetail(account, groupId);
-        if (explicitFalse(detail.opt("enablePurchase"))) throw new NativeException("当前藏品暂不支持购买");
         String expected = expectedDigitalCollectionId == null ? "" : expectedDigitalCollectionId.trim();
         JSONObject candidate = null;
         double lowest = Double.NaN;
