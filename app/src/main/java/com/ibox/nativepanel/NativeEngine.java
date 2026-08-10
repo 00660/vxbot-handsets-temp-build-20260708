@@ -286,6 +286,11 @@ public final class NativeEngine {
         JSONObject stored = store.getAccount(phone);
         try {
             JSONObject assets = client.fetchAssets(account, Math.max(pageNo, 1), Math.max(pageSize, 1));
+            try {
+                attachConsignmentListingIds(account, assets);
+            } catch (Exception ignored) {
+                // Asset status remains usable when the optional order list is unavailable.
+            }
             if (stored != null) {
                 JSONObject cache = objectOf("data", assets, "updatedAt", Instant.now().toString(), "stale", false);
                 stored.put("assetCache", cache);
@@ -305,6 +310,41 @@ public final class NativeEngine {
                 store.upsertAccount(stored);
             }
             return ok(fallback);
+        }
+    }
+
+    private void attachConsignmentListingIds(IBoxDirectClient.Account account, JSONObject assets) throws Exception {
+        JSONArray items = assets == null ? null : assets.optJSONArray("items");
+        if (items == null || items.length() == 0) return;
+        boolean hasConsigning = false;
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.optJSONObject(index);
+            if (item != null && item.optBoolean("consigning", false)) {
+                hasConsigning = true;
+                break;
+            }
+        }
+        if (!hasConsigning) return;
+
+        OrderPage page = loadOrderPage(
+                account,
+                PURCHASE_CONSIGNMENT_ORDER_LIST_URL,
+                objectOf("pageNo", 1, "pageSize", 100, "initiatorType", 2),
+                "consignment"
+        );
+        Map<String, String> listingByGroupId = new LinkedHashMap<>();
+        for (int index = 0; index < page.items.length(); index++) {
+            JSONObject order = page.items.optJSONObject(index);
+            if (order == null || integer(order.opt("orderType"), -1) != 2) continue;
+            String groupId = order.optString("groupId");
+            String listingId = order.optString("listingOrderItemId");
+            if (!groupId.isEmpty() && listingId.matches("\\d+")) listingByGroupId.put(groupId, listingId);
+        }
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.optJSONObject(index);
+            if (item == null || !item.optBoolean("consigning", false)) continue;
+            String listingId = listingByGroupId.get(item.optString("groupId"));
+            if (listingId != null) item.put("listingOrderItemId", listingId);
         }
     }
 

@@ -531,6 +531,7 @@ public final class MainActivity extends Activity {
             boolean hasPrice = Double.isFinite(floorPrice);
             boolean delisted = "delisted".equals(item.optString("marketState"));
             boolean consigning = item.optBoolean("consigning", false);
+            String listingOrderItemId = first(item, "listingOrderItemId");
             double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
             double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
             LinearLayout row = vertical(Color.TRANSPARENT);
@@ -567,7 +568,28 @@ public final class MainActivity extends Activity {
                     ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
                     : "未实现收益 --";
             footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
-            if (!consigning) {
+            if (consigning) {
+                Button cancel = button("取消寄售", false);
+                cancel.setTextColor(danger);
+                cancel.setOnClickListener(v -> {
+                    if (!listingOrderItemId.matches("\\d+")) {
+                        toast("寄售挂单编号尚未同步，请刷新资产");
+                        return;
+                    }
+                    showProjectDialog("取消寄售", text("确认取消这条寄售挂单？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
+                        dialog.dismiss();
+                        JSONObject body = new JSONObject();
+                        try { body.put("phone", phone); } catch (Exception ignored) { }
+                        request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(listingOrderItemId) + "/cancel", body,
+                                result -> request("同步资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null,
+                                        refreshed -> {
+                                            content.removeAllViews();
+                                            renderAccountCards();
+                                        }));
+                    });
+                });
+                footer.addView(cancel, new LinearLayout.LayoutParams(dp(96), dp(32)));
+            } else {
                 Button consignment = button("寄售", false);
                 consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
                 footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
