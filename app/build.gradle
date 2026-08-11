@@ -10,8 +10,8 @@ android {
         applicationId "com.ibox.nativepanel"
         minSdk 26
         targetSdk 35
-        versionCode 31
-        versionName "0.4.18-native-direct"
+        versionCode 32
+        versionName "0.4.19-native-direct"
     }
 
     signingConfigs {
