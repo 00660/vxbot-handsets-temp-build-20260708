@@ -608,7 +608,7 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
                 cancelParams.setMargins(dp(6), 0, 0, 0);
                 footer.addView(cancel, cancelParams);
-            } else if (!delisted && !consigning && consignmentStateVerified) {
+            } else if (!consigning && consignmentStateVerified) {
                 Button consignment = button("寄售", false);
                 consignment.setMinWidth(0);
                 consignment.setMinimumWidth(0);

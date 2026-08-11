@@ -3323,12 +3323,8 @@ public final class NativeEngine {
             normalized.put("instanceId", instanceId);
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
             normalized.put("locked", integer(first(entry, "lockStatus", "lockedStatus"), 0) > 0);
-            boolean consigning = integer(first(entry, "digitalCollectionStatus"), -1) == 2
-                    || (integer(first(entry, "consignmentStatus"), -1) == 1
-                    && integer(first(entry, "consignmentNum", "consignNum"), 0) > 0);
-            normalized.put("consigning", consigning);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title"));
-            if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false) && !consigning) result.put(normalized);
+            if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false)) result.put(normalized);
         }
         return result;
     }
