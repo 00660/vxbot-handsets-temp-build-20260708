@@ -731,40 +731,119 @@ public final class MainActivity extends Activity {
                 String rawPhase = first(activity, "phase", "status");
                 boolean recentExpired = "recent_expired".equals(data == null ? "" : data.optString("mode")) || "recent_expired".equals(rawPhase);
                 boolean expired = recentExpired || "expired".equals(rawPhase) || "ended".equals(rawPhase);
-                boolean actionable = "available".equals(rawPhase) || "preparing".equals(rawPhase);
                 String phase = recentExpired ? "最近结束" : synthesisPhaseLabel(rawPhase);
                 String period = expired ? first(activity, "endTime", "endAt", "startTime", "startAt") : first(activity, "startTime", "startAt");
                 LinearLayout row = card();
                 row.addView(text(title, 15, ink, Typeface.BOLD));
                 row.addView(text(phase + (period.isEmpty() ? "" : " · " + time(period)), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
-                if (actionable) {
-                    String syntheticId = first(activity, "syntheticId", "id");
-                    LinearLayout actions = horizontal(Color.TRANSPARENT);
-                    Button detail = button("材料", false);
-                    detail.setOnClickListener(v -> loadSynthesisCenter(syntheticId));
-                    Button immediate = button("立即合成", true);
-                    immediate.setOnClickListener(v -> showSynthesisDialog(activity, false));
-                    Button schedule = button("定时", false);
-                    schedule.setOnClickListener(v -> showSynthesisDialog(activity, true));
-                    actions.addView(detail, new LinearLayout.LayoutParams(0, dp(42), 1));
-                    actions.addView(immediate, marginParams(dp(92), dp(42), dp(8), 0, 0, 0));
-                    actions.addView(schedule, marginParams(dp(72), dp(42), dp(8), 0, 0, 0));
-                    row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-                }
+                LinearLayout detail = vertical(Color.TRANSPARENT);
+                detail.addView(empty("材料同步中"));
+                row.addView(detail, marginParams(-1, -2, 0, dp(4), 0, 0));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+                String syntheticId = first(activity, "syntheticId", "id");
+                if (!syntheticId.isEmpty()) loadSynthesisCenter(syntheticId, activity, detail);
             }
         }, () -> renderRetry(target, "合成活动同步失败", () -> loadSynthesisActivities(target)));
     }
 
-    private void loadSynthesisCenter(String syntheticId) {
+    private void loadSynthesisCenter(String syntheticId, JSONObject activity, LinearLayout target) {
         if (syntheticId.isEmpty()) return;
         request("读取材料", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId), null, result -> {
             JSONObject data = result.optJSONObject("data");
-            showJsonDialog("合成材料", data);
+            renderSynthesisDetail(activity, data, target);
+        }, () -> {
+            target.removeAllViews();
+            target.addView(text("合成材料读取失败", 12, danger, Typeface.NORMAL));
+        });
+    }
+
+    private void renderSynthesisDetail(JSONObject activity, JSONObject data, LinearLayout target) {
+        target.removeAllViews();
+        if (data == null) {
+            target.addView(text("未读取到合成材料", 12, muted, Typeface.NORMAL));
+            return;
+        }
+        renderSynthesisGroups(findArray(data, "groups", "materials"), target);
+        String rawPhase = first(activity, "phase", "status");
+        boolean preparing = "preparing".equals(rawPhase);
+        boolean available = "available".equals(rawPhase);
+        boolean needsSlider = data.optBoolean("needSlider", false);
+        boolean canSubmit = data.optBoolean("canSubmit", false) && !needsSlider;
+        boolean canSchedule = preparing && !first(activity, "startAt", "startTime").isEmpty() && canSubmit;
+        boolean canImmediate = available && canSubmit;
+        String reason = first(data, "reason");
+        if (preparing && canSchedule) {
+            target.addView(text("开始时将按秒确认并提交", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+        } else if (needsSlider) {
+            target.addView(text("该合成需要人工完成滑块验证", 12, danger, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+        } else if (!canSubmit && !reason.isEmpty()) {
+            target.addView(text(reason, 12, danger, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+        } else if ("expired".equals(rawPhase) || "ended".equals(rawPhase)) {
+            target.addView(text("该项目已结束，仅作材料参考", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+        }
+        if (!canSchedule && !canImmediate) return;
+        LinearLayout actions = horizontal(Color.TRANSPARENT);
+        EditText count = numberInput("合成数量", "1");
+        Button action = button(canSchedule ? "加入任务" : "立即提交", true);
+        TextView state = text("", 12, muted, Typeface.NORMAL);
+        actions.addView(count, new LinearLayout.LayoutParams(0, dp(46), 1));
+        actions.addView(action, marginParams(dp(112), dp(46), dp(8), 0, 0, 0));
+        target.addView(actions, marginParams(-1, -2, 0, dp(4), 0, 0));
+        target.addView(state, marginParams(-1, -2, 0, dp(6), 0, 0));
+        if (canSchedule) {
+            action.setOnClickListener(v -> showSynthesisDialog(activity, true, count.getText().toString()));
+        } else {
+            action.setOnClickListener(v -> submitSynthesisNow(first(activity, "syntheticId", "id"), count, action, state));
+        }
+    }
+
+    private void renderSynthesisGroups(JSONArray groups, LinearLayout target) {
+        if (groups == null || groups.length() == 0) {
+            target.addView(text("未读取到材料", 12, muted, Typeface.NORMAL));
+            return;
+        }
+        for (int index = 0; index < groups.length(); index++) {
+            JSONObject group = groups.optJSONObject(index);
+            if (group == null) continue;
+            JSONObject album = group.optJSONObject("album");
+            if (album == null) {
+                JSONArray options = group.optJSONArray("options");
+                album = options == null ? null : options.optJSONObject(0);
+            }
+            String name = album == null ? "未选择材料" : first(album, "name", "title", "id");
+            String usable = album == null ? "0" : first(album, "usableNum", "quantity", "num");
+            String required = first(group, "required", "requiredTotal", "quantity");
+            target.addView(text(name + " · 可用 " + usable + " · 每次消耗 " + (required.isEmpty() ? "1" : required), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(4)));
+        }
+    }
+
+    private void submitSynthesisNow(String syntheticId, EditText count, Button action, TextView state) {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("syntheticNum", intValue(count, 1));
+        } catch (Exception ignored) {
+        }
+        action.setEnabled(false);
+        action.setText("提交中");
+        state.setText("正在确认并提交");
+        request("提交合成", "POST", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/" + Uri.encode(syntheticId) + "/submit", body, result -> {
+            state.setTextColor(success);
+            state.setText("合成已提交");
+            action.setEnabled(true);
+            action.setText("立即提交");
+        }, () -> {
+            state.setTextColor(danger);
+            state.setText("合成提交失败，请刷新后重试");
+            action.setEnabled(true);
+            action.setText("立即提交");
         });
     }
 
     private void showSynthesisDialog(JSONObject activity, boolean scheduled) {
+        showSynthesisDialog(activity, scheduled, "1");
+    }
+
+    private void showSynthesisDialog(JSONObject activity, boolean scheduled, String initialCount) {
         if (selectedPhone.isEmpty()) {
             toast("请先选择账号");
             return;
@@ -774,7 +853,7 @@ public final class MainActivity extends Activity {
             toast("合成编号为空");
             return;
         }
-        EditText count = numberInput("合成数量", "1");
+        EditText count = numberInput("合成数量", initialCount);
         LinearLayout form = vertical(Color.TRANSPARENT);
         form.addView(text(first(activity, "title", "name", "activityName", syntheticId), 15, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
         form.addView(count, new LinearLayout.LayoutParams(-1, dp(46)));
@@ -1214,20 +1293,73 @@ public final class MainActivity extends Activity {
 
     private void showWantedTaskDialog(JSONObject item) {
         if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
-        LinearLayout form = vertical(Color.TRANSPARENT);
-        EditText price = numberInput("求购价格", moneyValue(first(item, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText quantity = numberInput("数量", "1"); form.addView(quantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText paymentCode = numberInput("求购支付通道编号", ""); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        ProjectToggle agreement = toggle("我已阅读并同意交易服务协议", false); form.addView(agreement, marginParams(-1, -2, 0, 0, 0, dp(4)));
-        showProjectDialog("创建求购任务", form, "保存并启动", dialog -> {
-            JSONObject body = new JSONObject();
-            try {
-                body.put("type", "wanted"); body.put("phone", selectedPhone); body.put("groupId", first(item, "groupId", "id")); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
-                body.put("price", doubleValue(price, 0)); body.put("quantity", intValue(quantity, 1)); body.put("autoStart", true);
-                body.put("paymentPlatformCode", intValue(paymentCode, 0)); body.put("agreementAccepted", agreement.isChecked());
-            } catch (Exception ignored) { }
-            request("创建交易任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
+        String groupId = first(item, "groupId", "id");
+        request("核实求购钱包", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/market-trade/" + Uri.encode(groupId) + "/wanted-preflight", null, preflight -> {
+            JSONObject data = preflight.optJSONObject("data");
+            JSONObject payment = data == null ? null : data.optJSONObject("wantedPayment");
+            int paymentCodeValue = payment == null ? 0 : payment.optInt("code", 0);
+            if (payment == null || !payment.optBoolean("available", false) || paymentCodeValue <= 0) {
+                toast("当前账号没有可用求购支付钱包");
+                return;
+            }
+            LinearLayout form = vertical(Color.TRANSPARENT);
+            EditText price = numberInput("求购价格", moneyValue(first(item, "floorPrice", "price"))); form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+            EditText quantity = numberInput("数量", "1"); form.addView(quantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+            JSONArray platforms = payment.optJSONArray("platforms");
+            final int[] selectedPaymentCode = new int[]{paymentCodeValue};
+            Button paymentPicker = button(paymentPlatformLabel(platforms, paymentCodeValue), false);
+            paymentPicker.setOnClickListener(v -> showPaymentPlatformDialog(platforms, selectedPaymentCode, paymentPicker));
+            form.addView(labelled("求购支付钱包", paymentPicker));
+            ProjectToggle agreement = toggle("我已阅读并同意交易服务协议", false); form.addView(agreement, marginParams(-1, -2, 0, 0, 0, dp(4)));
+            showProjectDialog("创建求购任务", form, "保存并启动", dialog -> {
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("type", "wanted"); body.put("phone", selectedPhone); body.put("groupId", groupId); body.put("title", first(item, "name", "title")); body.put("cover", first(item, "cover", "image"));
+                    body.put("price", doubleValue(price, 0)); body.put("quantity", intValue(quantity, 1)); body.put("autoStart", true);
+                    body.put("paymentPlatformCode", selectedPaymentCode[0]); body.put("agreementAccepted", agreement.isChecked());
+                } catch (Exception ignored) { }
+                request("创建交易任务", "POST", "/native/market/trade/tasks", body, result -> { dialog.dismiss(); selectPage("trade"); });
+            });
         });
+    }
+
+    private String paymentPlatformLabel(JSONArray platforms, int code) {
+        if (platforms != null) {
+            for (int index = 0; index < platforms.length(); index++) {
+                JSONObject platform = platforms.optJSONObject(index);
+                if (platform != null && platform.optInt("code", 0) == code) {
+                    String name = first(platform, "name");
+                    return (name.isEmpty() ? "支付钱包 " + code : name) + " · " + code;
+                }
+            }
+        }
+        return "支付钱包 " + code;
+    }
+
+    private void showPaymentPlatformDialog(JSONArray platforms, int[] selectedCode, Button picker) {
+        if (platforms == null || platforms.length() == 0) {
+            toast("没有读取到可用求购支付钱包");
+            return;
+        }
+        LinearLayout options = vertical(Color.TRANSPARENT);
+        final Dialog[] dialog = new Dialog[1];
+        for (int index = 0; index < platforms.length(); index++) {
+            JSONObject platform = platforms.optJSONObject(index);
+            if (platform == null) continue;
+            int code = platform.optInt("code", 0);
+            boolean selectable = platform.optBoolean("selectable", false);
+            Button option = button(paymentPlatformLabel(platforms, code), selectable && code == selectedCode[0]);
+            option.setEnabled(selectable);
+            option.setAlpha(selectable ? 1f : 0.5f);
+            option.setContentDescription(paymentPlatformLabel(platforms, code) + (selectable ? "，可用" : "，不可用"));
+            option.setOnClickListener(v -> {
+                selectedCode[0] = code;
+                picker.setText(paymentPlatformLabel(platforms, code));
+                if (dialog[0] != null) dialog[0].dismiss();
+            });
+            options.addView(option, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        }
+        dialog[0] = showProjectDialog("选择求购支付钱包", options, null, null);
     }
 
     private void showAssetConsignmentDialog(String phone, JSONObject asset) {
@@ -1853,13 +1985,6 @@ public final class MainActivity extends Activity {
                         String status = lotteryAccountStatusLabel(snapshot);
                         row.addView(text(phone + " · " + count + " · " + status, 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(5)));
                     }
-                }
-                String id = activity.optString("id");
-                boolean enabled = activity.optBoolean("enabled", false);
-                if ("open".equals(activity.optString("phase", ""))) {
-                    Button toggle = button(enabled ? "停止自动抽奖" : "开启自动抽奖", enabled);
-                    toggle.setOnClickListener(v -> request(enabled ? "停止自动抽奖" : "开启自动抽奖", "POST", "/native/lottery/auto/" + Uri.encode(id) + "/" + (enabled ? "disable" : "enable"), null, ignored -> loadLottery(target)));
-                    row.addView(toggle, marginParams(-1, dp(42), 0, dp(8), 0, 0));
                 }
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }

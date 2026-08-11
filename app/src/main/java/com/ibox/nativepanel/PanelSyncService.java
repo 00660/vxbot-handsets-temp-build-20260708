@@ -21,6 +21,7 @@ public final class PanelSyncService extends Service {
     private static final String PREFS = "ibox_native_panel";
     private static final String CHANNEL_ID = "ibox_panel_sync";
     private static final int NOTIFICATION_ID = 304;
+    private static final long TASK_TICK_INTERVAL_MS = 25L;
     private ScheduledExecutorService scheduler;
     private volatile boolean stopped;
     private NativeEngine engine;
@@ -32,7 +33,7 @@ public final class PanelSyncService extends Service {
         startForeground(NOTIFICATION_ID, notification("正在启动本机任务引擎"));
         engine = new NativeEngine(this);
         scheduler = Executors.newScheduledThreadPool(2);
-        scheduler.scheduleWithFixedDelay(this::tick, 0, 1, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(this::tick, 0, TASK_TICK_INTERVAL_MS, TimeUnit.MILLISECONDS);
         scheduler.scheduleWithFixedDelay(this::sync, 0, 1, TimeUnit.SECONDS);
     }
 

@@ -19,11 +19,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -66,6 +67,8 @@ public final class NativeEngine {
     private static final long TASK_MAX_LATE_MS = 60L * 1000L;
     private static final int LOTTERY_DRAWS_PER_REQUEST = 5;
     private static final int LOTTERY_MAX_DRAWS_PER_RUN = 100;
+    private static final double QUANT_MAX_VOLATILITY_PERCENT = 100d;
+    private static final int QUANT_MAX_COOLDOWN_MINUTES = 24 * 60;
     private static final Object TICK_LOCK = new Object();
     private static final Object CLOCK_LOCK = new Object();
     private static volatile long serverClockOffsetMs;
@@ -75,6 +78,7 @@ public final class NativeEngine {
     private final IBoxDirectClient client;
     private final Map<String, IBoxDirectClient.SmsSession> smsSessions = new HashMap<>();
     private final Map<String, TaskCaptchaSession> taskCaptchaSessions = new HashMap<>();
+    private final Set<String> submittingSyntheses = Collections.synchronizedSet(new HashSet<>());
     private volatile long lastMarketWatchAt;
     private volatile long lastLotteryRefreshAt;
 
@@ -115,6 +119,9 @@ public final class NativeEngine {
         }
         if (route.path.startsWith("/accounts/") && route.path.endsWith("/market-trade/assets") && "GET".equals(verb)) {
             return marketTradeAssets(route.segment(2), route.query("groupId"));
+        }
+        if (route.path.startsWith("/accounts/") && route.path.contains("/market-trade/") && route.path.endsWith("/wanted-preflight") && "GET".equals(verb)) {
+            return marketTradeWantedPreflight(route.segment(2), route.segment(4));
         }
         if (route.path.startsWith("/accounts/") && route.path.contains("/market-trade/") && route.path.endsWith("/preflight") && "GET".equals(verb)) {
             return marketTradePreflight(route.segment(2), route.segment(4));
@@ -201,6 +208,13 @@ public final class NativeEngine {
 
     public void tick() {
         synchronized (TICK_LOCK) {
+            // 抢购和合成的时间窗口优先于低频行情刷新，避免刷新请求占住执行线程。
+            try {
+                processSynthesisTasks();
+                processFirstSaleTasks();
+            } catch (Exception ignored) {
+                // Task state carries the error for the corresponding card.
+            }
             try {
                 refreshMarketWatches(false);
             } catch (Exception ignored) {
@@ -213,8 +227,6 @@ public final class NativeEngine {
                 // Network failures must not terminate the foreground engine.
             }
             try {
-                processSynthesisTasks();
-                processFirstSaleTasks();
                 processQuantStrategies();
                 processTradeTasks();
             } catch (Exception ignored) {
@@ -793,9 +805,28 @@ public final class NativeEngine {
             if (activity == null) continue;
             JSONArray channels = firstArray(activity, "channels", "syntheticChannels", "syntheticActivityList", "synthetics");
             if (channels.length() == 0) {
-                String directId = first(activity, "syntheticActivityId", "syntheticId", "id");
-                if (!directId.isEmpty()) normalized.add(synthesisActivity(activity, activity, directId, now));
-                continue;
+                String activityId = first(activity, "id", "activityId", "syntheticActivityId");
+                if (!activityId.isEmpty()) {
+                    try {
+                        JSONObject detailResponse = client.requestAuthenticated(
+                                account,
+                                "GET",
+                                SYNTHESIS_ACTIVITY_DETAIL_URL,
+                                null,
+                                objectOf("id", integer(activityId, 0)),
+                                false,
+                                "合成活动详情"
+                        );
+                        channels = firstArray(data(detailResponse), "channels", "syntheticChannels", "syntheticActivityList", "synthetics");
+                    } catch (Exception ignored) {
+                        channels = new JSONArray();
+                    }
+                }
+                if (channels.length() == 0) {
+                    String directId = first(activity, "syntheticActivityId", "syntheticId");
+                    if (!directId.isEmpty()) normalized.add(synthesisActivity(activity, activity, directId, now));
+                    continue;
+                }
             }
             for (int channelIndex = 0; channelIndex < channels.length(); channelIndex++) {
                 JSONObject channel = channels.optJSONObject(channelIndex);
@@ -848,7 +879,13 @@ public final class NativeEngine {
 
     private JSONObject submitSynthesis(String phone, String syntheticId, JSONObject body) throws Exception {
         int count = Math.max(1, body == null ? 1 : body.optInt("syntheticNum", 1));
-        return submitPreparedSynthesis(phone, prepareSynthesis(phone, syntheticId, count));
+        String key = phone + ":" + syntheticId;
+        if (!submittingSyntheses.add(key)) throw new NativeException("该合成正在提交中");
+        try {
+            return submitPreparedSynthesis(phone, prepareSynthesis(phone, syntheticId, count));
+        } finally {
+            submittingSyntheses.remove(key);
+        }
     }
 
     private JSONObject confirmSynthesis(String phone, String syntheticId, JSONObject body) throws Exception {
@@ -886,22 +923,51 @@ public final class NativeEngine {
         if (phones.length() == 0 || phone.isEmpty() || syntheticId.isEmpty()) throw new NativeException("合成任务缺少账号或合成编号");
         if (!contains(phones, phone)) throw new NativeException("合成任务来源账号未包含在执行账号中");
         for (int index = 0; index < phones.length(); index++) account(phones.optString(index));
+        JSONObject activityData = synthesisActivities(phone).optJSONObject("data");
+        JSONArray activities = firstArray(activityData, "activities", "items", "list");
+        JSONObject matched = null;
+        for (int index = 0; index < activities.length(); index++) {
+            JSONObject candidate = activities.optJSONObject(index);
+            if (candidate != null && syntheticId.equals(first(candidate, "syntheticId", "id"))) {
+                matched = candidate;
+                break;
+            }
+        }
+        if (matched == null || !"preparing".equals(matched.optString("phase"))) {
+            throw new NativeException("该活动暂不能加入定时任务");
+        }
+        long officialStartAt = epoch(first(matched, "startAt", "startTime", "beginTime"));
+        if (officialStartAt <= taskNow()) throw new NativeException("合成活动开始时间已过");
         task.put("id", UUID.randomUUID().toString());
         task.put("phone", phone);
         task.put("sourcePhone", phone);
         task.put("phones", phones);
         task.put("syntheticId", syntheticId);
+        task.put("title", first(matched, "title", "name", "activityName", syntheticId));
         task.put("syntheticNum", Math.max(1, task.optInt("syntheticNum", 1)));
         task.put("status", "scheduled");
         task.put("enabled", true);
         task.put("runs", new JSONObject());
         task.put("createdAt", Instant.now().toString());
         task.put("updatedAt", Instant.now().toString());
-        String startAt = first(task, "startAt", "startTime");
-        long scheduledAt = epoch(startAt);
-        if (scheduledAt <= 0L) throw new NativeException("合成定时任务需要有效开始时间");
-        task.put("startAt", Instant.ofEpochMilli(scheduledAt).toString());
+        task.put("startAt", Instant.ofEpochMilli(officialStartAt).toString());
+        long scheduledAt = officialStartAt;
         JSONArray tasks = store.getSynthesisTasks();
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject existing = tasks.optJSONObject(index);
+            if (existing == null || !"scheduled".equals(existing.optString("status"))) continue;
+            if (!syntheticId.equals(existing.optString("syntheticId"))
+                    || scheduledAt != epoch(existing.optString("startAt"))
+                    || task.optInt("syntheticNum", 1) != existing.optInt("syntheticNum", 1)) continue;
+            JSONArray mergedPhones = executionPhones(existing);
+            for (int phoneIndex = 0; phoneIndex < phones.length(); phoneIndex++) {
+                addTaskPhone(mergedPhones, phones.optString(phoneIndex));
+            }
+            existing.put("phones", mergedPhones);
+            existing.put("updatedAt", Instant.now().toString());
+            if (!store.saveSynthesisTasks(tasks)) throw new NativeException("合成任务保存失败");
+            return ok(existing);
+        }
         tasks.put(task);
         if (!store.saveSynthesisTasks(tasks)) throw new NativeException("合成任务保存失败");
         if (scheduledAt <= taskNow()) {
@@ -981,6 +1047,10 @@ public final class NativeEngine {
     }
 
     private JSONObject prepareFirstSaleTaskAccount(JSONObject task, String phone, String requiredAction) throws Exception {
+        return prepareFirstSaleTaskAccount(task, phone, new String[]{requiredAction});
+    }
+
+    private JSONObject prepareFirstSaleTaskAccount(JSONObject task, String phone, String[] allowedActions) throws Exception {
         String paymentPassword = task.optString("paymentPassword").trim();
         if (paymentPassword.isEmpty()) throw new NativeException("首发任务需要支付密码");
         IBoxDirectClient.Account account = account(phone);
@@ -989,8 +1059,27 @@ public final class NativeEngine {
         if (saleId.isEmpty()) throw new NativeException("首发详情未返回发售编号");
         String expectedSaleId = task.optString("saleId");
         if (!expectedSaleId.isEmpty() && !expectedSaleId.equals(saleId)) throw new NativeException("首发项目已变更，请重新创建任务");
-        if (!requiredAction.equals(detail.optString("action"))) {
-            throw new NativeException("scheduled".equals(requiredAction) ? "首发项目当前不在准备阶段" : "首发项目当前不可购买");
+        String action = detail.optString("action");
+        boolean allowed = false;
+        if (allowedActions != null) {
+            for (String allowedAction : allowedActions) {
+                if (allowedAction != null && allowedAction.equals(action)) {
+                    allowed = true;
+                    break;
+                }
+            }
+        }
+        if (!allowed) {
+            boolean scheduledAllowed = false;
+            if (allowedActions != null) {
+                for (String allowedAction : allowedActions) {
+                    if ("scheduled".equals(allowedAction)) {
+                        scheduledAllowed = true;
+                        break;
+                    }
+                }
+            }
+            throw new NativeException(scheduledAllowed ? "首发项目当前不在准备阶段" : "首发项目当前不可购买");
         }
         int limit = detail.optInt("userOnceMaxBuyNum", 0);
         if (limit <= 0) throw new NativeException("首发项目购买额度无效");
@@ -1016,6 +1105,11 @@ public final class NativeEngine {
         task.put("num", Math.max(1, task.optInt("num", 1)));
         task.put("paymentPlatformCode", Math.max(0, task.optInt("paymentPlatformCode", 0)));
         JSONObject sourcePlan = prepareFirstSaleTaskAccount(task, phone, immediate ? "immediate" : "scheduled");
+        for (int index = 0; index < phones.length(); index++) {
+            String executionPhone = phones.optString(index);
+            if (phone.equals(executionPhone)) continue;
+            prepareFirstSaleTaskAccount(task, executionPhone, immediate ? "immediate" : "scheduled");
+        }
         JSONObject detail = sourcePlan.getJSONObject("detail");
         saleId = sourcePlan.optString("saleId");
         long scheduledAt = immediate ? taskNow() : epoch(detail.optString("startAt"));
@@ -1041,6 +1135,26 @@ public final class NativeEngine {
         task.put("startTime", detail.optString("startTime"));
         task.put("eligibility", firstSaleEligibility(detail));
         JSONArray tasks = store.getFirstSaleTasks();
+        if (!immediate) {
+            for (int index = 0; index < tasks.length(); index++) {
+                JSONObject existing = tasks.optJSONObject(index);
+                if (existing == null || !"scheduled".equals(existing.optString("status"))) continue;
+                if (!saleId.equals(existing.optString("saleId"))
+                        || scheduledAt != epoch(existing.optString("startAt"))
+                        || task.optInt("num", 1) != existing.optInt("num", 1)) continue;
+                JSONArray mergedPhones = executionPhones(existing);
+                for (int phoneIndex = 0; phoneIndex < phones.length(); phoneIndex++) {
+                    addTaskPhone(mergedPhones, phones.optString(phoneIndex));
+                }
+                existing.put("phones", mergedPhones);
+                existing.put("sourcePhone", phone);
+                existing.put("paymentPlatformCode", task.optInt("paymentPlatformCode", 0));
+                existing.put("paymentPassword", task.optString("paymentPassword"));
+                existing.put("updatedAt", Instant.now().toString());
+                if (!store.saveFirstSaleTasks(tasks)) throw new NativeException("首发任务保存失败");
+                return ok(existing);
+            }
+        }
         tasks.put(task);
         if (!store.saveFirstSaleTasks(tasks)) throw new NativeException("首发任务保存失败");
         if (immediate) {
@@ -1096,28 +1210,19 @@ public final class NativeEngine {
         IBoxDirectClient.Account account = firstAccount();
         JSONObject historyResponse = client.requestAuthenticated(account, "GET", LOTTERY_HISTORY_URL, null, null, false, "抽奖历史");
         JSONArray history = firstArray(data(historyResponse), "activities", "list", "records", "items");
-        JSONArray existing = store.getLotteryTasks();
-        Map<String, JSONObject> previous = byId(existing);
         JSONArray activities = new JSONArray();
         int maximum = Math.min(history.length(), 30);
         for (int index = 0; index < maximum; index++) {
             JSONObject row = history.optJSONObject(index);
             String id = first(row, "id", "drawId", "lotteryActivityId");
-            if (id.isEmpty()) continue;
-            JSONObject detailResponse = client.requestAuthenticated(account, "GET", LOTTERY_ACTIVITY_URL + "/" + encodePath(id), null, null, false, "抽奖活动");
-            JSONObject detail = object(data(detailResponse));
+            if (!id.matches("\\d+")) continue;
             JSONObject activity = new JSONObject();
             activity.put("id", id);
-            activity.put("title", first(detail, "title", "name", "activityName"));
-            activity.put("onlineStatus", integer(first(detail, "onlineStatus", "status"), 0));
-            activity.put("enableOpen", bool(detail.opt("enableOpen")));
-            activity.put("startedAt", first(detail, "startedAt", "startTime", "beginTime"));
-            activity.put("endedAt", first(detail, "endedAt", "endTime", "finishedAt"));
-            activity.put("startTime", activity.optString("startedAt"));
-            activity.put("endTime", activity.optString("endedAt"));
-            String phase = lotteryPhase(activity, now);
-            activity.put("phase", phase);
-            activity.put("enabled", previous.containsKey(id) ? previous.get(id).optBoolean("enabled", false) : false);
+            JSONObject detailResponse = client.requestAuthenticated(account, "GET", LOTTERY_ACTIVITY_URL + "/" + encodePath(id), null, null, false, "抽奖活动");
+            applyLotteryDetail(activity, object(data(detailResponse)), now);
+            String phase = activity.optString("phase");
+            // WebView 抽奖资源没有手动开关，活动进入监听列表后始终自动执行。
+            activity.put("enabled", true);
             activity.put("updatedAt", Instant.now().toString());
             JSONObject accounts = new JSONObject();
             JSONArray localAccounts = store.getAccounts();
@@ -1178,29 +1283,94 @@ public final class NativeEngine {
         throw new NativeException("抽奖活动不存在，请先刷新活动列表");
     }
 
+    private void validateQuantStrategy(JSONObject strategy) throws Exception {
+        String phone = first(strategy, "phone", "sourcePhone");
+        String groupId = first(strategy, "groupId", "collectionId", "id");
+        if (!phone.matches("\\d{11}")) throw new NativeException("量化策略账号无效");
+        account(phone);
+        if (!groupId.matches("\\d+")) throw new NativeException("量化藏品编号无效");
+        String executionMode = strategy.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
+        if (!("monitor".equals(executionMode) || "live".equals(executionMode))) throw new NativeException("量化执行方式无效");
+        int intervalValue = strategy.has("intervalValue") ? integer(strategy.opt("intervalValue"), -1) : 15;
+        if (intervalValue < 1 || intervalValue > 86_400) throw new NativeException("量化监控间隔无效");
+        String intervalUnit = strategy.optString("intervalUnit", "seconds").trim().toLowerCase(Locale.ROOT);
+        if (!("seconds".equals(intervalUnit) || "minutes".equals(intervalUnit) || "hours".equals(intervalUnit))) throw new NativeException("量化监控间隔单位无效");
+        int maxPosition = strategy.has("maxPosition") ? integer(strategy.opt("maxPosition"), -1) : 1;
+        if (maxPosition < 1) throw new NativeException("量化最大持仓必须大于 0");
+        double minimumProfit = strategy.has("minNetProfit") ? decimal(strategy.opt("minNetProfit"), Double.NaN) : 0d;
+        if (!Double.isFinite(minimumProfit) || minimumProfit < 0d) throw new NativeException("量化最低净利无效");
+        double volatilityLimit = strategy.has("volatilityLimitPercent") ? decimal(strategy.opt("volatilityLimitPercent"), Double.NaN) : 0d;
+        if (!Double.isFinite(volatilityLimit) || volatilityLimit < 0d || volatilityLimit > QUANT_MAX_VOLATILITY_PERCENT) {
+            throw new NativeException("量化波动上限无效");
+        }
+        int cooldownMinutes = strategy.has("cooldownMinutes") ? integer(strategy.opt("cooldownMinutes"), -1) : 10;
+        if (cooldownMinutes < 0 || cooldownMinutes > QUANT_MAX_COOLDOWN_MINUTES) throw new NativeException("量化冷却时间无效");
+        JSONObject buy = strategy.optJSONObject("buy");
+        JSONObject sell = strategy.optJSONObject("sell");
+        JSONObject stopLoss = strategy.optJSONObject("stopLoss");
+        boolean buyEnabled = buy != null && buy.optBoolean("enabled", false);
+        boolean sellEnabled = sell != null && sell.optBoolean("enabled", false);
+        boolean stopLossEnabled = stopLoss != null && stopLoss.optBoolean("enabled", false);
+        if (!buyEnabled && !sellEnabled && !stopLossEnabled) throw new NativeException("量化策略至少需要启用一条规则");
+        if (buyEnabled) {
+            double maxPrice = decimal(buy.opt("maxPrice"), Double.NaN);
+            int quantity = integer(buy.opt("quantity"), -1);
+            if (!Double.isFinite(maxPrice) || maxPrice <= 0d) throw new NativeException("量化买入价格无效");
+            if (quantity != 1) throw new NativeException("量化买入每次只能提交 1 件");
+        }
+        if (sellEnabled) {
+            double minPrice = decimal(sell.opt("minPrice"), Double.NaN);
+            double sellPrice = decimal(sell.opt("sellPrice"), Double.NaN);
+            int quantity = integer(sell.opt("quantity"), -1);
+            if (!Double.isFinite(minPrice) || minPrice <= 0d || !Double.isFinite(sellPrice) || sellPrice <= 0d) {
+                throw new NativeException("量化卖出价格无效");
+            }
+            if (sellPrice != Math.rint(sellPrice)) throw new NativeException("量化寄售价必须为整数");
+            if (quantity != 1) throw new NativeException("量化卖出每次只能提交 1 件");
+        }
+        if (stopLossEnabled) {
+            double triggerPrice = decimal(stopLoss.opt("triggerPrice"), Double.NaN);
+            double sellPrice = decimal(stopLoss.opt("sellPrice"), Double.NaN);
+            int quantity = sell == null ? 1 : integer(sell.opt("quantity"), 1);
+            if (!Double.isFinite(triggerPrice) || triggerPrice <= 0d || !Double.isFinite(sellPrice) || sellPrice <= 0d) {
+                throw new NativeException("量化止损价格无效");
+            }
+            if (sellPrice != Math.rint(sellPrice)) throw new NativeException("量化止损寄售价必须为整数");
+            if (quantity != 1) throw new NativeException("量化止损每次只能提交 1 件");
+        }
+        if ("live".equals(executionMode) && (sellEnabled || stopLossEnabled) && strategy.optString("consignPassword").trim().isEmpty()) {
+            throw new NativeException("真实量化寄售需要交易密码");
+        }
+    }
+
+    private static boolean hasLiveQuantConflict(JSONArray strategies, String phone, String groupId, String exceptId) {
+        if (strategies == null) return false;
+        for (int index = 0; index < strategies.length(); index++) {
+            JSONObject item = strategies.optJSONObject(index);
+            if (item == null || exceptId.equals(item.optString("id"))) continue;
+            if (!"live".equals(item.optString("executionMode")) || !phone.equals(item.optString("phone")) || !groupId.equals(item.optString("groupId"))) continue;
+            String status = item.optString("status");
+            if (item.optBoolean("enabled", false) || "verification_required".equals(status) || "needs_sell_password".equals(status) || "payment_pending".equals(status)) return true;
+        }
+        return false;
+    }
+
     private JSONObject createQuantStrategy(JSONObject body) throws Exception {
         JSONObject strategy = copy(body);
         String phone = first(strategy, "phone", "sourcePhone");
         String groupId = first(strategy, "groupId", "collectionId", "id");
         if (phone.isEmpty() || groupId.isEmpty()) throw new NativeException("量化策略缺少账号或藏品编号");
         if (!groupId.matches("\\d+")) throw new NativeException("量化藏品编号无效");
-        String executionMode = strategy.optString("executionMode", "monitor");
-        if (!("monitor".equals(executionMode) || "live".equals(executionMode))) throw new NativeException("量化执行方式无效");
+        strategy.put("phone", phone);
+        strategy.put("groupId", groupId);
+        validateQuantStrategy(strategy);
+        String executionMode = strategy.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
+        strategy.put("executionMode", executionMode);
+        if ("live".equals(executionMode) && hasLiveQuantConflict(store.getQuantStrategies(), phone, groupId, "")) {
+            throw new NativeException("同账号同藏品已有运行中的实时量化策略");
+        }
         int intervalValue = strategy.optInt("intervalValue", 15);
-        if (intervalValue < 1 || intervalValue > 86_400) throw new NativeException("量化监控间隔无效");
         String intervalUnit = strategy.optString("intervalUnit", "seconds").trim().toLowerCase(Locale.ROOT);
-        if (!("seconds".equals(intervalUnit) || "minutes".equals(intervalUnit) || "hours".equals(intervalUnit))) throw new NativeException("量化监控间隔单位无效");
-        if (strategy.optInt("maxPosition", 1) < 1) throw new NativeException("量化最大持仓必须大于 0");
-        JSONObject sell = strategy.optJSONObject("sell");
-        if ("live".equals(executionMode) && sell != null && sell.optBoolean("enabled", false)
-                && strategy.optString("consignPassword").trim().isEmpty()) {
-            throw new NativeException("真实量化寄售需要交易密码");
-        }
-        JSONObject stopLoss = strategy.optJSONObject("stopLoss");
-        if ("live".equals(executionMode) && stopLoss != null && stopLoss.optBoolean("enabled", false)
-                && strategy.optString("consignPassword").trim().isEmpty()) {
-            throw new NativeException("真实量化止损需要交易密码");
-        }
         String now = Instant.now().toString();
         strategy.put("id", UUID.randomUUID().toString());
         strategy.put("phone", phone);
@@ -1226,8 +1396,32 @@ public final class NativeEngine {
         for (int index = 0; index < strategies.length(); index++) {
             JSONObject strategy = strategies.optJSONObject(index);
             if (strategy == null || !id.equals(strategy.optString("id"))) continue;
+            if (terminalTaskStatus(strategy.optString("status"))) throw new NativeException("已提交或待支付的量化策略不能修改");
+            JSONObject candidate = copy(strategy);
+            merge(candidate, body);
+            validateQuantStrategy(candidate);
+            String candidatePhone = first(candidate, "phone", "sourcePhone");
+            String candidateGroupId = first(candidate, "groupId", "collectionId", "id");
+            String executionMode = candidate.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
+            candidate.put("executionMode", executionMode);
+            if ("live".equals(executionMode) && hasLiveQuantConflict(strategies, candidatePhone, candidateGroupId, id)) {
+                throw new NativeException("同账号同藏品已有运行中的实时量化策略");
+            }
             merge(strategy, body);
+            strategy.put("phone", candidatePhone);
+            strategy.put("groupId", candidateGroupId);
+            strategy.put("executionMode", executionMode);
+            strategy.put("enabled", true);
+            strategy.put("status", "monitoring");
+            strategy.put("lastSignal", "idle");
+            strategy.put("lastCheckAt", "");
+            strategy.put("nextCheckAt", "");
+            strategy.put("consecutiveFailures", 0);
+            strategy.put("lastFailureAt", "");
+            strategy.put("lastRetryAfterMs", 0);
+            strategy.put("lastResult", "strategy_updated");
             strategy.put("updatedAt", Instant.now().toString());
+            addEvent(strategy, "updated", "策略已更新");
             updated = strategy;
             break;
         }
@@ -1246,6 +1440,9 @@ public final class NativeEngine {
                 throw new NativeException("已提交或待支付的量化策略不能重新启动");
             }
             if (enabled) {
+                if ("live".equals(strategy.optString("executionMode")) && hasLiveQuantConflict(strategies, strategy.optString("phone"), strategy.optString("groupId"), id)) {
+                    throw new NativeException("同账号同藏品已有运行中的实时量化策略");
+                }
                 IBoxDirectClient.Account direct = this.account(strategy.optString("phone"));
                 JSONObject evaluated = evaluateQuantStrategy(strategy, direct);
                 applyQuantSnapshot(strategy, evaluated);
@@ -1482,6 +1679,7 @@ public final class NativeEngine {
         if (!"wanted".equals(type)) throw new NativeException("交易任务类型无效");
         if (!task.optBoolean("agreementAccepted", false)) throw new NativeException("求购任务需要确认交易服务协议");
         int requestedCode = task.optInt("paymentPlatformCode", 0);
+        if (requestedCode <= 0) throw new NativeException("求购任务需要选择支付通道");
         JSONObject wanted = detail.optJSONObject("wanted");
         if (explicitFalse(detail.opt("enablePurchase")) || (wanted != null && explicitFalse(wanted.opt("enabled")))) {
             throw new NativeException("当前藏品暂不支持求购");
@@ -1879,7 +2077,7 @@ public final class NativeEngine {
         for (int index = 0; index < phones.length(); index++) {
             String phone = phones.optString(index);
             try {
-                prepareFirstSaleTaskAccount(task, phone, "scheduled");
+                prepareFirstSaleTaskAccount(task, phone, new String[]{"scheduled", "immediate"});
                 taskRun(task, phone, "ready", "");
             } catch (Exception error) {
                 taskRun(task, phone, "failed", message(error));
@@ -1910,17 +2108,18 @@ public final class NativeEngine {
                 JSONObject result = submitFirstSale(request, task.optJSONObject("captcha"));
                 Object order = result.opt("data");
                 String orderUuid = deepString(order, "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
+                if (orderUuid.isEmpty()) throw new NativeException("首发下单未返回订单编号");
                 String cashier = deepString(order, "cashierLink", "link");
                 String cashierMessage = "";
-                if (!orderUuid.isEmpty() && cashier.isEmpty()) {
+                if (cashier.isEmpty()) {
                     try {
                         cashier = cashierLink(account(phone), orderUuid, 0);
                     } catch (Exception error) {
                         cashierMessage = message(error);
                     }
                 }
-                taskRun(task, phone, orderUuid.isEmpty() ? "submitted" : "payment_pending", cashierMessage,
-                        objectOf("orderUuid", orderUuid, "cashierLink", cashier, "paymentStatus", orderUuid.isEmpty() ? "submitted" : "pending", "result", order));
+                taskRun(task, phone, "payment_pending", cashierMessage,
+                        objectOf("orderUuid", orderUuid, "cashierLink", cashier, "paymentStatus", "pending", "result", order));
             } catch (Exception error) {
                 if (captchaRequired(error)) {
                     taskRun(task, phone, "verification_required", message(error));
@@ -2372,6 +2571,8 @@ public final class NativeEngine {
         JSONObject buy = strategy.optJSONObject("buy");
         if (buy == null || !buy.optBoolean("enabled", false)) return false;
         if (candidate == null || candidate.optBoolean("locked", false)) return false;
+        String digitalCollectionId = candidate.optString("digitalCollectionId");
+        if (!digitalCollectionId.matches("\\d+")) throw new NativeException("量化买入挂单实例编号无效");
         double ceiling = decimal(buy.opt("maxPrice"), Double.NaN);
         double price = decimal(candidate.opt("price"), Double.NaN);
         if (!Double.isFinite(ceiling) || !Double.isFinite(price) || price > ceiling) return false;
@@ -2384,7 +2585,7 @@ public final class NativeEngine {
             return false;
         }
         int paymentCode = paymentPlatformCode(account, 1, 0);
-        JSONObject request = objectOf("digitalCollectionId", integer(candidate.opt("digitalCollectionId"), 0), "paymentPlatformCode", paymentCode);
+        JSONObject request = objectOf("digitalCollectionId", integer(digitalCollectionId, 0), "paymentPlatformCode", paymentCode);
         JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_PURCHASE_CONSIGNMENT_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(strategy.optJSONObject("captcha")), true, "量化买入");
         String orderUuid = deepString(data(response), "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid");
         if (orderUuid.isEmpty()) throw new NativeException("量化买入未返回订单编号");
@@ -2413,17 +2614,21 @@ public final class NativeEngine {
         double trigger = stopLossAction && stopLoss != null ? decimal(stopLoss.opt("triggerPrice"), Double.NaN) : decimal(sell.opt("minPrice"), Double.NaN);
         if (!Double.isFinite(trigger) || !Double.isFinite(salePrice)) return false;
         double marketPrice = decimal(strategy.opt("latestFloorPrice"), Double.NaN);
-        if (!Double.isFinite(marketPrice) || marketPrice < trigger) return false;
+        if (!Double.isFinite(marketPrice)) return false;
+        if (stopLossAction ? marketPrice > trigger : marketPrice < trigger) return false;
         if (asset == null) return false;
+        String digitalCollectionId = asset.optString("id");
+        if (!digitalCollectionId.matches("\\d+")) throw new NativeException("量化寄售持仓实例编号无效");
         int quantity = Math.max(1, sell.optInt("quantity", 1));
         if (asset.optInt("quantity", 0) < quantity || asset.optBoolean("locked", false)) return false;
-        String priceError = marketTradeConsignmentPriceError(salePrice, publicConfig);
+        JSONObject freshConfig = marketTradePublicConfig(account);
+        String priceError = marketTradeConsignmentPriceError(salePrice, freshConfig);
         if (!priceError.isEmpty()) throw new NativeException(priceError);
         String password = strategy.optString("consignPassword").trim();
         if (password.isEmpty()) throw new NativeException("量化寄售缺少交易密码");
         int paymentCode = paymentPlatformCode(account, 1, 0);
         JSONObject request = objectOf(
-                "digitalCollectionId", integer(asset.opt("id"), 0),
+                "digitalCollectionId", integer(digitalCollectionId, 0),
                 "price", salePrice,
                 "paymentPlatformCodes", new JSONArray().put(paymentCode),
                 "consignPassword", password
@@ -2443,22 +2648,36 @@ public final class NativeEngine {
         long now = taskNow();
         for (int index = 0; index < activities.length(); index++) {
             JSONObject activity = activities.optJSONObject(index);
-            if (activity == null || !activity.optBoolean("enabled", false) || !lotteryOpen(activity, now)) continue;
+            if (activity == null || !activity.optBoolean("enabled", true)) continue;
             JSONObject accounts = activity.optJSONObject("accounts");
             if (accounts == null) continue;
             Iterator<String> phones = accounts.keys();
             while (phones.hasNext()) {
                 String phone = phones.next();
                 JSONObject state = accounts.optJSONObject(phone);
-                if (state == null || state.optInt("availableCount", 0) <= 0 || "drawing".equals(state.optString("status"))) continue;
+                if (state == null || "drawing".equals(state.optString("status"))) continue;
                 try {
                     IBoxDirectClient.Account account = account(phone);
+                    refreshLotteryActivity(account, activity);
+                    now = taskNow();
+                    if (!lotteryOpen(activity, now)) {
+                        putQuietly(state, "availableCount", 0);
+                        putQuietly(state, "status", activity.optString("phase", "not_started"));
+                        putQuietly(state, "updatedAt", Instant.now().toString());
+                        changed = true;
+                        continue;
+                    }
                     int drawCount = 0;
-                    int available = Math.max(0, state.optInt("availableCount", 0));
+                    int available = availableLotteryCount(account, activity.optString("id"));
                     while (available > 0 && drawCount < LOTTERY_MAX_DRAWS_PER_RUN) {
+                        refreshLotteryActivity(account, activity);
+                        if (!lotteryOpen(activity, taskNow())) {
+                            available = 0;
+                            break;
+                        }
                         available = availableLotteryCount(account, activity.optString("id"));
                         if (available <= 0) break;
-                        int requested = Math.min(LOTTERY_DRAWS_PER_REQUEST, available);
+                        int requested = available >= LOTTERY_DRAWS_PER_REQUEST ? LOTTERY_DRAWS_PER_REQUEST : 1;
                         putQuietly(state, "status", "drawing");
                         JSONObject response = client.requestAuthenticated(account, "POST", LOTTERY_ACTIVITY_URL + "/" + encodePath(activity.optString("id")) + "/draw", objectOf("drawCount", requested), null, true, "自动抽奖");
                         int remaining = availableLotteryCount(account, activity.optString("id"));
@@ -2485,6 +2704,24 @@ public final class NativeEngine {
             putQuietly(activity, "updatedAt", Instant.now().toString());
         }
         if (changed) store.saveLotteryTasks(activities);
+    }
+
+    private void refreshLotteryActivity(IBoxDirectClient.Account account, JSONObject activity) throws Exception {
+        String id = activity == null ? "" : activity.optString("id");
+        if (id.isEmpty()) throw new NativeException("抽奖活动编号为空");
+        JSONObject response = client.requestAuthenticated(account, "GET", LOTTERY_ACTIVITY_URL + "/" + encodePath(id), null, null, false, "抽奖活动");
+        applyLotteryDetail(activity, object(data(response)), taskNow());
+    }
+
+    private static void applyLotteryDetail(JSONObject activity, JSONObject detail, long now) throws JSONException {
+        activity.put("title", first(detail, "title", "name", "activityName"));
+        activity.put("onlineStatus", integer(first(detail, "onlineStatus", "status"), 0));
+        activity.put("enableOpen", bool(detail.opt("enableOpen")));
+        activity.put("startedAt", first(detail, "startedAt", "startTime", "beginTime"));
+        activity.put("endedAt", first(detail, "endedAt", "endTime", "finishedAt"));
+        activity.put("startTime", activity.optString("startedAt"));
+        activity.put("endTime", activity.optString("endedAt"));
+        activity.put("phase", lotteryPhase(activity, now));
     }
 
     private int availableLotteryCount(IBoxDirectClient.Account account, String drawId) throws Exception {
@@ -2529,7 +2766,8 @@ public final class NativeEngine {
         value.put("startAt", isoTime(value.optString("startTime")));
         value.put("endAt", isoTime(value.optString("endTime")));
         value.put("phase", synthesisPhase(value, now));
-        value.put("supportAssistant", bool(channel.opt("supportAssistant")));
+        Object supportAssistant = channel.has("supportAssistant") ? channel.opt("supportAssistant") : parent.opt("supportAssistant");
+        value.put("supportAssistant", bool(supportAssistant));
         return value;
     }
 
@@ -2541,6 +2779,7 @@ public final class NativeEngine {
         result.put("title", first(root, "title", "activityName", "name", "syntheticName"));
         boolean needsSlider = bool(root.opt("needSlider"));
         result.put("needSlider", needsSlider);
+        JSONArray groups = synthesisGroupSummaries(root, 1);
         try {
             JSONObject request = synthesisRequest(root, syntheticId, 1);
             result.put("canSubmit", !needsSlider);
@@ -2549,7 +2788,45 @@ public final class NativeEngine {
             result.put("canSubmit", false);
             result.put("reason", message(error));
         }
-        result.put("materials", firstArray(root, "burnAlbums", "materials", "materialGroups"));
+        result.put("groups", groups);
+        return result;
+    }
+
+    private JSONArray synthesisGroupSummaries(JSONObject root, int syntheticNum) throws JSONException {
+        JSONArray groups = firstArray(root, "burnAlbums", "materials", "materialGroups");
+        JSONArray result = new JSONArray();
+        for (int index = 0; index < groups.length(); index++) {
+            JSONObject group = groups.optJSONObject(index);
+            if (group == null) continue;
+            int required = Math.max(1, integer(first(group, "quantity", "needNum", "burnNum", "requireNum", "num", "count"), 1));
+            int requiredTotal = required * Math.max(1, syntheticNum);
+            String groupId = first(group, "groupId", "syntheticGroupId", "id");
+            if (groupId.isEmpty()) groupId = String.valueOf(index + 1);
+            JSONObject summary = objectOf(
+                    "groupId", groupId,
+                    "required", required,
+                    "requiredTotal", requiredTotal
+            );
+            JSONArray choices = firstArray(group, "albums", "albumList", "materials", "items");
+            JSONArray options = new JSONArray();
+            JSONObject selected = null;
+            for (int optionIndex = 0; optionIndex < choices.length(); optionIndex++) {
+                JSONObject option = choices.optJSONObject(optionIndex);
+                if (option == null) continue;
+                JSONObject album = objectOf(
+                        "id", first(option, "digitalCollectionId", "digitalCollectionID", "albumId", "collectionId", "id"),
+                        "name", first(option, "albumName", "digitalCollectionName", "collectionName", "name", "title"),
+                        "usableNum", integer(first(option, "usableNum", "availableNum", "holdNum", "quantity", "num"), 0)
+                );
+                options.put(album);
+                if (selected == null && integer(album.opt("usableNum"), 0) >= requiredTotal && !album.optString("id").isEmpty()) {
+                    selected = album;
+                }
+            }
+            if (selected != null) summary.put("album", selected);
+            else summary.put("options", options);
+            result.put(summary);
+        }
         return result;
     }
 
@@ -2611,6 +2888,10 @@ public final class NativeEngine {
         result.put("endTime", end);
         result.put("endAt", isoTime(end));
         result.put("userOnceMaxBuyNum", integer(first(value, "userOnceMaxBuyNum", "onceMaxBuyNum", "maxBuyNum", "limitNum"), 0));
+        putNullable(result, "forNew", firstNullable(value, "forNew"));
+        putNullable(result, "priorityNum", firstNullable(value, "priorityNum"));
+        putNullable(result, "isMembership", firstNullable(value, "isMembership"));
+        putNullable(result, "buttonStatus", firstNullable(value, "buttonStatus"));
         return result;
     }
 
@@ -2850,7 +3131,11 @@ public final class NativeEngine {
                 "saleStatusLabel", detail.optString("saleStatusLabel"),
                 "action", detail.optString("action"),
                 "phase", detail.optString("phase"),
-                "userOnceMaxBuyNum", detail.opt("userOnceMaxBuyNum")
+                "userOnceMaxBuyNum", detail.opt("userOnceMaxBuyNum"),
+                "forNew", detail.opt("forNew"),
+                "priorityNum", detail.opt("priorityNum"),
+                "isMembership", detail.opt("isMembership"),
+                "buttonStatus", detail.opt("buttonStatus")
         );
     }
 
@@ -2988,6 +3273,16 @@ public final class NativeEngine {
         ));
     }
 
+    private JSONObject marketTradeWantedPreflight(String phone, String groupId) throws Exception {
+        if (groupId == null || !groupId.trim().matches("\\d+")) throw new NativeException("交易藏品编号无效");
+        IBoxDirectClient.Account account = account(phone);
+        JSONObject detail = loadMarketTradeDetail(account, groupId);
+        JSONObject wanted = detail.optJSONObject("wanted");
+        JSONArray allowedCodes = wanted == null ? new JSONArray() : firstArray(wanted, "paymentPlatformCodes", "platformCodes");
+        JSONObject payment = paymentPlatformAvailability(account, 2, allowedCodes);
+        return ok(objectOf("detail", detail, "wantedPayment", payment, "updatedAt", Instant.now().toString()));
+    }
+
     private JSONObject loadMarketTradeDetail(IBoxDirectClient.Account account, String groupId) throws Exception {
         JSONObject detailResponse = client.requestAuthenticated(account, "GET", MARKET_GROUP_URL + "/" + encodePath(groupId), null, null, false, "交易详情");
         JSONObject root = object(data(detailResponse));
@@ -3062,8 +3357,12 @@ public final class NativeEngine {
             normalized.put("instanceId", instanceId);
             normalized.put("quantity", integer(first(entry, "holdNum", "holdCount", "quantity", "count", "num"), 1));
             normalized.put("locked", integer(first(entry, "lockStatus", "lockedStatus"), 0) > 0);
+            boolean consigning = integer(first(entry, "digitalCollectionStatus"), -1) == 2
+                    || (integer(first(entry, "consignmentStatus"), -1) == 1
+                    && integer(first(entry, "consignmentNum", "consignNum"), 0) > 0);
+            normalized.put("consigning", consigning);
             normalized.put("name", collection == null ? first(entry, "name", "title") : first(collection, "name", "title"));
-            if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false)) result.put(normalized);
+            if (!normalized.optString("id").isEmpty() && !normalized.optBoolean("locked", false) && !consigning) result.put(normalized);
         }
         return result;
     }
@@ -3080,13 +3379,21 @@ public final class NativeEngine {
         for (int index = 0; index < source.length(); index++) {
             JSONObject entry = source.optJSONObject(index);
             if (entry == null) continue;
-            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2) result.put(entry);
+            int digitalStatus = integer(first(entry, "digitalCollectionStatus"), -1);
+            int consignmentStatus = integer(first(entry, "consignmentStatus"), -1);
+            int consignmentNum = integer(first(entry, "consignmentNum", "consignNum"), 0);
+            if (digitalStatus == 2 || (consignmentStatus == 1 && consignmentNum > 0)) result.put(entry);
         }
         return result;
     }
 
     private static String ownedCollectionId(JSONObject entry, String groupId) {
-        String instanceId = first(entry, "id");
+        String instanceId = first(entry, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
+        if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
+        JSONObject collection = entry == null ? null : entry.optJSONObject("digitalCollection");
+        instanceId = first(collection, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
+        if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
+        instanceId = first(entry, "id");
         if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
         return "";
     }
@@ -3173,11 +3480,51 @@ public final class NativeEngine {
     }
 
     private JSONObject paymentPlatformAvailability(IBoxDirectClient.Account account, int placeOrderMethod) throws Exception {
+        return paymentPlatformAvailability(account, placeOrderMethod, new JSONArray());
+    }
+
+    private JSONObject paymentPlatformAvailability(IBoxDirectClient.Account account, int placeOrderMethod, JSONArray allowedCodes) throws Exception {
         try {
-            return objectOf("available", true, "code", paymentPlatformCode(account, placeOrderMethod, 0));
+            JSONArray platforms = paymentPlatformOptions(account, placeOrderMethod, allowedCodes);
+            int code = 0;
+            for (int index = 0; index < platforms.length(); index++) {
+                JSONObject platform = platforms.optJSONObject(index);
+                if (platform != null && platform.optBoolean("selectable", false)) {
+                    code = platform.optInt("code", 0);
+                    if (code > 0) break;
+                }
+            }
+            if (code <= 0) throw new NativeException("未找到可用支付通道");
+            return objectOf("available", true, "code", code, "platforms", platforms);
         } catch (Exception error) {
-            return objectOf("available", false, "code", JSONObject.NULL, "message", message(error));
+            return objectOf("available", false, "code", JSONObject.NULL, "platforms", new JSONArray(), "message", message(error));
         }
+    }
+
+    private JSONArray paymentPlatformOptions(IBoxDirectClient.Account account, int placeOrderMethod, JSONArray allowedCodes) throws Exception {
+        JSONObject response = client.requestAuthenticated(account, "GET", PAYMENT_PLATFORMS_URL, null, objectOf("placeOrderMethod", placeOrderMethod), false, "支付通道");
+        JSONArray source = firstArray(data(response), "paymentPlatforms", "platforms", "paymentPlatformList", "paymentMethods", "list", "records", "items", "rows", "data");
+        boolean restrictAllowedCodes = allowedCodes != null && allowedCodes.length() > 0;
+        JSONArray result = new JSONArray();
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject item = source.optJSONObject(index);
+            if (item == null) continue;
+            int code = integer(first(item, "paymentPlatformCode", "platformCode", "code"), 0);
+            if (code <= 0 || (restrictAllowedCodes && !contains(allowedCodes, String.valueOf(code)))) continue;
+            Object activationValue = paymentPlatformActivationValue(item);
+            int activation = activationValue instanceof Boolean ? (bool(activationValue) ? 1 : 0) : integer(activationValue, 0);
+            boolean enabled = item.optBoolean("enabled", item.optBoolean("isEnabled", true));
+            boolean available = item.optBoolean("available", item.optBoolean("isAvailable", true));
+            result.put(objectOf(
+                    "code", code,
+                    "name", first(item, "platformName", "paymentPlatformName", "name", "paymentType", "platformType"),
+                    "activationStatus", activation,
+                    "enabled", enabled,
+                    "available", available,
+                    "selectable", activation == 1 && enabled && available
+            ));
+        }
+        return result;
     }
 
     private String cashierLink(IBoxDirectClient.Account account, String orderUuid, int initiatorType) throws Exception {
@@ -3385,15 +3732,6 @@ public final class NativeEngine {
             if (named == null && !title.isEmpty() && title.equals(first(item, "name", "title"))) named = item;
         }
         return grouped == null ? named : grouped;
-    }
-
-    private static Map<String, JSONObject> byId(JSONArray values) {
-        Map<String, JSONObject> result = new LinkedHashMap<>();
-        for (int index = 0; index < values.length(); index++) {
-            JSONObject value = values.optJSONObject(index);
-            if (value != null && !value.optString("id").isEmpty()) result.put(value.optString("id"), value);
-        }
-        return result;
     }
 
     private static JSONArray removeByPhone(JSONArray values, String phone) {
