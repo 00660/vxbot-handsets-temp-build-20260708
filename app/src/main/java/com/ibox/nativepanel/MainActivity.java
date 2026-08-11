@@ -614,8 +614,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showConsignmentCancelConfirm(String phone, String name, JSONObject listing) {
-        String listingOrderId = first(listing, "listingOrderId");
-        if (!listingOrderId.matches("\\d+")) {
+        String orderId = first(listing, "orderId");
+        if (!orderId.matches("\\d+")) {
             toast("寄售挂单尚未同步");
             return;
         }
@@ -628,7 +628,7 @@ public final class MainActivity extends Activity {
                 body.put("phone", phone);
             } catch (Exception ignored) {
             }
-            request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(listingOrderId) + "/cancel", body,
+            request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(orderId) + "/cancel", body,
                     result -> request("同步资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null,
                             refreshed -> {
                                 content.removeAllViews();

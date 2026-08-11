@@ -48,9 +48,9 @@ public final class NativeEngine {
     private static final String MARKET_PUBLIC_URL = "https://sail-api.ibox.art/public-market-service/digital-collection-groups";
     private static final String MARKET_GROUP_URL = "https://sail-api.ibox.art/public-service/digital-collection-groups";
     private static final String MARKET_TRADE_PUBLIC_CONFIG_URL = "https://sail-api.ibox.art/public-service-qt/config/public";
-    private static final String MARKET_ASSET_DETAIL_URL = "https://sail-api.ibox.art/public-service-qt/asset/details";
+    private static final String OWNED_COLLECTION_DETAIL_URL = "https://sail-api.ibox.art/public-service/digital-collections";
     private static final String MARKET_CONSIGNMENT_ORDER_URL = "https://sail-api.ibox.art/order-create-service/consignment-orders";
-    private static final String MARKET_CONSIGNMENT_CANCEL_URL = "https://sail-api.ibox.art/order-service-qt/cancel/listings";
+    private static final String CONSIGNMENT_ORDER_URL = "https://sail-api.ibox.art/order-service/consign-orders";
     private static final String MARKET_ADVANCE_ORDER_URL = "https://sail-api.ibox.art/order-create-service/advance-orders";
     private static final String MARKET_PURCHASE_CONSIGNMENT_URL = "https://sail-api.ibox.art/order-create-service/purchase-consignment-orders";
     private static final String OWNED_GROUP_URL = "https://sail-api.ibox.art/personal-center-service/users/digital-collection-groups";
@@ -350,23 +350,28 @@ public final class NativeEngine {
                     JSONObject detailResponse = client.requestAuthenticated(
                             account,
                             "GET",
-                            MARKET_ASSET_DETAIL_URL + "/" + encodePath(assetId),
+                            OWNED_COLLECTION_DETAIL_URL + "/" + encodePath(assetId),
                             null,
                             null,
                             false,
                             "寄售资产详情"
                     );
                     JSONObject detail = object(data(detailResponse));
-                    String listingOrderId = first(detail, "listingOrderId");
-                    int listingStatus = integer(first(detail, "listingStatus"), -1);
-                    if (listingStatus != 1 || !listingOrderId.matches("\\d+")) {
+                    String detailAssetId = first(detail, "id");
+                    String detailGroupId = first(detail, "groupId");
+                    String orderId = first(detail, "orderId");
+                    int collectionStatus = integer(first(detail, "digitalCollectionStatus"), -1);
+                    if (!assetId.equals(detailAssetId)
+                            || !item.optString("groupId").equals(detailGroupId)
+                            || collectionStatus != 2
+                            || !orderId.matches("\\d+")) {
                         resolved = false;
                         continue;
                     }
                     activeListings.put(objectOf(
                             "assetId", assetId,
                             "tokenId", first(detail, "tokenId"),
-                            "listingOrderId", listingOrderId
+                            "orderId", orderId
                     ));
                 }
                 if (resolved) {
@@ -1594,21 +1599,21 @@ public final class NativeEngine {
         return ok(new JSONObject());
     }
 
-    private JSONObject cancelConsignmentOrder(String listingOrderId, JSONObject body) throws Exception {
+    private JSONObject cancelConsignmentOrder(String orderId, JSONObject body) throws Exception {
         String phone = first(body, "phone", "sourcePhone");
         if (phone.isEmpty()) throw new NativeException("取消寄售需要指定账号");
-        if (!listingOrderId.matches("\\d+")) throw new NativeException("寄售订单编号无效");
+        if (!orderId.matches("\\d+")) throw new NativeException("寄售订单编号无效");
         IBoxDirectClient.Account account = account(phone);
         client.requestAuthenticated(
                 account,
                 "POST",
-                MARKET_CONSIGNMENT_CANCEL_URL + "/" + encodePath(listingOrderId),
+                CONSIGNMENT_ORDER_URL + "/" + encodePath(orderId) + "/cancel",
                 null,
                 null,
                 false,
                 "取消寄售"
         );
-        return ok(objectOf("listingOrderId", listingOrderId, "phone", phone));
+        return ok(objectOf("orderId", orderId, "phone", phone));
     }
 
     private JSONObject taskCaptcha(String kind, Route route, String method, JSONObject body) throws Exception {
