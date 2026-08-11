@@ -1182,6 +1182,10 @@ public final class MainActivity extends Activity {
         scroll.addView(form, new ScrollView.LayoutParams(-1, -2));
         String title = first(target, "name", "title", "groupId", "id");
         form.addView(text(title, 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(12)));
+        String groupId = first(target, "groupId", "id");
+        String initialPreset = existing == null ? "smart_value_buy" : existing.optString("strategyPreset", "custom");
+        OptionField preset = optionField("交易逻辑", new String[]{"smart_value_buy", "cost_profit_exit", "trailing_profit_exit", "custom"}, initialPreset);
+        form.addView(labelled("交易逻辑", preset));
         ProjectToggle buyEnabled = toggle("启用买入", existing == null || existing.optJSONObject("buy") == null || existing.optJSONObject("buy").optBoolean("enabled", true));
         EditText buyPrice = numberInput("最高买入价", existing == null ? moneyValue(first(target, "floorPrice", "price")) : number(existing.optJSONObject("buy"), "maxPrice", ""));
         EditText buyQuantity = numberInput("买入数量", existing == null ? "1" : number(existing.optJSONObject("buy"), "quantity", "1"));
@@ -1203,10 +1207,64 @@ public final class MainActivity extends Activity {
         EditText interval = numberInput("监控间隔", existing == null ? "15" : number(existing, "intervalValue", "15"));
         OptionField intervalUnit = optionField("间隔单位", new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
         form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit));
-        showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, "保存", dialog -> {
+        double referencePrice = parseDouble(first(target, "latestFloorPrice", "floorPrice", "price"), Double.NaN);
+        double assetCost = engine.store().getAssetCost(strategyPhone, groupId);
+        Consumer<String> applyPreset = value -> {
+            if ("custom".equals(value)) return;
+            buyQuantity.setText("1");
+            sellQuantity.setText("1");
+            maxPosition.setText("1");
+            intervalUnit.setValue("seconds");
+            if ("smart_value_buy".equals(value)) {
+                if (!Double.isFinite(referencePrice) || referencePrice <= 0d) {
+                    preset.setValue("custom");
+                    toast("当前行情价不可用，无法应用智能折价买入");
+                    return;
+                }
+                buyEnabled.setChecked(true);
+                buyPrice.setText(moneyValue(String.valueOf(referencePrice)));
+                sellEnabled.setChecked(false);
+                sellTrigger.setText("");
+                sellPrice.setText("");
+                stopLossEnabled.setChecked(false);
+                stopTrigger.setText("");
+                stopPrice.setText("");
+                minProfit.setText(moneyValue(String.valueOf(Math.max(0.01d, referencePrice * 0.02d))));
+                volatility.setText("15");
+                cooldown.setText("30");
+                interval.setText("15");
+            } else if ("cost_profit_exit".equals(value) || "trailing_profit_exit".equals(value)) {
+                if (!Double.isFinite(assetCost) || assetCost <= 0d) {
+                    preset.setValue("custom");
+                    toast("请先在资产页长按该持仓并录入成本");
+                    return;
+                }
+                double targetProfitRate = "cost_profit_exit".equals(value) ? 0.08d : 0.03d;
+                double minimumProfit = Math.max(0.01d, assetCost * targetProfitRate);
+                double targetPrice = Math.ceil((assetCost + minimumProfit) / 0.955d);
+                buyEnabled.setChecked(false);
+                buyPrice.setText("");
+                sellEnabled.setChecked(true);
+                sellTrigger.setText(moneyValue(String.valueOf(targetPrice)));
+                sellPrice.setText(String.valueOf(Math.max(1L, (long) targetPrice)));
+                stopLossEnabled.setChecked(false);
+                stopTrigger.setText("");
+                stopPrice.setText("");
+                minProfit.setText(moneyValue(String.valueOf(minimumProfit)));
+                volatility.setText("0");
+                cooldown.setText("5");
+                interval.setText("5");
+            }
+        };
+        preset.setOnValueChangeListener(applyPreset);
+        if (existing == null) applyPreset.accept(initialPreset);
+        showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, existing == null ? "保存并启动" : "保存并重启", dialog -> {
             JSONObject body = new JSONObject();
             try {
-                body.put("phone", strategyPhone); body.put("groupId", first(target, "groupId", "id")); body.put("title", title); body.put("cover", first(target, "cover", "image"));
+                body.put("phone", strategyPhone); body.put("groupId", groupId); body.put("title", title); body.put("cover", first(target, "cover", "image"));
+                body.put("strategyPreset", preset.value());
+                body.put("entryDiscountPercent", 8); body.put("minimumHistorySamples", 6); body.put("priceHistoryLimit", 24);
+                body.put("trailingActivationPercent", 10); body.put("trailingDrawdownPercent", 5); body.put("trailingRetentionPercent", 3);
                 body.put("executionMode", "live"); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.value());
                 body.put("maxPosition", intValue(maxPosition, 1)); body.put("minNetProfit", doubleValue(minProfit, 0)); body.put("volatilityLimitPercent", doubleValue(volatility, 0)); body.put("cooldownMinutes", intValue(cooldown, 10));
                 JSONObject buy = new JSONObject(); buy.put("enabled", buyEnabled.isChecked()); buy.put("maxPrice", doubleValue(buyPrice, 0)); buy.put("quantity", intValue(buyQuantity, 1)); body.put("buy", buy);
@@ -2546,6 +2604,10 @@ public final class MainActivity extends Activity {
     }
 
     private String optionLabel(String value) {
+        if ("smart_value_buy".equals(value)) return "智能折价买入";
+        if ("cost_profit_exit".equals(value)) return "成本净利止盈";
+        if ("trailing_profit_exit".equals(value)) return "峰值回撤锁盈";
+        if ("custom".equals(value)) return "自定义";
         if ("seconds".equals(value)) return "秒";
         if ("minutes".equals(value)) return "分钟";
         if ("hours".equals(value)) return "小时";
@@ -2602,6 +2664,7 @@ public final class MainActivity extends Activity {
         private final String title;
         private final String[] values;
         private String selected;
+        private Consumer<String> listener;
 
         OptionField(String title, String[] values, String selected) {
             super(MainActivity.this);
@@ -2620,10 +2683,14 @@ public final class MainActivity extends Activity {
         String value() { return selected; }
 
         void setValue(String value) {
+            boolean changed = selected == null || !selected.equals(value);
             selected = value;
             setText(optionLabel(value) + " \u2304");
             setContentDescription(title + "，当前" + optionLabel(value));
+            if (changed && listener != null) listener.accept(value);
         }
+
+        void setOnValueChangeListener(Consumer<String> listener) { this.listener = listener; }
     }
 
     private EditText numberInput(String hint, String value) { EditText input = input(hint); input.setText(value == null ? "" : value); input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL); return input; }
@@ -2812,7 +2879,25 @@ public final class MainActivity extends Activity {
         return "平台已记录";
     }
     private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "cancelled": return "已取消"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
-    private String strategyMeta(JSONObject strategy) { return "自动执行 · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
+    private String strategyMeta(JSONObject strategy) {
+        String preset = strategy.optString("strategyPreset", "custom");
+        String rule;
+        if ("smart_value_buy".equals(preset)) {
+            rule = "样本 " + strategy.optInt("historySampleCount", 0) + "/" + strategy.optInt("minimumHistorySamples", 6)
+                    + " · 中位参考 " + money(first(strategy, "fairPrice")) + " · 入场上限 " + money(first(strategy, "entryMaximum"));
+        } else if ("cost_profit_exit".equals(preset)) {
+            rule = "成本 " + money(first(strategy, "assetCost")) + " · 动态目标 " + money(first(strategy, "dynamicSellTargetPrice"));
+        } else if ("trailing_profit_exit".equals(preset)) {
+            rule = "成本 " + money(first(strategy, "assetCost")) + " · 峰值 " + money(first(strategy, "highestObservedPrice"))
+                    + " · 保护价 " + money(first(strategy, "dynamicSellTargetPrice"));
+        } else {
+            rule = "买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice"))
+                    + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice"));
+        }
+        return optionLabel(preset) + " · 自动执行 · 账号 " + first(strategy, "phone", "sourcePhone")
+                + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n" + rule
+                + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt"));
+    }
     private JSONArray findArray(JSONObject object, String... keys) { if (object == null) return null; for (String key : keys) { JSONArray array = object.optJSONArray(key); if (array != null) return array; } return null; }
     private JSONArray arrayOrEmpty(JSONArray source) { return source == null ? new JSONArray() : source; }
     private String pretty(JSONObject object) { if (object == null) return "暂无数据"; StringBuilder output = new StringBuilder(); Iterator<String> keys = object.keys(); while (keys.hasNext()) { String key = keys.next(); Object value = object.opt(key); output.append(key).append("：").append(value).append('\n'); } return output.toString(); }

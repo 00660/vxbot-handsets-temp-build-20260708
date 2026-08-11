@@ -70,6 +70,8 @@ public final class NativeEngine {
     private static final long ORDER_TASK_LINK_WINDOW_MS = 10L * 60L * 1000L;
     private static final int LOTTERY_DRAWS_PER_REQUEST = 5;
     private static final int LOTTERY_MAX_DRAWS_PER_RUN = 100;
+    private static final double QUANT_NET_PROCEEDS_RATE = 0.955d;
+    private static final int QUANT_PRICE_HISTORY_LIMIT = 24;
     private static final double QUANT_MAX_VOLATILITY_PERCENT = 100d;
     private static final int QUANT_MAX_COOLDOWN_MINUTES = 24 * 60;
     private static final Object TICK_LOCK = new Object();
@@ -1297,6 +1299,11 @@ public final class NativeEngine {
         if (!groupId.matches("\\d+")) throw new NativeException("量化藏品编号无效");
         String executionMode = strategy.optString("executionMode", "live").trim().toLowerCase(Locale.ROOT);
         if (!"live".equals(executionMode)) throw new NativeException("量化策略仅支持自动执行");
+        String preset = strategy.optString("strategyPreset", "custom").trim();
+        if (!("smart_value_buy".equals(preset) || "cost_profit_exit".equals(preset)
+                || "trailing_profit_exit".equals(preset) || "custom".equals(preset))) {
+            throw new NativeException("量化交易逻辑无效");
+        }
         int intervalValue = strategy.has("intervalValue") ? integer(strategy.opt("intervalValue"), -1) : 15;
         if (intervalValue < 1 || intervalValue > 86_400) throw new NativeException("量化监控间隔无效");
         String intervalUnit = strategy.optString("intervalUnit", "seconds").trim().toLowerCase(Locale.ROOT);
@@ -1305,6 +1312,32 @@ public final class NativeEngine {
         if (maxPosition < 1) throw new NativeException("量化最大持仓必须大于 0");
         double minimumProfit = strategy.has("minNetProfit") ? decimal(strategy.opt("minNetProfit"), Double.NaN) : 0d;
         if (!Double.isFinite(minimumProfit) || minimumProfit < 0d) throw new NativeException("量化最低净利无效");
+        if ("smart_value_buy".equals(preset)) {
+            double discount = decimal(strategy.opt("entryDiscountPercent"), Double.NaN);
+            int minimumSamples = integer(strategy.opt("minimumHistorySamples"), -1);
+            int historyLimit = integer(strategy.opt("priceHistoryLimit"), -1);
+            if (!Double.isFinite(discount) || discount < 0.1d || discount > 50d) throw new NativeException("智能折价比例无效");
+            if (minimumSamples < 3 || minimumSamples > QUANT_PRICE_HISTORY_LIMIT
+                    || historyLimit < minimumSamples || historyLimit > QUANT_PRICE_HISTORY_LIMIT) {
+                throw new NativeException("智能行情样本参数无效");
+            }
+        }
+        if ("cost_profit_exit".equals(preset) || "trailing_profit_exit".equals(preset)) {
+            if (!Double.isFinite(store.getAssetCost(phone, groupId))) {
+                throw new NativeException("请先在资产页长按该持仓并录入成本");
+            }
+            if (minimumProfit <= 0d) throw new NativeException("退出策略最低净利必须大于 0");
+        }
+        if ("trailing_profit_exit".equals(preset)) {
+            double activation = decimal(strategy.opt("trailingActivationPercent"), Double.NaN);
+            double drawdown = decimal(strategy.opt("trailingDrawdownPercent"), Double.NaN);
+            double retention = decimal(strategy.opt("trailingRetentionPercent"), Double.NaN);
+            if (!Double.isFinite(activation) || activation < 0.1d || activation > 100d
+                    || !Double.isFinite(drawdown) || drawdown < 0.1d || drawdown > 50d
+                    || !Double.isFinite(retention) || retention < 0d || retention >= activation) {
+                throw new NativeException("峰值回撤参数无效");
+            }
+        }
         double volatilityLimit = strategy.has("volatilityLimitPercent") ? decimal(strategy.opt("volatilityLimitPercent"), Double.NaN) : 0d;
         if (!Double.isFinite(volatilityLimit) || volatilityLimit < 0d || volatilityLimit > QUANT_MAX_VOLATILITY_PERCENT) {
             throw new NativeException("量化波动上限无效");
@@ -1318,6 +1351,13 @@ public final class NativeEngine {
         boolean sellEnabled = sell != null && sell.optBoolean("enabled", false);
         boolean stopLossEnabled = stopLoss != null && stopLoss.optBoolean("enabled", false);
         if (!buyEnabled && !sellEnabled && !stopLossEnabled) throw new NativeException("量化策略至少需要启用一条规则");
+        if ("smart_value_buy".equals(preset) && (!buyEnabled || sellEnabled || stopLossEnabled)) {
+            throw new NativeException("智能折价买入规则配置无效");
+        }
+        if (("cost_profit_exit".equals(preset) || "trailing_profit_exit".equals(preset))
+                && (buyEnabled || !sellEnabled || stopLossEnabled)) {
+            throw new NativeException("智能退出规则配置无效");
+        }
         if (buyEnabled) {
             double maxPrice = decimal(buy.opt("maxPrice"), Double.NaN);
             int quantity = integer(buy.opt("quantity"), -1);
@@ -1359,6 +1399,16 @@ public final class NativeEngine {
         return false;
     }
 
+    private static void resetQuantRuntimeState(JSONObject strategy) {
+        String[] keys = {
+                "priceHistory", "fairPrice", "highestObservedPrice", "assetCost", "dynamicSellTargetPrice",
+                "trailingActivated", "historyReady", "historySampleCount", "entryMaximum", "estimatedNetProfit",
+                "latestFloorPrice", "lastVolatilityPercent", "lowestListingPrice", "listingCount", "holdings",
+                "platformPriceRange", "lastSignal", "lastSignalPrice"
+        };
+        for (String key : keys) strategy.remove(key);
+    }
+
     private JSONObject createQuantStrategy(JSONObject body) throws Exception {
         JSONObject strategy = copy(body);
         String phone = first(strategy, "phone", "sourcePhone");
@@ -1368,6 +1418,7 @@ public final class NativeEngine {
         strategy.put("phone", phone);
         strategy.put("groupId", groupId);
         strategy.put("executionMode", "live");
+        resetQuantRuntimeState(strategy);
         validateQuantStrategy(strategy);
         if (hasLiveQuantConflict(store.getQuantStrategies(), phone, groupId, "")) {
             throw new NativeException("同账号同藏品已有运行中的实时量化策略");
@@ -1413,6 +1464,7 @@ public final class NativeEngine {
                 throw new NativeException("同账号同藏品已有运行中的实时量化策略");
             }
             merge(strategy, body);
+            resetQuantRuntimeState(strategy);
             strategy.put("phone", candidatePhone);
             strategy.put("groupId", candidateGroupId);
             strategy.put("executionMode", "live");
@@ -1461,6 +1513,7 @@ public final class NativeEngine {
                 if (hasLiveQuantConflict(strategies, strategy.optString("phone"), strategy.optString("groupId"), id)) {
                     throw new NativeException("同账号同藏品已有运行中的实时量化策略");
                 }
+                resetQuantRuntimeState(strategy);
                 IBoxDirectClient.Account direct = this.account(strategy.optString("phone"));
                 JSONObject evaluated = evaluateQuantStrategy(strategy, direct);
                 applyQuantSnapshot(strategy, evaluated);
@@ -2635,8 +2688,11 @@ public final class NativeEngine {
                     addEvent(strategy, "price_range_blocked", strategy.optString("lastResult"));
                 } else {
                     boolean profitBlocked = evaluated.optBoolean("profitGuardBlocked", false);
+                    boolean collectingHistory = "smart_value_buy".equals(strategy.optString("strategyPreset"))
+                            && !evaluated.optBoolean("historyReady", false);
                     putQuietly(strategy, "status", "monitoring");
-                    putQuietly(strategy, "lastResult", profitBlocked ? "profit_below_minimum" : "signal_updated");
+                    putQuietly(strategy, "lastResult", collectingHistory ? "collecting_price_history"
+                            : profitBlocked ? "profit_below_minimum" : "signal_updated");
                     if (profitBlocked) addEvent(strategy, "profit_guard_blocked", "预估净利低于设置阈值");
                     if ("live".equals(strategy.optString("executionMode")) && !"idle".equals(signal)) {
                         JSONObject detail = evaluated.optJSONObject("detail");
@@ -2717,6 +2773,7 @@ public final class NativeEngine {
         JSONObject detail = loadMarketTradeDetail(account, strategy.optString("groupId"));
         JSONArray listings = marketListings(account, strategy.optString("groupId"));
         JSONArray owned = ownedCollections(account, strategy.optString("groupId"));
+        String preset = strategy.optString("strategyPreset", "custom");
         JSONObject buy = strategy.optJSONObject("buy");
         if (buy == null) buy = new JSONObject();
         JSONObject sell = strategy.optJSONObject("sell");
@@ -2728,33 +2785,83 @@ public final class NativeEngine {
         double lowestPrice = lowest == null ? Double.NaN : decimal(lowest.opt("price"), Double.NaN);
         double detailFloor = decimal(detail.opt("floorPrice"), Double.NaN);
         double marketPrice = Double.isFinite(lowestPrice) ? lowestPrice : detailFloor;
+        JSONArray priceHistory = "smart_value_buy".equals(preset)
+                ? appendQuantPrice(strategy.optJSONArray("priceHistory"), marketPrice, strategy.optInt("priceHistoryLimit", QUANT_PRICE_HISTORY_LIMIT))
+                : null;
+        int minimumSamples = strategy.optInt("minimumHistorySamples", 6);
+        boolean historyReady = priceHistory != null && priceHistory.length() >= minimumSamples;
+        double fairPrice = historyReady ? quantMedian(priceHistory) : Double.NaN;
+        double assetCost = ("cost_profit_exit".equals(preset) || "trailing_profit_exit".equals(preset))
+                ? store.getAssetCost(strategy.optString("phone"), strategy.optString("groupId")) : Double.NaN;
+        double highestObservedPrice = Double.NaN;
+        if ("trailing_profit_exit".equals(preset) && Double.isFinite(marketPrice) && marketPrice > 0d) {
+            highestObservedPrice = Math.max(marketPrice, decimal(strategy.opt("highestObservedPrice"), marketPrice));
+        }
         JSONObject publicConfig = (buy.optBoolean("enabled", false) || sell.optBoolean("enabled", false) || stopLoss.optBoolean("enabled", false))
                 ? marketTradePublicConfig(account) : new JSONObject();
         JSONObject buyCandidate = null;
         double buyMaximum = decimal(buy.opt("maxPrice"), Double.NaN);
-        if (buy.optBoolean("enabled", false) && Double.isFinite(buyMaximum) && buyMaximum > 0d) {
+        double entryMaximum = buyMaximum;
+        if ("smart_value_buy".equals(preset)) {
+            double discount = decimal(strategy.opt("entryDiscountPercent"), 8d);
+            entryMaximum = historyReady && Double.isFinite(fairPrice)
+                    ? Math.min(buyMaximum, fairPrice * (1d - discount / 100d)) : Double.NaN;
+        }
+        if (buy.optBoolean("enabled", false) && Double.isFinite(entryMaximum) && entryMaximum > 0d) {
             for (int index = 0; index < listings.length(); index++) {
                 JSONObject listing = listings.optJSONObject(index);
                 double price = listing == null ? Double.NaN : decimal(listing.opt("price"), Double.NaN);
-                if (listing == null || listing.optBoolean("locked", false) || !Double.isFinite(price) || price > buyMaximum
+                if (listing == null || listing.optBoolean("locked", false) || !Double.isFinite(price) || price > entryMaximum
                         || ownsCollection(owned, listing.optString("digitalCollectionId"))) continue;
                 if (buyCandidate == null || price < decimal(buyCandidate.opt("price"), Double.NaN)) buyCandidate = listing;
             }
         }
-        double sellPrice = decimal(sell.opt("sellPrice"), Double.NaN);
         double minimumProfit = Math.max(0d, decimal(strategy.opt("minNetProfit"), 0d));
-        double estimatedProfit = buyCandidate == null || !sell.optBoolean("enabled", false) || !Double.isFinite(sellPrice)
-                ? Double.NaN : sellPrice * 0.955d - decimal(buyCandidate.opt("price"), Double.NaN);
-        boolean profitBlocked = Double.isFinite(estimatedProfit) && estimatedProfit < minimumProfit;
         int sellQuantity = Math.max(1, sell.optInt("quantity", 1));
-        boolean stopLossReady = stopLoss.optBoolean("enabled", false)
-                && decimal(stopLoss.opt("triggerPrice"), Double.NaN) > 0d
-                && decimal(stopLoss.opt("sellPrice"), Double.NaN) > 0d
-                && holdings >= sellQuantity && Double.isFinite(marketPrice)
-                && marketPrice <= decimal(stopLoss.opt("triggerPrice"), Double.NaN);
-        boolean sellReady = sell.optBoolean("enabled", false) && decimal(sell.opt("minPrice"), Double.NaN) > 0d
-                && sellPrice > 0d && holdings >= sellQuantity && Double.isFinite(marketPrice)
-                && marketPrice >= decimal(sell.opt("minPrice"), Double.NaN);
+        double configuredSellPrice = decimal(sell.opt("sellPrice"), Double.NaN);
+        double dynamicSellTargetPrice = Double.NaN;
+        double estimatedProfit = Double.NaN;
+        boolean profitBlocked = false;
+        boolean stopLossReady = false;
+        boolean sellReady = false;
+        boolean trailingActivated = false;
+        if ("smart_value_buy".equals(preset)) {
+            estimatedProfit = buyCandidate == null || !Double.isFinite(fairPrice) ? Double.NaN
+                    : fairPrice * QUANT_NET_PROCEEDS_RATE - decimal(buyCandidate.opt("price"), Double.NaN);
+            profitBlocked = Double.isFinite(estimatedProfit) && estimatedProfit < minimumProfit;
+        } else if ("cost_profit_exit".equals(preset)) {
+            dynamicSellTargetPrice = Math.ceil((assetCost + minimumProfit) / QUANT_NET_PROCEEDS_RATE);
+            sellReady = sell.optBoolean("enabled", false) && holdings >= sellQuantity
+                    && Double.isFinite(marketPrice) && marketPrice >= dynamicSellTargetPrice;
+            estimatedProfit = Double.isFinite(dynamicSellTargetPrice)
+                    ? dynamicSellTargetPrice * QUANT_NET_PROCEEDS_RATE - assetCost : Double.NaN;
+        } else if ("trailing_profit_exit".equals(preset)) {
+            double activationPercent = decimal(strategy.opt("trailingActivationPercent"), 10d);
+            double drawdownPercent = decimal(strategy.opt("trailingDrawdownPercent"), 5d);
+            double retentionPercent = decimal(strategy.opt("trailingRetentionPercent"), 3d);
+            double retainedProfit = Math.max(minimumProfit, assetCost * retentionPercent / 100d);
+            double protectedSellPrice = Math.ceil((assetCost + retainedProfit) / QUANT_NET_PROCEEDS_RATE);
+            trailingActivated = Double.isFinite(highestObservedPrice)
+                    && highestObservedPrice * QUANT_NET_PROCEEDS_RATE >= assetCost * (1d + activationPercent / 100d);
+            double executableSellPrice = Double.isFinite(marketPrice) ? Math.floor(marketPrice) : Double.NaN;
+            sellReady = sell.optBoolean("enabled", false) && holdings >= sellQuantity && trailingActivated
+                    && marketPrice <= highestObservedPrice * (1d - drawdownPercent / 100d)
+                    && executableSellPrice >= protectedSellPrice;
+            dynamicSellTargetPrice = sellReady ? executableSellPrice : protectedSellPrice;
+            estimatedProfit = sellReady ? executableSellPrice * QUANT_NET_PROCEEDS_RATE - assetCost : Double.NaN;
+        } else {
+            estimatedProfit = buyCandidate == null || !sell.optBoolean("enabled", false) || !Double.isFinite(configuredSellPrice)
+                    ? Double.NaN : configuredSellPrice * QUANT_NET_PROCEEDS_RATE - decimal(buyCandidate.opt("price"), Double.NaN);
+            profitBlocked = Double.isFinite(estimatedProfit) && estimatedProfit < minimumProfit;
+            stopLossReady = stopLoss.optBoolean("enabled", false)
+                    && decimal(stopLoss.opt("triggerPrice"), Double.NaN) > 0d
+                    && decimal(stopLoss.opt("sellPrice"), Double.NaN) > 0d
+                    && holdings >= sellQuantity && Double.isFinite(marketPrice)
+                    && marketPrice <= decimal(stopLoss.opt("triggerPrice"), Double.NaN);
+            sellReady = sell.optBoolean("enabled", false) && decimal(sell.opt("minPrice"), Double.NaN) > 0d
+                    && configuredSellPrice > 0d && holdings >= sellQuantity && Double.isFinite(marketPrice)
+                    && marketPrice >= decimal(sell.opt("minPrice"), Double.NaN);
+        }
         String sellAction = stopLossReady ? "stop_loss" : sellReady ? "sell" : "";
         JSONObject sellAsset = sellAction.isEmpty() ? null : firstOwnedAsset(owned, sellQuantity);
         double volatility = quantVolatility(decimal(strategy.opt("latestFloorPrice"), Double.NaN), marketPrice);
@@ -2764,7 +2871,8 @@ public final class NativeEngine {
         String signal = stopLossReady ? "stop_loss" : volatilityBlocked ? "idle"
                 : buyCandidate != null && !profitBlocked && holdings < maxPosition ? "buy" : sellReady ? "sell" : "idle";
         double actionSellPrice = "stop_loss".equals(signal) ? decimal(stopLoss.opt("sellPrice"), Double.NaN)
-                : "sell".equals(signal) ? sellPrice : Double.NaN;
+                : "sell".equals(signal) && ("cost_profit_exit".equals(preset) || "trailing_profit_exit".equals(preset))
+                ? dynamicSellTargetPrice : "sell".equals(signal) ? configuredSellPrice : Double.NaN;
         String sellPriceRangeError = Double.isFinite(actionSellPrice) ? marketTradeConsignmentPriceError(actionSellPrice, publicConfig) : "";
         return objectOf(
                 "detail", detail,
@@ -2773,6 +2881,15 @@ public final class NativeEngine {
                 "holdings", holdings,
                 "lowestListingPrice", Double.isFinite(lowestPrice) ? lowestPrice : JSONObject.NULL,
                 "marketPrice", Double.isFinite(marketPrice) ? marketPrice : JSONObject.NULL,
+                "priceHistory", priceHistory == null ? JSONObject.NULL : priceHistory,
+                "historySampleCount", priceHistory == null ? 0 : priceHistory.length(),
+                "historyReady", historyReady,
+                "fairPrice", Double.isFinite(fairPrice) ? fairPrice : JSONObject.NULL,
+                "entryMaximum", Double.isFinite(entryMaximum) ? entryMaximum : JSONObject.NULL,
+                "assetCost", Double.isFinite(assetCost) ? assetCost : JSONObject.NULL,
+                "highestObservedPrice", Double.isFinite(highestObservedPrice) ? highestObservedPrice : JSONObject.NULL,
+                "trailingActivated", trailingActivated,
+                "dynamicSellTargetPrice", Double.isFinite(dynamicSellTargetPrice) ? dynamicSellTargetPrice : JSONObject.NULL,
                 "buyCandidate", buyCandidate == null ? JSONObject.NULL : buyCandidate,
                 "estimatedNetProfit", Double.isFinite(estimatedProfit) ? estimatedProfit : JSONObject.NULL,
                 "profitGuardBlocked", profitBlocked,
@@ -2794,6 +2911,19 @@ public final class NativeEngine {
         putQuietly(strategy, "latestFloorPrice", evaluated.opt("marketPrice"));
         putQuietly(strategy, "lastVolatilityPercent", evaluated.opt("volatilityPercent"));
         putQuietly(strategy, "platformPriceRange", evaluated.optJSONObject("publicConfig"));
+        JSONArray priceHistory = evaluated.optJSONArray("priceHistory");
+        if (priceHistory != null) {
+            putQuietly(strategy, "priceHistory", priceHistory);
+            putQuietly(strategy, "historySampleCount", evaluated.optInt("historySampleCount", priceHistory.length()));
+            putQuietly(strategy, "historyReady", evaluated.optBoolean("historyReady", false));
+            putQuietly(strategy, "fairPrice", evaluated.opt("fairPrice"));
+            putQuietly(strategy, "entryMaximum", evaluated.opt("entryMaximum"));
+        }
+        if (!evaluated.isNull("assetCost")) putQuietly(strategy, "assetCost", evaluated.opt("assetCost"));
+        if (!evaluated.isNull("highestObservedPrice")) putQuietly(strategy, "highestObservedPrice", evaluated.opt("highestObservedPrice"));
+        if (!evaluated.isNull("dynamicSellTargetPrice")) putQuietly(strategy, "dynamicSellTargetPrice", evaluated.opt("dynamicSellTargetPrice"));
+        putQuietly(strategy, "trailingActivated", evaluated.optBoolean("trailingActivated", false));
+        putQuietly(strategy, "estimatedNetProfit", evaluated.opt("estimatedNetProfit"));
         putQuietly(strategy, "lastSignal", evaluated.optString("signal"));
         String signal = evaluated.optString("signal");
         Object signalPrice = "buy".equals(signal) && evaluated.optJSONObject("buyCandidate") != null
@@ -3027,12 +3157,23 @@ public final class NativeEngine {
         double price = decimal(candidate.opt("price"), Double.NaN);
         if (!Double.isFinite(ceiling) || !Double.isFinite(price) || price > ceiling) return false;
         double minimumNetProfit = Math.max(0d, decimal(strategy.opt("minNetProfit"), 0d));
-        JSONObject sell = strategy.optJSONObject("sell");
-        double targetSellPrice = sell == null ? Double.NaN : decimal(sell.opt("sellPrice"), Double.NaN);
-        if (minimumNetProfit > 0d && Double.isFinite(targetSellPrice)
-                && targetSellPrice * 0.955d - price < minimumNetProfit) {
-            strategy.put("lastResult", "profit_below_minimum");
-            return false;
+        if ("smart_value_buy".equals(strategy.optString("strategyPreset"))) {
+            double fairPrice = decimal(strategy.opt("fairPrice"), Double.NaN);
+            double discount = decimal(strategy.opt("entryDiscountPercent"), Double.NaN);
+            if (!strategy.optBoolean("historyReady", false) || !Double.isFinite(fairPrice) || !Double.isFinite(discount)
+                    || price > fairPrice * (1d - discount / 100d)
+                    || fairPrice * QUANT_NET_PROCEEDS_RATE - price < minimumNetProfit) {
+                strategy.put("lastResult", "profit_below_minimum");
+                return false;
+            }
+        } else {
+            JSONObject sell = strategy.optJSONObject("sell");
+            double targetSellPrice = sell == null ? Double.NaN : decimal(sell.opt("sellPrice"), Double.NaN);
+            if (minimumNetProfit > 0d && Double.isFinite(targetSellPrice)
+                    && targetSellPrice * QUANT_NET_PROCEEDS_RATE - price < minimumNetProfit) {
+                strategy.put("lastResult", "profit_below_minimum");
+                return false;
+            }
         }
         int paymentCode = paymentPlatformCode(account, 1, 0);
         JSONObject request = objectOf("digitalCollectionId", integer(digitalCollectionId, 0), "paymentPlatformCode", paymentCode);
@@ -3059,13 +3200,38 @@ public final class NativeEngine {
     private boolean tryQuantSell(JSONObject strategy, IBoxDirectClient.Account account, JSONObject asset, double salePrice, JSONObject publicConfig) throws Exception {
         JSONObject sell = strategy.optJSONObject("sell");
         JSONObject stopLoss = strategy.optJSONObject("stopLoss");
+        String preset = strategy.optString("strategyPreset", "custom");
+        boolean dynamicExit = "cost_profit_exit".equals(preset) || "trailing_profit_exit".equals(preset);
         boolean stopLossAction = "stop_loss".equals(strategy.optString("lastSignal"));
         if (sell == null || (!sell.optBoolean("enabled", false) && !stopLossAction)) return false;
         double trigger = stopLossAction && stopLoss != null ? decimal(stopLoss.opt("triggerPrice"), Double.NaN) : decimal(sell.opt("minPrice"), Double.NaN);
-        if (!Double.isFinite(trigger) || !Double.isFinite(salePrice)) return false;
+        if (!Double.isFinite(salePrice) || (dynamicExit && !"sell".equals(strategy.optString("lastSignal")))) return false;
+        if (!dynamicExit && !Double.isFinite(trigger)) return false;
         double marketPrice = decimal(strategy.opt("latestFloorPrice"), Double.NaN);
         if (!Double.isFinite(marketPrice)) return false;
-        if (stopLossAction ? marketPrice > trigger : marketPrice < trigger) return false;
+        if (!dynamicExit && (stopLossAction ? marketPrice > trigger : marketPrice < trigger)) return false;
+        if (dynamicExit) {
+            JSONObject freshLowest = lowestListing(marketListings(account, strategy.optString("groupId")));
+            double freshMarketPrice = freshLowest == null ? Double.NaN : decimal(freshLowest.opt("price"), Double.NaN);
+            double cost = store.getAssetCost(strategy.optString("phone"), strategy.optString("groupId"));
+            double minimumProfit = Math.max(0d, decimal(strategy.opt("minNetProfit"), 0d));
+            if (!Double.isFinite(freshMarketPrice) || !Double.isFinite(cost)) return false;
+            if ("cost_profit_exit".equals(preset)) {
+                double target = Math.ceil((cost + minimumProfit) / QUANT_NET_PROCEEDS_RATE);
+                if (freshMarketPrice < target || salePrice < target) return false;
+            } else {
+                double activation = decimal(strategy.opt("trailingActivationPercent"), 10d);
+                double drawdown = decimal(strategy.opt("trailingDrawdownPercent"), 5d);
+                double retention = decimal(strategy.opt("trailingRetentionPercent"), 3d);
+                double highest = decimal(strategy.opt("highestObservedPrice"), Double.NaN);
+                double retainedProfit = Math.max(minimumProfit, cost * retention / 100d);
+                if (!Double.isFinite(highest)
+                        || highest * QUANT_NET_PROCEEDS_RATE < cost * (1d + activation / 100d)
+                        || freshMarketPrice > highest * (1d - drawdown / 100d)
+                        || salePrice > Math.floor(freshMarketPrice)
+                        || salePrice * QUANT_NET_PROCEEDS_RATE - cost < retainedProfit) return false;
+            }
+        }
         if (asset == null) return false;
         String digitalCollectionId = asset.optString("instanceId");
         if (!digitalCollectionId.matches("\\d+")) throw new NativeException("量化寄售持仓实例编号无效");
@@ -3883,6 +4049,35 @@ public final class NativeEngine {
             if (asset != null && !asset.optBoolean("locked", false) && asset.optInt("quantity", 0) >= quantity) return asset;
         }
         return null;
+    }
+
+    private static JSONArray appendQuantPrice(JSONArray source, double price, int requestedLimit) {
+        int limit = Math.max(1, Math.min(QUANT_PRICE_HISTORY_LIMIT, requestedLimit));
+        List<Double> values = new ArrayList<>();
+        if (source != null) {
+            for (int index = 0; index < source.length(); index++) {
+                double value = decimal(source.opt(index), Double.NaN);
+                if (Double.isFinite(value) && value > 0d) values.add(value);
+            }
+        }
+        if (Double.isFinite(price) && price > 0d) values.add(price);
+        JSONArray result = new JSONArray();
+        int start = Math.max(0, values.size() - limit);
+        for (int index = start; index < values.size(); index++) result.put(values.get(index));
+        return result;
+    }
+
+    private static double quantMedian(JSONArray source) {
+        if (source == null || source.length() == 0) return Double.NaN;
+        List<Double> values = new ArrayList<>();
+        for (int index = 0; index < source.length(); index++) {
+            double value = decimal(source.opt(index), Double.NaN);
+            if (Double.isFinite(value) && value > 0d) values.add(value);
+        }
+        if (values.isEmpty()) return Double.NaN;
+        Collections.sort(values);
+        int middle = values.size() / 2;
+        return (values.size() & 1) == 1 ? values.get(middle) : (values.get(middle - 1) + values.get(middle)) / 2d;
     }
 
     private static double quantVolatility(double previous, double current) {
