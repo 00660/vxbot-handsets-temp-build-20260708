@@ -2360,9 +2360,6 @@ public final class NativeEngine {
                 } else if (failure.contains("暂不支持") || failure.contains("账号不存在")) {
                     putQuietly(task, "enabled", false);
                     putQuietly(task, "status", "blocked");
-                } else if ("wanted".equals(task.optString("type")) && !task.optString("orderUuid").isEmpty() && task.optString("cashierLink").isEmpty()) {
-                    putQuietly(task, "status", "scheduled");
-                    putQuietly(task, "enabled", true);
                 }
                 putQuietly(task, "lastCheckAt", Instant.now().toString());
             }
@@ -2424,15 +2421,27 @@ public final class NativeEngine {
             task.put("paymentStatus", "created");
         }
         String cashier = task.optString("cashierLink");
-        if (cashier.isEmpty()) cashier = cashierLink(account, orderUuid, 2);
+        String cashierError = "";
+        if (cashier.isEmpty()) {
+            try {
+                cashier = cashierLink(account, orderUuid, 2);
+            } catch (Exception error) {
+                cashierError = message(error);
+            }
+        }
         task.put("orderUuid", orderUuid);
         task.put("cashierLink", cashier);
-        task.put("paymentStatus", "pending");
+        task.put("paymentStatus", cashier.isEmpty() ? "unavailable" : "pending");
+        task.put("cashierError", cashierError);
         task.put("enabled", false);
         task.put("status", "payment_pending");
         task.put("lastResult", "payment_pending");
         task.put("submittedAt", Instant.now().toString());
-        sendBark("iBox 求购待支付", task.optString("title") + " · 订单 " + orderUuid + " 已创建，等待钱包支付。", "active");
+        try {
+            sendBark("iBox 求购待支付", task.optString("title") + " · 订单 " + orderUuid + " 已创建，等待钱包支付。", "active");
+        } catch (Exception error) {
+            task.put("notificationError", message(error));
+        }
     }
 
     private void processRetiredMarketTask(JSONObject task) throws Exception {
