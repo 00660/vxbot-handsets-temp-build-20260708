@@ -557,7 +557,7 @@ public final class MainActivity extends Activity {
             if (consigning) {
                 info.addView(text(consignmentStateVerified ? "寄售中" : "寄售状态待同步", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
             }
-            header.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+            header.addView(info, new LinearLayout.LayoutParams(0, -2, 0.76f));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
             valuation.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
             TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : (delisted ? "已退市" : "--"), 14, hasPrice ? success : muted, Typeface.BOLD);
@@ -572,7 +572,7 @@ public final class MainActivity extends Activity {
             floorLabel.setEllipsize(TextUtils.TruncateAt.END);
             floorLabel.setIncludeFontPadding(false);
             valuation.addView(floorLabel, marginParams(-1, -2, 0, dp(3), 0, 0));
-            header.addView(valuation, new LinearLayout.LayoutParams(dp(82), dp(52)));
+            header.addView(valuation, new LinearLayout.LayoutParams(0, dp(52), 0.24f));
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout footer = horizontal(Color.TRANSPARENT);
             footer.setGravity(Gravity.CENTER_VERTICAL);
