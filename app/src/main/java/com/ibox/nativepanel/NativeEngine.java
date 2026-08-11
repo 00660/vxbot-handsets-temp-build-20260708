@@ -519,6 +519,7 @@ public final class NativeEngine {
         result.put("orderUuid", deepString(order, "orderUuid", "orderUUId", "orderUUID", "orderId", "orderNumber", "uuid"));
         result.put("orderId", deepString(order, "orderId"));
         result.put("orderNumber", deepString(order, "orderNumber"));
+        result.put("listingOrderItemId", deepString(order, "listingOrderItemId"));
         result.put("type", type);
         String groupId = first(order, "groupId", "digitalCollectionGroupId", "collectionGroupId");
         if (groupId.isEmpty()) groupId = first(preview, "groupId", "digitalCollectionGroupId", "collectionGroupId");
@@ -1756,6 +1757,8 @@ public final class NativeEngine {
 
     private JSONObject cancelConsignmentOrder(String orderId, JSONObject body) throws Exception {
         String phone = first(body, "phone", "sourcePhone");
+        String digitalCollectionId = first(body, "digitalCollectionId", "assetId", "instanceId");
+        String listingOrderItemId = first(body, "listingOrderItemId");
         if (phone.isEmpty()) throw new NativeException("取消寄售需要指定账号");
         if (!orderId.matches("\\d+")) throw new NativeException("寄售订单编号无效");
         IBoxDirectClient.Account account = account(phone);
@@ -1768,7 +1771,66 @@ public final class NativeEngine {
                 false,
                 "取消寄售"
         );
-        return ok(objectOf("orderId", orderId, "phone", phone));
+
+        String now = Instant.now().toString();
+        boolean tasksChanged = markCancelledConsignmentTasks(phone, digitalCollectionId, listingOrderItemId, now);
+        boolean strategiesChanged = markCancelledQuantStrategies(phone, digitalCollectionId, listingOrderItemId, now);
+        try {
+            sendBark("iBox 寄售已取消", "实例 " + (digitalCollectionId.isEmpty() ? orderId : digitalCollectionId) + " 已取消寄售。", "active");
+        } catch (Exception ignored) {
+            // 平台取消已经成功，通知失败不能反向覆盖取消结果。
+        }
+        return ok(objectOf(
+                "orderId", orderId,
+                "phone", phone,
+                "digitalCollectionId", digitalCollectionId,
+                "tasksChanged", tasksChanged,
+                "strategiesChanged", strategiesChanged
+        ));
+    }
+
+    private boolean markCancelledConsignmentTasks(String phone, String digitalCollectionId, String listingOrderItemId, String now) {
+        JSONArray tasks = store.getTradeTasks();
+        boolean changed = false;
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null || !"consignment".equals(task.optString("type"))
+                    || !"submitted".equals(task.optString("status"))
+                    || !phone.equals(task.optString("phone"))
+                    || !matchesConsignment(task, digitalCollectionId, listingOrderItemId)) continue;
+            putQuietly(task, "enabled", false);
+            putQuietly(task, "status", "cancelled");
+            putQuietly(task, "lastResult", "consignment_cancelled");
+            putQuietly(task, "cancelledAt", now);
+            putQuietly(task, "updatedAt", now);
+            addEventQuietly(task, "consignment_cancelled", "寄售已取消");
+            changed = true;
+        }
+        return changed && store.saveTradeTasks(tasks);
+    }
+
+    private boolean markCancelledQuantStrategies(String phone, String digitalCollectionId, String listingOrderItemId, String now) {
+        JSONArray strategies = store.getQuantStrategies();
+        boolean changed = false;
+        for (int index = 0; index < strategies.length(); index++) {
+            JSONObject strategy = strategies.optJSONObject(index);
+            if (strategy == null || !"submitted".equals(strategy.optString("status"))
+                    || !phone.equals(strategy.optString("phone"))
+                    || !matchesConsignment(strategy, digitalCollectionId, listingOrderItemId)) continue;
+            putQuietly(strategy, "enabled", false);
+            putQuietly(strategy, "status", "cancelled");
+            putQuietly(strategy, "lastResult", "consignment_cancelled");
+            putQuietly(strategy, "cancelledAt", now);
+            putQuietly(strategy, "updatedAt", now);
+            addEventQuietly(strategy, "consignment_cancelled", "量化寄售已取消");
+            changed = true;
+        }
+        return changed && store.saveQuantStrategies(strategies);
+    }
+
+    private static boolean matchesConsignment(JSONObject value, String digitalCollectionId, String listingOrderItemId) {
+        return (!digitalCollectionId.isEmpty() && digitalCollectionId.equals(value.optString("digitalCollectionId")))
+                || (!listingOrderItemId.isEmpty() && listingOrderItemId.equals(value.optString("listingOrderItemId")));
     }
 
     private JSONObject taskCaptcha(String kind, Route route, String method, JSONObject body) throws Exception {
@@ -2399,8 +2461,9 @@ public final class NativeEngine {
             task.put("enabled", false);
             task.put("status", "submitted");
             task.put("lastResult", "submitted");
+            task.put("paymentStatus", "submitted");
             task.put("submittedAt", Instant.now().toString());
-            sendBark("iBox 寄售已提交", task.optString("title") + " · 寄售价 ¥" + task.optString("price"), "active");
+            sendBarkBestEffort(task, "iBox 寄售已提交", task.optString("title") + " · 寄售价 ¥" + task.optString("price"), "active");
             return;
         }
         if (!"wanted".equals(type)) throw new NativeException("交易任务类型无效");
@@ -2583,7 +2646,7 @@ public final class NativeEngine {
         if (!Double.isFinite(marketPrice)) return false;
         if (stopLossAction ? marketPrice > trigger : marketPrice < trigger) return false;
         if (asset == null) return false;
-        String digitalCollectionId = asset.optString("id");
+        String digitalCollectionId = asset.optString("instanceId");
         if (!digitalCollectionId.matches("\\d+")) throw new NativeException("量化寄售持仓实例编号无效");
         int quantity = Math.max(1, sell.optInt("quantity", 1));
         if (asset.optInt("quantity", 0) < quantity || asset.optBoolean("locked", false)) return false;
@@ -2600,11 +2663,18 @@ public final class NativeEngine {
                 "consignPassword", password
         );
         JSONObject response = client.requestAuthenticatedWithCaptcha(account, "POST", MARKET_CONSIGNMENT_ORDER_URL, request, null, IBoxDirectClient.CaptchaResult.fromJson(strategy.optJSONObject("captcha")), true, "量化寄售");
-        strategy.put("listingOrderItemId", deepString(data(response), "listingOrderItemId"));
+        Object result = data(response);
+        strategy.put("digitalCollectionId", digitalCollectionId);
+        strategy.put("resolvedPaymentPlatformCode", paymentCode);
+        strategy.put("orderUuid", deepString(result, "orderId", "orderUUId", "orderUuid", "orderUUID", "uuid"));
+        strategy.put("listingOrderItemId", deepString(result, "listingOrderItemId"));
+        strategy.put("result", result);
         strategy.put("enabled", false);
         strategy.put("status", "submitted");
         strategy.put("lastResult", "consignment_submitted");
+        strategy.put("paymentStatus", "submitted");
         strategy.put("submittedAt", Instant.now().toString());
+        sendBarkBestEffort(strategy, "iBox 量化寄售已提交", strategy.optString("title") + " · 寄售价 ¥" + salePrice, "active");
         return true;
     }
 
@@ -3649,6 +3719,15 @@ public final class NativeEngine {
             if (status < 200 || status >= 300) throw new NativeException("Bark 推送失败（HTTP " + status + "）");
         } finally {
             if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void sendBarkBestEffort(JSONObject state, String title, String body, String level) {
+        try {
+            sendBark(title, body, level);
+            state.remove("notificationError");
+        } catch (Exception error) {
+            putQuietly(state, "notificationError", message(error));
         }
     }
 

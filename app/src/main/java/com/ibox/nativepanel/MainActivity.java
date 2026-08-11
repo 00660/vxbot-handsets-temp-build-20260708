@@ -666,6 +666,7 @@ public final class MainActivity extends Activity {
             JSONObject body = new JSONObject();
             try {
                 body.put("phone", phone);
+                body.put("digitalCollectionId", assetId);
             } catch (Exception ignored) {
             }
             request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(orderId) + "/cancel", body,
@@ -2758,7 +2759,7 @@ public final class MainActivity extends Activity {
         if (status == 11) return "退款成功";
         return "平台已记录";
     }
-    private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
+    private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "cancelled": return "已取消"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
     private String strategyMeta(JSONObject strategy) { return (strategy.optString("executionMode", "monitor").equals("live") ? "真实执行" : "仅监控") + " · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
     private JSONArray findArray(JSONObject object, String... keys) { if (object == null) return null; for (String key : keys) { JSONArray array = object.optJSONArray(key); if (array != null) return array; } return null; }
     private JSONArray arrayOrEmpty(JSONArray source) { return source == null ? new JSONArray() : source; }
