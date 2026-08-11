@@ -48,6 +48,7 @@ public final class NativeEngine {
     private static final String MARKET_PUBLIC_URL = "https://sail-api.ibox.art/public-market-service/digital-collection-groups";
     private static final String MARKET_GROUP_URL = "https://sail-api.ibox.art/public-service/digital-collection-groups";
     private static final String MARKET_TRADE_PUBLIC_CONFIG_URL = "https://sail-api.ibox.art/public-service-qt/config/public";
+    private static final String MARKET_ASSET_DETAIL_URL = "https://sail-api.ibox.art/public-service-qt/asset/details";
     private static final String MARKET_CONSIGNMENT_ORDER_URL = "https://sail-api.ibox.art/order-create-service/consignment-orders";
     private static final String MARKET_CONSIGNMENT_CANCEL_URL = "https://sail-api.ibox.art/order-service-qt/cancel/listings";
     private static final String MARKET_ADVANCE_ORDER_URL = "https://sail-api.ibox.art/order-create-service/advance-orders";
@@ -286,11 +287,7 @@ public final class NativeEngine {
         JSONObject stored = store.getAccount(phone);
         try {
             JSONObject assets = client.fetchAssets(account, Math.max(pageNo, 1), Math.max(pageSize, 1));
-            try {
-                attachConsignmentListingIds(account, assets);
-            } catch (Exception ignored) {
-                // Asset status remains usable when the optional order list is unavailable.
-            }
+            attachActiveConsignmentDetails(account, assets);
             if (stored != null) {
                 JSONObject cache = objectOf("data", assets, "updatedAt", Instant.now().toString(), "stale", false);
                 stored.put("assetCache", cache);
@@ -304,6 +301,13 @@ public final class NativeEngine {
             JSONObject fallback = copy(snapshot);
             fallback.put("cacheStale", true);
             fallback.put("cacheUpdatedAt", cache.optString("updatedAt", ""));
+            JSONArray items = fallback.optJSONArray("items");
+            if (items != null) {
+                for (int index = 0; index < items.length(); index++) {
+                    JSONObject item = items.optJSONObject(index);
+                    if (item != null) item.put("consignmentStateVerified", false);
+                }
+            }
             cache.put("stale", true);
             if (stored != null) {
                 stored.put("assetCache", cache);
@@ -313,38 +317,58 @@ public final class NativeEngine {
         }
     }
 
-    private void attachConsignmentListingIds(IBoxDirectClient.Account account, JSONObject assets) throws Exception {
+    private void attachActiveConsignmentDetails(IBoxDirectClient.Account account, JSONObject assets) throws Exception {
         JSONArray items = assets == null ? null : assets.optJSONArray("items");
-        if (items == null || items.length() == 0) return;
-        boolean hasConsigning = false;
+        if (items == null) return;
         for (int index = 0; index < items.length(); index++) {
             JSONObject item = items.optJSONObject(index);
-            if (item != null && item.optBoolean("consigning", false)) {
-                hasConsigning = true;
-                break;
-            }
-        }
-        if (!hasConsigning) return;
+            if (item == null) continue;
+            boolean consigning = item.optBoolean("consigning", false);
+            item.put("activeListings", new JSONArray());
+            item.put("consignmentStateVerified", !consigning);
+            if (!consigning) continue;
 
-        OrderPage page = loadOrderPage(
-                account,
-                PURCHASE_CONSIGNMENT_ORDER_LIST_URL,
-                objectOf("pageNo", 1, "pageSize", 100, "initiatorType", 2),
-                "consignment"
-        );
-        Map<String, String> listingByGroupId = new LinkedHashMap<>();
-        for (int index = 0; index < page.items.length(); index++) {
-            JSONObject order = page.items.optJSONObject(index);
-            if (order == null || integer(order.opt("orderType"), -1) != 2) continue;
-            String groupId = order.optString("groupId");
-            String listingId = order.optString("listingOrderItemId");
-            if (!groupId.isEmpty() && listingId.matches("\\d+")) listingByGroupId.put(groupId, listingId);
-        }
-        for (int index = 0; index < items.length(); index++) {
-            JSONObject item = items.optJSONObject(index);
-            if (item == null || !item.optBoolean("consigning", false)) continue;
-            String listingId = listingByGroupId.get(item.optString("groupId"));
-            if (listingId != null) item.put("listingOrderItemId", listingId);
+            try {
+                JSONArray source = activeConsignmentAssets(account, item.optString("groupId"));
+                JSONArray activeListings = new JSONArray();
+                boolean resolved = true;
+                for (int sourceIndex = 0; sourceIndex < source.length(); sourceIndex++) {
+                    JSONObject asset = source.optJSONObject(sourceIndex);
+                    String assetId = ownedCollectionId(asset, item.optString("groupId"));
+                    if (!assetId.matches("\\d+")) {
+                        resolved = false;
+                        continue;
+                    }
+                    JSONObject detailResponse = client.requestAuthenticated(
+                            account,
+                            "GET",
+                            MARKET_ASSET_DETAIL_URL + "/" + encodePath(assetId),
+                            null,
+                            null,
+                            false,
+                            "寄售资产详情"
+                    );
+                    JSONObject detail = object(data(detailResponse));
+                    String listingOrderId = first(detail, "listingOrderId");
+                    int listingStatus = integer(first(detail, "listingStatus"), -1);
+                    if (listingStatus != 1 || !listingOrderId.matches("\\d+")) {
+                        resolved = false;
+                        continue;
+                    }
+                    activeListings.put(objectOf(
+                            "assetId", assetId,
+                            "tokenId", first(detail, "tokenId"),
+                            "listingOrderId", listingOrderId
+                    ));
+                }
+                if (resolved) {
+                    item.put("activeListings", activeListings);
+                    item.put("consigning", activeListings.length() > 0);
+                    item.put("consignmentStateVerified", true);
+                }
+            } catch (Exception ignored) {
+                // Do not expose a cancellation action without a current official asset-detail response.
+            }
         }
     }
 
@@ -469,7 +493,6 @@ public final class NativeEngine {
         JSONObject result = new JSONObject();
         result.put("id", first(order, "id", "orderId", "orderNumber"));
         result.put("orderUuid", deepString(order, "orderUuid", "orderUUId"));
-        result.put("listingOrderItemId", deepString(order, "listingOrderItemId"));
         result.put("type", type);
         String groupId = first(order, "groupId", "digitalCollectionGroupId", "collectionGroupId");
         if (groupId.isEmpty()) groupId = first(preview, "groupId", "digitalCollectionGroupId", "collectionGroupId");
@@ -479,6 +502,10 @@ public final class NativeEngine {
         if (title.isEmpty()) title = assetName(preview);
         if (title.isEmpty()) title = assetName(collection);
         result.put("title", title.isEmpty() ? "未命名藏品" : title);
+        String tokenId = first(order, "tokenId");
+        if (tokenId.isEmpty()) tokenId = first(preview, "tokenId");
+        if (tokenId.isEmpty()) tokenId = first(collection, "tokenId");
+        result.put("tokenId", tokenId);
         String cover = assetCover(preview);
         if (cover.isEmpty()) cover = assetCover(collection);
         if (cover.isEmpty()) cover = assetCover(order);
@@ -1559,46 +1586,21 @@ public final class NativeEngine {
         return ok(new JSONObject());
     }
 
-    private JSONObject cancelConsignmentOrder(String listingOrderItemId, JSONObject body) throws Exception {
+    private JSONObject cancelConsignmentOrder(String listingOrderId, JSONObject body) throws Exception {
         String phone = first(body, "phone", "sourcePhone");
         if (phone.isEmpty()) throw new NativeException("取消寄售需要指定账号");
-        if (!listingOrderItemId.matches("\\d+")) throw new NativeException("寄售订单编号无效");
+        if (!listingOrderId.matches("\\d+")) throw new NativeException("寄售订单编号无效");
         IBoxDirectClient.Account account = account(phone);
-        client.requestAuthenticated(account, "POST", MARKET_CONSIGNMENT_CANCEL_URL + "/" + encodePath(listingOrderItemId), null, null, false, "取消寄售");
-        String now = Instant.now().toString();
-        JSONArray tasks = store.getTradeTasks();
-        boolean tasksChanged = false;
-        for (int index = 0; index < tasks.length(); index++) {
-            JSONObject task = tasks.optJSONObject(index);
-            if (task == null || !"consignment".equals(task.optString("type")) || !phone.equals(task.optString("phone"))
-                    || !listingOrderItemId.equals(task.optString("listingOrderItemId"))) continue;
-            task.put("enabled", false);
-            task.put("status", "cancelled");
-            task.put("lastResult", "consignment_cancelled");
-            task.put("updatedAt", now);
-            tasksChanged = true;
-        }
-        if (tasksChanged) store.saveTradeTasks(tasks);
-        JSONArray strategies = store.getQuantStrategies();
-        boolean strategiesChanged = false;
-        for (int index = 0; index < strategies.length(); index++) {
-            JSONObject strategy = strategies.optJSONObject(index);
-            if (strategy == null || !phone.equals(strategy.optString("phone"))
-                    || !listingOrderItemId.equals(strategy.optString("listingOrderItemId"))) continue;
-            strategy.put("enabled", false);
-            strategy.put("status", "cancelled");
-            strategy.put("lastResult", "consignment_cancelled");
-            strategy.put("updatedAt", now);
-            addEvent(strategy, "consignment_cancelled", "寄售已取消");
-            strategiesChanged = true;
-        }
-        if (strategiesChanged) store.saveQuantStrategies(strategies);
-        try {
-            sendBark("iBox 寄售已取消", "挂单 " + listingOrderItemId + " 已取消。", "active");
-        } catch (Exception ignored) {
-            // Notification failure must not turn a successful cancellation into an error.
-        }
-        return ok(objectOf("listingOrderItemId", listingOrderItemId, "phone", phone));
+        client.requestAuthenticated(
+                account,
+                "POST",
+                MARKET_CONSIGNMENT_CANCEL_URL + "/" + encodePath(listingOrderId),
+                null,
+                null,
+                false,
+                "取消寄售"
+        );
+        return ok(objectOf("listingOrderId", listingOrderId, "phone", phone));
     }
 
     private JSONObject taskCaptcha(String kind, Route route, String method, JSONObject body) throws Exception {
@@ -3054,15 +3056,20 @@ public final class NativeEngine {
     }
 
     private boolean hasActiveConsignment(IBoxDirectClient.Account account, String groupId) throws Exception {
+        return activeConsignmentAssets(account, groupId).length() > 0;
+    }
+
+    private JSONArray activeConsignmentAssets(IBoxDirectClient.Account account, String groupId) throws Exception {
         JSONObject query = objectOf("pageNo", 1, "pageSize", 100, "lockStatus", 1);
         JSONObject response = client.requestAuthenticated(account, "GET", OWNED_GROUP_URL + "/" + encodePath(groupId), null, query, false, "寄售状态");
         JSONArray source = firstArray(data(response), "collectionAssets", "list", "records", "items", "rows", "data");
+        JSONArray result = new JSONArray();
         for (int index = 0; index < source.length(); index++) {
             JSONObject entry = source.optJSONObject(index);
             if (entry == null) continue;
-            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2) return true;
+            if (integer(first(entry, "digitalCollectionStatus"), -1) == 2) result.put(entry);
         }
-        return false;
+        return result;
     }
 
     private static String ownedCollectionId(JSONObject entry, String groupId) {

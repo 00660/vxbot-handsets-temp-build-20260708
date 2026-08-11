@@ -531,8 +531,10 @@ public final class MainActivity extends Activity {
             boolean hasPrice = Double.isFinite(floorPrice);
             boolean delisted = "delisted".equals(item.optString("marketState"));
             boolean consigning = item.optBoolean("consigning", false);
-            String listingOrderItemId = first(item, "listingOrderItemId");
-            double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
+            boolean consignmentStateVerified = item.optBoolean("consignmentStateVerified", false);
+            JSONArray activeListings = item.optJSONArray("activeListings");
+            boolean canCancelConsignment = consigning && consignmentStateVerified
+                    && activeListings != null && activeListings.length() > 0;
             double rate = hasCost && hasPrice && unitCost > 0d ? (floorPrice - unitCost) / unitCost * 100d : Double.NaN;
             LinearLayout row = vertical(Color.TRANSPARENT);
             row.setPadding(0, dp(12), 0, dp(12));
@@ -551,7 +553,9 @@ public final class MainActivity extends Activity {
             info.addView(text(name, 14, ink, Typeface.BOLD));
             String position = "持仓 " + compactNumber(quantity) + " 件 · 成本 " + (hasCost ? money(String.valueOf(unitCost)) : "--");
             info.addView(text(position, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
-            if (consigning) info.addView(text("寄售中", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
+            if (consigning) {
+                info.addView(text(consignmentStateVerified ? "寄售中" : "寄售状态待同步", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
+            }
             header.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
             TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : (delisted ? "已退市" : "--"), 14, hasPrice ? success : muted, Typeface.BOLD);
@@ -564,32 +568,15 @@ public final class MainActivity extends Activity {
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout footer = horizontal(Color.TRANSPARENT);
             footer.setGravity(Gravity.CENTER_VERTICAL);
-            String performance = Double.isFinite(profit)
-                    ? "未实现收益 " + signedMoney(profit) + " · " + signedPercent(rate)
-                    : "未实现收益 --";
-            footer.addView(text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
-            if (consigning) {
+            double totalValue = hasPrice ? quantity * floorPrice : 0d;
+            String performance = "总值 " + money(String.valueOf(totalValue)) + " · 收益率 " + (Double.isFinite(rate) ? signedPercent(rate) : "0%");
+            footer.addView(text(performance, 12, hasPrice ? success : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
+            if (canCancelConsignment) {
                 Button cancel = button("取消寄售", false);
                 cancel.setTextColor(danger);
-                cancel.setOnClickListener(v -> {
-                    if (!listingOrderItemId.matches("\\d+")) {
-                        toast("寄售挂单编号尚未同步，请刷新资产");
-                        return;
-                    }
-                    showProjectDialog("取消寄售", text("确认取消这条寄售挂单？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
-                        dialog.dismiss();
-                        JSONObject body = new JSONObject();
-                        try { body.put("phone", phone); } catch (Exception ignored) { }
-                        request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(listingOrderItemId) + "/cancel", body,
-                                result -> request("同步资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null,
-                                        refreshed -> {
-                                            content.removeAllViews();
-                                            renderAccountCards();
-                                        }));
-                    });
-                });
+                cancel.setOnClickListener(v -> showConsignmentCancelPicker(phone, name, activeListings));
                 footer.addView(cancel, new LinearLayout.LayoutParams(dp(96), dp(32)));
-            } else {
+            } else if (!consigning && consignmentStateVerified) {
                 Button consignment = button("寄售", false);
                 consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
                 footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
@@ -597,6 +584,57 @@ public final class MainActivity extends Activity {
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
+    }
+
+    private void showConsignmentCancelPicker(String phone, String name, JSONArray listings) {
+        if (listings == null || listings.length() == 0) {
+            toast("寄售挂单尚未同步");
+            return;
+        }
+        if (listings.length() == 1) {
+            showConsignmentCancelConfirm(phone, name, listings.optJSONObject(0));
+            return;
+        }
+        LinearLayout choices = vertical(Color.TRANSPARENT);
+        final Dialog[] picker = new Dialog[1];
+        for (int index = 0; index < listings.length(); index++) {
+            JSONObject listing = listings.optJSONObject(index);
+            if (listing == null) continue;
+            String assetId = first(listing, "assetId");
+            String tokenId = first(listing, "tokenId");
+            Button choice = button("实例 " + assetId + (tokenId.isEmpty() ? "" : " · Token " + tokenId), false);
+            choice.setGravity(Gravity.CENTER_VERTICAL);
+            choice.setOnClickListener(v -> {
+                if (picker[0] != null) picker[0].dismiss();
+                showConsignmentCancelConfirm(phone, name, listing);
+            });
+            choices.addView(choice, marginParams(-1, dp(48), 0, 0, 0, dp(8)));
+        }
+        picker[0] = showProjectDialog("选择要取消的寄售", choices, null, null);
+    }
+
+    private void showConsignmentCancelConfirm(String phone, String name, JSONObject listing) {
+        String listingOrderId = first(listing, "listingOrderId");
+        if (!listingOrderId.matches("\\d+")) {
+            toast("寄售挂单尚未同步");
+            return;
+        }
+        String assetId = first(listing, "assetId");
+        String detail = assetId.isEmpty() ? name : name + " · 实例 " + assetId;
+        showProjectDialog("取消寄售", text("确认取消 " + detail + " 的寄售？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
+            dialog.dismiss();
+            JSONObject body = new JSONObject();
+            try {
+                body.put("phone", phone);
+            } catch (Exception ignored) {
+            }
+            request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(listingOrderId) + "/cancel", body,
+                    result -> request("同步资产", "GET", "/native/accounts/" + Uri.encode(phone) + "/assets?refresh=1", null,
+                            refreshed -> {
+                                content.removeAllViews();
+                                renderAccountCards();
+                            }));
+        });
     }
 
     private void showAssetCostDialog(String phone, String assetId, String name, double existingCost) {
@@ -1559,18 +1597,6 @@ public final class MainActivity extends Activity {
                 });
                 row.addView(payment, marginParams(-1, dp(40), 0, dp(10), 0, 0));
             }
-            String listingOrderItemId = first(order, "listingOrderItemId");
-            if (!pending && !listingOrderItemId.isEmpty() && intValue(first(order, "orderType"), -1) == 2) {
-                Button cancel = button("取消寄售", false);
-                cancel.setTextColor(danger);
-                cancel.setOnClickListener(v -> showProjectDialog("取消寄售", text("确认取消这条寄售挂单？", 14, muted, Typeface.NORMAL), "确认取消", dialog -> {
-                    dialog.dismiss();
-                    JSONObject body = new JSONObject();
-                    try { body.put("phone", first(order, "phone", selectedPhone)); } catch (Exception ignored) { }
-                    request("取消寄售", "POST", "/native/consignment-orders/" + Uri.encode(listingOrderItemId) + "/cancel", body, result -> loadOrders(target));
-                }));
-                row.addView(cancel, marginParams(-1, dp(40), 0, dp(10), 0, 0));
-            }
             target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
         }
     }
@@ -2161,7 +2187,7 @@ public final class MainActivity extends Activity {
         String pricedQuantity = first(data, "pricedQuantity");
         String valuationCoverage = "已估值 " + (pricedQuantity.isEmpty() ? "0" : compactNumber(parseDouble(pricedQuantity, 0d)))
                 + " / " + (items == null ? "0" : compactNumber(items.length()));
-        value.addView(text(estimate.isEmpty() ? "--" : money(estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
+        value.addView(text(money(estimate.isEmpty() ? "0" : estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
         value.addView(text(valuationCoverage, 11, muted, Typeface.NORMAL));
         headline.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
         if (stale) {
@@ -2198,21 +2224,21 @@ public final class MainActivity extends Activity {
             }
         }
         boolean hasReturn = costQuantity > 0d && Double.compare(pricedCostQuantity, costQuantity) == 0;
-        double floatingProfit = hasReturn ? pricedCostValue - costBasis : Double.NaN;
-        double returnRate = hasReturn && costBasis > 0d ? floatingProfit / costBasis * 100d : Double.NaN;
+        double returnRate = hasReturn && costBasis > 0d ? (pricedCostValue - costBasis) / costBasis * 100d : Double.NaN;
         String cost = costQuantity > 0d ? money(String.valueOf(costBasis)) : "待录入";
-        String profit = Double.isFinite(floatingProfit) ? signedMoney(floatingProfit) : "--";
-        String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "--";
+        double estimatedValue = parseDouble(first(data, "estimatedValue"), 0d);
+        String totalValue = money(String.valueOf(Double.isFinite(estimatedValue) && estimatedValue >= 0d ? estimatedValue : 0d));
+        String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "0%";
         String[][] values = {
                 {"持仓数量", first(data, "total", "totalCount", "count")},
                 {"持仓成本", cost},
-                {"未实现收益", profit},
+                {"总值", totalValue},
                 {"收益率", rate}
         };
         for (int index = 0; index < values.length; index += 2) {
             LinearLayout row = horizontal(Color.TRANSPARENT);
             row.setWeightSum(2f);
-            addMetricCell(row, values[index][0], values[index][1], index == 2 && Double.isFinite(floatingProfit) ? (floatingProfit >= 0d ? success : danger) : ink, false);
+            addMetricCell(row, values[index][0], values[index][1], ink, false);
             addMetricCell(row, values[index + 1][0], values[index + 1][1], index + 1 == 3 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, true);
             grid.addView(row, marginParams(-1, dp(62), 0, index == 0 ? 0 : dp(6), 0, 0));
         }
