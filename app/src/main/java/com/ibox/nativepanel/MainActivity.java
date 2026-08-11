@@ -1622,8 +1622,20 @@ public final class MainActivity extends Activity {
         ));
         for (int i = 0; i < pending.length(); i++) {
             JSONObject order = pending.optJSONObject(i);
-            String orderUuid = first(order, "orderUuid", "orderUUId", "orderNumber", "id");
-            if (!orderUuid.isEmpty()) result.add(orderUuid);
+            result.addAll(orderIdentifiers(order));
+            String fallbackId = first(order, "id");
+            if (!fallbackId.isEmpty()) result.add(fallbackId);
+        }
+        return result;
+    }
+
+    private Set<String> orderIdentifiers(JSONObject value) {
+        Set<String> result = new HashSet<>();
+        if (value == null) return result;
+        String[] keys = {"orderUuid", "orderUUId", "orderUUID", "orderId", "orderNumber"};
+        for (String key : keys) {
+            String identifier = first(value, key);
+            if (!identifier.isEmpty()) result.add(identifier);
         }
         return result;
     }
@@ -1635,7 +1647,15 @@ public final class MainActivity extends Activity {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) continue;
             String status = task.optString("status", "");
-            if (!"payment_pending".equals(status) || !pendingOrderIds.contains(task.optString("orderUuid"))) continue;
+            if (!"payment_pending".equals(status)) continue;
+            boolean linked = false;
+            for (String identifier : orderIdentifiers(task)) {
+                if (pendingOrderIds.contains(identifier)) {
+                    linked = true;
+                    break;
+                }
+            }
+            if (!linked) continue;
             String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
             row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
