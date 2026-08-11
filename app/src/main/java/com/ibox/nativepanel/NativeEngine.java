@@ -300,6 +300,7 @@ public final class NativeEngine {
         try {
             JSONObject assets = client.fetchAssets(account, Math.max(pageNo, 1), Math.max(pageSize, 1));
             attachActiveConsignmentDetails(account, assets);
+            reconcileFinishedConsignmentTasks(phone, assets);
             if (stored != null) {
                 JSONObject cache = objectOf("data", assets, "updatedAt", Instant.now().toString(), "stale", false);
                 stored.put("assetCache", cache);
@@ -395,6 +396,47 @@ public final class NativeEngine {
                 // Do not expose a cancellation action without a current official asset-detail response.
             }
         }
+    }
+
+    private void reconcileFinishedConsignmentTasks(String phone, JSONObject assets) {
+        JSONArray groups = assets == null ? null : assets.optJSONArray("items");
+        if (groups == null) return;
+        JSONArray tasks = store.getTradeTasks();
+        JSONArray remaining = new JSONArray();
+        boolean removed = false;
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null) continue;
+            String status = task.optString("status");
+            boolean finishedConsignment = "consignment".equals(task.optString("type"))
+                    && phone.equals(task.optString("phone"))
+                    && !task.optBoolean("enabled", false)
+                    && ("submitted".equals(status) || "cancelled".equals(status) || "failed".equals(status));
+            if (finishedConsignment && consignmentInstanceVerifiedInactive(groups, task.optString("groupId"), task.optString("digitalCollectionId"))) {
+                removed = true;
+                continue;
+            }
+            remaining.put(task);
+        }
+        if (removed) store.saveTradeTasks(remaining);
+    }
+
+    private static boolean consignmentInstanceVerifiedInactive(JSONArray groups, String groupId, String digitalCollectionId) {
+        if (groupId.isEmpty() || digitalCollectionId.isEmpty()) return false;
+        for (int index = 0; index < groups.length(); index++) {
+            JSONObject group = groups.optJSONObject(index);
+            if (group == null || !groupId.equals(group.optString("groupId"))
+                    || !group.optBoolean("consignmentStateVerified", false)) continue;
+            JSONArray listings = group.optJSONArray("activeListings");
+            if (listings != null) {
+                for (int listingIndex = 0; listingIndex < listings.length(); listingIndex++) {
+                    JSONObject listing = listings.optJSONObject(listingIndex);
+                    if (listing != null && digitalCollectionId.equals(listing.optString("assetId"))) return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private JSONObject loadOrders(String requestedPhone) throws Exception {
@@ -1457,12 +1499,6 @@ public final class NativeEngine {
     }
 
     private JSONObject createTradeTask(JSONObject body, String kind) throws Exception {
-        synchronized (TICK_LOCK) {
-            return createTradeTaskLocked(body, kind);
-        }
-    }
-
-    private JSONObject createTradeTaskLocked(JSONObject body, String kind) throws Exception {
         JSONObject task = copy(body);
         String phone = first(task, "phone", "sourcePhone");
         String groupId = first(task, "groupId", "collectionId", "id");
@@ -1793,12 +1829,8 @@ public final class NativeEngine {
         );
 
         String now = Instant.now().toString();
-        boolean tasksChanged;
-        boolean strategiesChanged;
-        synchronized (TICK_LOCK) {
-            tasksChanged = markCancelledConsignmentTasks(phone, digitalCollectionId, listingOrderItemId, now);
-            strategiesChanged = markCancelledQuantStrategies(phone, digitalCollectionId, listingOrderItemId, now);
-        }
+        boolean tasksRemoved = removeCancelledConsignmentTasks(phone, digitalCollectionId, listingOrderItemId);
+        boolean strategiesChanged = markCancelledQuantStrategies(phone, digitalCollectionId, listingOrderItemId, now);
         try {
             sendBark("iBox 寄售已取消", "实例 " + (digitalCollectionId.isEmpty() ? orderId : digitalCollectionId) + " 已取消寄售。", "active");
         } catch (Exception ignored) {
@@ -1808,29 +1840,27 @@ public final class NativeEngine {
                 "orderId", orderId,
                 "phone", phone,
                 "digitalCollectionId", digitalCollectionId,
-                "tasksChanged", tasksChanged,
+                "tasksRemoved", tasksRemoved,
                 "strategiesChanged", strategiesChanged
         ));
     }
 
-    private boolean markCancelledConsignmentTasks(String phone, String digitalCollectionId, String listingOrderItemId, String now) {
+    private boolean removeCancelledConsignmentTasks(String phone, String digitalCollectionId, String listingOrderItemId) {
         JSONArray tasks = store.getTradeTasks();
-        boolean changed = false;
+        JSONArray remaining = new JSONArray();
+        boolean removed = false;
         for (int index = 0; index < tasks.length(); index++) {
             JSONObject task = tasks.optJSONObject(index);
-            if (task == null || !"consignment".equals(task.optString("type"))
-                    || !"submitted".equals(task.optString("status"))
-                    || !phone.equals(task.optString("phone"))
-                    || !matchesConsignment(task, digitalCollectionId, listingOrderItemId)) continue;
-            putQuietly(task, "enabled", false);
-            putQuietly(task, "status", "cancelled");
-            putQuietly(task, "lastResult", "consignment_cancelled");
-            putQuietly(task, "cancelledAt", now);
-            putQuietly(task, "updatedAt", now);
-            addEventQuietly(task, "consignment_cancelled", "寄售已取消");
-            changed = true;
+            if (task == null) continue;
+            if ("consignment".equals(task.optString("type"))
+                    && phone.equals(task.optString("phone"))
+                    && matchesConsignment(task, digitalCollectionId, listingOrderItemId)) {
+                removed = true;
+                continue;
+            }
+            remaining.put(task);
         }
-        return changed && store.saveTradeTasks(tasks);
+        return removed && store.saveTradeTasks(remaining);
     }
 
     private boolean markCancelledQuantStrategies(String phone, String digitalCollectionId, String listingOrderItemId, String now) {
@@ -2412,12 +2442,6 @@ public final class NativeEngine {
     }
 
     private void processTradeTasks(String preflightTaskId, JSONObject preflightPlan) {
-        synchronized (TICK_LOCK) {
-            processTradeTasksLocked(preflightTaskId, preflightPlan);
-        }
-    }
-
-    private void processTradeTasksLocked(String preflightTaskId, JSONObject preflightPlan) {
         JSONArray tasks = store.getTradeTasks();
         boolean changed = false;
         long now = System.currentTimeMillis();

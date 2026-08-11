@@ -1580,7 +1580,7 @@ public final class MainActivity extends Activity {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) continue;
             String status = task.optString("status", "");
-            if (isTerminalTaskStatus(status) || "failed".equals(status)) continue;
+            if (isTerminalTaskStatus(status)) continue;
             String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
             row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
