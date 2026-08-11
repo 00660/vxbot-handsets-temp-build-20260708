@@ -578,16 +578,34 @@ public final class MainActivity extends Activity {
             footer.setGravity(Gravity.CENTER_VERTICAL);
             double totalValue = hasPrice ? quantity * floorPrice : 0d;
             String performance = "总值 " + money(String.valueOf(totalValue)) + " · 收益率 " + (Double.isFinite(rate) ? signedPercent(rate) : "0%");
-            footer.addView(text(performance, 12, hasPrice ? success : muted, Typeface.BOLD), new LinearLayout.LayoutParams(0, dp(32), 1));
+            TextView performanceView = text(performance, 12, hasPrice ? success : muted, Typeface.BOLD);
+            performanceView.setMaxLines(1);
+            performanceView.setEllipsize(TextUtils.TruncateAt.END);
+            performanceView.setIncludeFontPadding(false);
+            performanceView.setMinWidth(0);
+            footer.addView(performanceView, new LinearLayout.LayoutParams(0, dp(32), 1));
             if (canCancelConsignment) {
                 Button cancel = button("取消寄售", false);
                 cancel.setTextColor(danger);
+                cancel.setMinWidth(0);
+                cancel.setMinimumWidth(0);
+                cancel.setMaxLines(1);
+                cancel.setEllipsize(TextUtils.TruncateAt.END);
+                cancel.setPadding(dp(4), 0, dp(4), 0);
                 cancel.setOnClickListener(v -> showConsignmentCancelPicker(phone, name, activeListings));
-                footer.addView(cancel, new LinearLayout.LayoutParams(dp(96), dp(32)));
+                LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
+                cancelParams.setMargins(dp(6), 0, 0, 0);
+                footer.addView(cancel, cancelParams);
             } else if (!consigning && consignmentStateVerified) {
                 Button consignment = button("寄售", false);
+                consignment.setMinWidth(0);
+                consignment.setMinimumWidth(0);
+                consignment.setMaxLines(1);
+                consignment.setPadding(dp(4), 0, dp(4), 0);
                 consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
-                footer.addView(consignment, new LinearLayout.LayoutParams(dp(76), dp(32)));
+                LinearLayout.LayoutParams consignmentParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
+                consignmentParams.setMargins(dp(6), 0, 0, 0);
+                footer.addView(consignment, consignmentParams);
             }
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
