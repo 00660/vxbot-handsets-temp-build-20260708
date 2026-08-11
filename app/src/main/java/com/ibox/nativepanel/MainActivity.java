@@ -584,7 +584,9 @@ public final class MainActivity extends Activity {
             floorLabel.setIncludeFontPadding(false);
             floorLabel.setMinWidth(0);
             valuation.addView(floorLabel, marginParams(-2, -2, 0, dp(3), 0, 0));
-            header.addView(valuation, new LinearLayout.LayoutParams(-2, dp(52)));
+            LinearLayout.LayoutParams valuationParams = new LinearLayout.LayoutParams(-2, dp(52));
+            valuationParams.setMargins(0, 0, dp(8), 0);
+            header.addView(valuation, valuationParams);
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout footer = horizontal(Color.TRANSPARENT);
             footer.setGravity(Gravity.CENTER_VERTICAL);
@@ -606,7 +608,7 @@ public final class MainActivity extends Activity {
                 cancel.setPadding(dp(4), 0, dp(4), 0);
                 cancel.setOnClickListener(v -> showConsignmentCancelPicker(phone, name, activeListings));
                 LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
-                cancelParams.setMargins(dp(6), 0, 0, 0);
+                cancelParams.setMargins(dp(6), 0, dp(8), 0);
                 footer.addView(cancel, cancelParams);
             } else if (!consigning && consignmentStateVerified) {
                 Button consignment = button("寄售", false);
@@ -616,7 +618,7 @@ public final class MainActivity extends Activity {
                 consignment.setPadding(dp(4), 0, dp(4), 0);
                 consignment.setOnClickListener(v -> showAssetConsignmentDialog(phone, item));
                 LinearLayout.LayoutParams consignmentParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
-                consignmentParams.setMargins(dp(6), 0, 0, 0);
+                consignmentParams.setMargins(dp(6), 0, dp(8), 0);
                 footer.addView(consignment, consignmentParams);
             }
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));

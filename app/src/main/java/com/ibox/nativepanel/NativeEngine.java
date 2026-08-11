@@ -110,15 +110,15 @@ public final class NativeEngine {
             String phone = route.segment(2);
             return removeAccount(phone);
         }
+        if (route.path.startsWith("/accounts/") && route.path.endsWith("/market-trade/assets") && "GET".equals(verb)) {
+            return marketTradeAssets(route.segment(2), route.query("groupId"));
+        }
         if (route.path.startsWith("/accounts/") && route.path.endsWith("/assets") && "GET".equals(verb)) {
             String phone = route.segment(2);
             return refreshAssets(phone, integer(route.query("pageNo"), 1), integer(route.query("pageSize"), 50));
         }
         if (route.path.startsWith("/accounts/") && route.path.endsWith("/orders") && "GET".equals(verb)) {
             return loadOrders(route.segment(2));
-        }
-        if (route.path.startsWith("/accounts/") && route.path.endsWith("/market-trade/assets") && "GET".equals(verb)) {
-            return marketTradeAssets(route.segment(2), route.query("groupId"));
         }
         if (route.path.startsWith("/accounts/") && route.path.contains("/market-trade/") && route.path.endsWith("/wanted-preflight") && "GET".equals(verb)) {
             return marketTradeWantedPreflight(route.segment(2), route.segment(4));
