@@ -66,6 +66,8 @@ public final class NativeEngine {
     private static final long TASK_CLOCK_SYNC_MS = 30L * 1000L;
     private static final long TASK_PREPARE_MS = 2500L;
     private static final long TASK_MAX_LATE_MS = 60L * 1000L;
+    private static final long IMMEDIATE_PURCHASE_STALE_MS = 60L * 1000L;
+    private static final long ORDER_TASK_LINK_WINDOW_MS = 10L * 60L * 1000L;
     private static final int LOTTERY_DRAWS_PER_REQUEST = 5;
     private static final int LOTTERY_MAX_DRAWS_PER_RUN = 100;
     private static final double QUANT_MAX_VOLATILITY_PERCENT = 100d;
@@ -488,6 +490,7 @@ public final class NativeEngine {
         OrderPage collectionOrders = OrderPage.empty();
         OrderPage consignmentOrders = OrderPage.empty();
         JSONArray failures = new JSONArray();
+        boolean collectionOrdersLoaded = false;
         try {
             collectionOrders = loadOrderPage(
                     account,
@@ -495,6 +498,7 @@ public final class NativeEngine {
                     objectOf("pageNo", 1, "pageSize", 40, "productType", 0, "orderType", 0, "orderStatus", 0),
                     "collection_pending"
             );
+            collectionOrdersLoaded = true;
         } catch (Exception error) {
             failures.put("collection_pending");
         }
@@ -532,6 +536,7 @@ public final class NativeEngine {
         ));
         JSONArray pendingOrders = new JSONArray();
         for (JSONObject order : pending) pendingOrders.put(order);
+        if (collectionOrdersLoaded) reconcileImmediatePurchaseTasks(account.phone, collectionOrders);
         return ok(objectOf(
                 "phone", account.phone,
                 "collectionPendingOrders", collectionOrders.items,
@@ -1904,9 +1909,25 @@ public final class NativeEngine {
             throw new NativeException("平台待支付订单类型无法确认");
         }
 
-        client.requestAuthenticated(account, "POST", url, null, null, false, "取消待支付订单");
+        Exception cancellationFailure = null;
+        try {
+            client.requestAuthenticated(account, "POST", url, null, null, false, "取消待支付订单");
+        } catch (Exception error) {
+            cancellationFailure = error;
+        }
+        if (cancellationFailure != null) {
+            JSONObject refreshed;
+            try {
+                refreshed = loadOrders(phone).optJSONObject("data");
+            } catch (Exception ignored) {
+                throw cancellationFailure;
+            }
+            if (orderReadFailed(refreshed, type) || findPendingOrder(refreshed, orderIdentifier.trim()) != null) {
+                throw cancellationFailure;
+            }
+        }
         String orderUuid = first(order, "orderUuid", "orderUUId", "orderId", "id");
-        JSONObject local = clearCancelledPendingOrderSources(phone, orderUuid);
+        JSONObject local = clearCancelledPendingOrderSources(phone, order);
         return ok(objectOf(
                 "phone", phone,
                 "orderUuid", orderUuid,
@@ -1938,13 +1959,24 @@ public final class NativeEngine {
         return null;
     }
 
-    private JSONObject clearCancelledPendingOrderSources(String phone, String orderUuid) throws Exception {
+    private static boolean orderReadFailed(JSONObject data, String type) {
+        JSONArray failures = data == null ? null : data.optJSONArray("orderReadFailures");
+        String source = "wanted_pending".equals(type) ? "consignment" : "collection_pending";
+        if (failures == null) return false;
+        for (int index = 0; index < failures.length(); index++) {
+            if (source.equals(String.valueOf(failures.opt(index)))) return true;
+        }
+        return false;
+    }
+
+    private JSONObject clearCancelledPendingOrderSources(String phone, JSONObject order) throws Exception {
+        String orderUuid = first(order, "orderUuid", "orderUUId", "orderId", "id");
         int removedTasks = 0;
         JSONArray tasks = store.getTradeTasks();
         JSONArray remaining = new JSONArray();
         for (int index = 0; index < tasks.length(); index++) {
             JSONObject task = tasks.optJSONObject(index);
-            if (task != null && phone.equals(task.optString("phone")) && orderUuid.equals(first(task, "orderUuid", "orderId"))) {
+            if (task != null && cancelledOrderMatchesTask(phone, order, task)) {
                 removedTasks++;
             } else if (task != null) {
                 remaining.put(task);
@@ -1976,6 +2008,103 @@ public final class NativeEngine {
                 "updatedQuantStrategies", strategiesChanged,
                 "updatedFirstSaleRuns", firstSaleRunsChanged
         );
+    }
+
+    private void reconcileImmediatePurchaseTasks(String phone, OrderPage orders) throws Exception {
+        if (orders == null || orders.count > orders.items.length()) return;
+        JSONArray tasks = store.getTradeTasks();
+        JSONArray remaining = new JSONArray();
+        Set<String> claimedOrders = new HashSet<>();
+        boolean changed = false;
+        long now = System.currentTimeMillis();
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null) continue;
+            if (!isImmediatePurchaseTask(phone, task)) {
+                remaining.put(task);
+                continue;
+            }
+            String status = task.optString("status");
+            JSONObject pending = findImmediatePurchaseOrder(task, orders.items, claimedOrders);
+            if (pending != null) {
+                String identifier = first(pending, "orderUuid", "orderId", "id", "orderNumber");
+                if (!identifier.isEmpty()) claimedOrders.add(identifier);
+                if (("submitting".equals(status) || "failed".equals(status)) && !identifier.isEmpty()) {
+                    task.put("orderUuid", identifier);
+                    task.put("enabled", false);
+                    task.put("status", "payment_pending");
+                    task.put("lastResult", "payment_pending");
+                    task.put("lockedAt", first(pending, "createdAt", "createTime"));
+                    task.put("updatedAt", Instant.now().toString());
+                    changed = true;
+                }
+                remaining.put(task);
+                continue;
+            }
+            long createdAt = epoch(first(task, "createdAt", "updatedAt"));
+            boolean staleSubmitting = "submitting".equals(status)
+                    && createdAt > 0L && now - createdAt >= IMMEDIATE_PURCHASE_STALE_MS;
+            if ("payment_pending".equals(status) || staleSubmitting) {
+                changed = true;
+                continue;
+            }
+            remaining.put(task);
+        }
+        if (changed && !store.saveTradeTasks(remaining)) throw new NativeException("平台订单同步成功，但本地立即买入任务清理失败");
+    }
+
+    private static JSONObject findImmediatePurchaseOrder(JSONObject task, JSONArray orders, Set<String> claimedOrders) {
+        JSONObject closest = null;
+        long closestDistance = Long.MAX_VALUE;
+        String taskGroupId = first(task, "groupId", "collectionGroupId", "digitalCollectionGroupId");
+        long taskCreatedAt = epoch(first(task, "createdAt", "updatedAt"));
+        for (int index = 0; index < orders.length(); index++) {
+            JSONObject order = orders.optJSONObject(index);
+            if (order == null || integer(order.opt("orderStatus"), -1) != 0) continue;
+            String identifier = first(order, "orderUuid", "orderId", "id", "orderNumber");
+            if (!identifier.isEmpty() && claimedOrders.contains(identifier)) continue;
+            if (sameOrderIdentifier(task, order)) return order;
+            String orderGroupId = first(order, "groupId", "collectionGroupId", "digitalCollectionGroupId");
+            long orderCreatedAt = epoch(first(order, "createdAt", "createTime"));
+            if (taskGroupId.isEmpty() || !taskGroupId.equals(orderGroupId) || taskCreatedAt <= 0L || orderCreatedAt <= 0L) continue;
+            long distance = Math.abs(taskCreatedAt - orderCreatedAt);
+            if (distance <= ORDER_TASK_LINK_WINDOW_MS && distance < closestDistance) {
+                closest = order;
+                closestDistance = distance;
+            }
+        }
+        return closest;
+    }
+
+    private static boolean cancelledOrderMatchesTask(String phone, JSONObject order, JSONObject task) {
+        if (!phone.equals(task.optString("phone"))) return false;
+        if (sameOrderIdentifier(task, order)) return true;
+        if (!isImmediatePurchaseTask(phone, task)) return false;
+        String taskGroupId = first(task, "groupId", "collectionGroupId", "digitalCollectionGroupId");
+        String orderGroupId = first(order, "groupId", "collectionGroupId", "digitalCollectionGroupId");
+        long taskCreatedAt = epoch(first(task, "createdAt", "updatedAt"));
+        long orderCreatedAt = epoch(first(order, "createdAt", "createTime"));
+        return !taskGroupId.isEmpty() && taskGroupId.equals(orderGroupId)
+                && taskCreatedAt > 0L && orderCreatedAt > 0L
+                && Math.abs(taskCreatedAt - orderCreatedAt) <= ORDER_TASK_LINK_WINDOW_MS;
+    }
+
+    private static boolean isImmediatePurchaseTask(String phone, JSONObject task) {
+        return task != null && phone.equals(task.optString("phone"))
+                && "retired_market".equals(task.optString("localType"))
+                && "immediate_purchase".equals(task.optString("executionMode"));
+    }
+
+    private static boolean sameOrderIdentifier(JSONObject left, JSONObject right) {
+        String[] keys = {"orderUuid", "orderUUId", "orderUUID", "orderId", "orderNumber", "id"};
+        for (String leftKey : keys) {
+            String leftValue = first(left, leftKey);
+            if (leftValue.isEmpty()) continue;
+            for (String rightKey : keys) {
+                if (leftValue.equals(first(right, rightKey))) return true;
+            }
+        }
+        return false;
     }
 
     private int clearCancelledFirstSaleRuns(String phone, String orderUuid, String now) throws Exception {
