@@ -1354,7 +1354,10 @@ public final class NativeEngine {
         for (int index = 0; index < strategies.length(); index++) {
             JSONObject strategy = strategies.optJSONObject(index);
             if (strategy == null || !id.equals(strategy.optString("id"))) continue;
-            if (terminalTaskStatus(strategy.optString("status"))) throw new NativeException("已提交或待支付的量化策略不能修改");
+            String currentStatus = strategy.optString("status");
+            if ("submitted".equals(currentStatus) || "payment_pending".equals(currentStatus)) {
+                throw new NativeException("已提交或待支付的量化策略不能修改");
+            }
             JSONObject candidate = copy(strategy);
             merge(candidate, body);
             validateQuantStrategy(candidate);
@@ -1378,6 +1381,17 @@ public final class NativeEngine {
             strategy.put("lastFailureAt", "");
             strategy.put("lastRetryAfterMs", 0);
             strategy.put("lastResult", "strategy_updated");
+            strategy.put("paymentStatus", "not_started");
+            strategy.remove("digitalCollectionId");
+            strategy.remove("resolvedPaymentPlatformCode");
+            strategy.remove("orderUuid");
+            strategy.remove("listingOrderItemId");
+            strategy.remove("cashierLink");
+            strategy.remove("result");
+            strategy.remove("submittedAt");
+            strategy.remove("triggeredAt");
+            strategy.remove("cancelledAt");
+            strategy.remove("pendingAction");
             strategy.put("updatedAt", Instant.now().toString());
             addEvent(strategy, "updated", "策略已更新");
             updated = strategy;
@@ -1443,6 +1457,12 @@ public final class NativeEngine {
     }
 
     private JSONObject createTradeTask(JSONObject body, String kind) throws Exception {
+        synchronized (TICK_LOCK) {
+            return createTradeTaskLocked(body, kind);
+        }
+    }
+
+    private JSONObject createTradeTaskLocked(JSONObject body, String kind) throws Exception {
         JSONObject task = copy(body);
         String phone = first(task, "phone", "sourcePhone");
         String groupId = first(task, "groupId", "collectionId", "id");
@@ -1773,8 +1793,12 @@ public final class NativeEngine {
         );
 
         String now = Instant.now().toString();
-        boolean tasksChanged = markCancelledConsignmentTasks(phone, digitalCollectionId, listingOrderItemId, now);
-        boolean strategiesChanged = markCancelledQuantStrategies(phone, digitalCollectionId, listingOrderItemId, now);
+        boolean tasksChanged;
+        boolean strategiesChanged;
+        synchronized (TICK_LOCK) {
+            tasksChanged = markCancelledConsignmentTasks(phone, digitalCollectionId, listingOrderItemId, now);
+            strategiesChanged = markCancelledQuantStrategies(phone, digitalCollectionId, listingOrderItemId, now);
+        }
         try {
             sendBark("iBox 寄售已取消", "实例 " + (digitalCollectionId.isEmpty() ? orderId : digitalCollectionId) + " 已取消寄售。", "active");
         } catch (Exception ignored) {
@@ -2388,6 +2412,12 @@ public final class NativeEngine {
     }
 
     private void processTradeTasks(String preflightTaskId, JSONObject preflightPlan) {
+        synchronized (TICK_LOCK) {
+            processTradeTasksLocked(preflightTaskId, preflightPlan);
+        }
+    }
+
+    private void processTradeTasksLocked(String preflightTaskId, JSONObject preflightPlan) {
         JSONArray tasks = store.getTradeTasks();
         boolean changed = false;
         long now = System.currentTimeMillis();

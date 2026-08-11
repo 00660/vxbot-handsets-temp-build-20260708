@@ -1143,6 +1143,11 @@ public final class MainActivity extends Activity {
                     start.setOnClickListener(v -> quantAction(strategy.optString("id"), "enable", target));
                     actions.addView(start, new LinearLayout.LayoutParams(0, dp(42), 1));
                 }
+                if (!("submitted".equals(strategyState) || "payment_pending".equals(strategyState))) {
+                    Button edit = button("修改", false);
+                    edit.setOnClickListener(v -> showQuantDialog(strategy, strategy));
+                    actions.addView(edit, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
+                }
                 Button events = button("记录", false);
                 events.setOnClickListener(v -> loadQuantEvents(strategy.optString("id")));
                 actions.addView(events, marginParams(dp(76), dp(42), dp(8), 0, 0, 0));
@@ -1170,7 +1175,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showQuantDialog(JSONObject target, JSONObject existing) {
-        if (selectedPhone.isEmpty()) { toast("请先选择账号"); return; }
+        String strategyPhone = existing == null ? selectedPhone : first(existing, "phone", "sourcePhone");
+        if (strategyPhone.isEmpty()) { toast("请先选择账号"); return; }
         ScrollView scroll = new ScrollView(this);
         LinearLayout form = vertical(Color.TRANSPARENT);
         scroll.addView(form, new ScrollView.LayoutParams(-1, -2));
@@ -1181,17 +1187,17 @@ public final class MainActivity extends Activity {
         ProjectToggle buyEnabled = toggle("启用买入", existing == null || existing.optJSONObject("buy") == null || existing.optJSONObject("buy").optBoolean("enabled", true));
         EditText buyPrice = numberInput("最高买入价", existing == null ? moneyValue(first(target, "floorPrice", "price")) : number(existing.optJSONObject("buy"), "maxPrice", ""));
         EditText buyQuantity = numberInput("买入数量", existing == null ? "1" : number(existing.optJSONObject("buy"), "quantity", "1"));
-        form.addView(buyEnabled); form.addView(buyPrice, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(buyQuantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        form.addView(buyEnabled); form.addView(labelled("最高买入价", buyPrice)); form.addView(labelled("买入数量", buyQuantity));
         ProjectToggle sellEnabled = toggle("启用卖出", existing != null && existing.optJSONObject("sell") != null && existing.optJSONObject("sell").optBoolean("enabled", false));
         EditText sellTrigger = numberInput("卖出触发行情价", existing == null ? "" : number(existing.optJSONObject("sell"), "minPrice", ""));
         EditText sellPrice = numberInput("寄售价（整数）", existing == null ? "" : number(existing.optJSONObject("sell"), "sellPrice", ""));
         EditText sellQuantity = numberInput("卖出数量", existing == null ? "1" : number(existing.optJSONObject("sell"), "quantity", "1"));
-        form.addView(sellEnabled); form.addView(sellTrigger, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(sellPrice, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(sellQuantity, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        form.addView(sellEnabled); form.addView(labelled("卖出触发行情价", sellTrigger)); form.addView(labelled("寄售价（整数）", sellPrice)); form.addView(labelled("卖出数量", sellQuantity));
         JSONObject existingStopLoss = existing == null ? null : existing.optJSONObject("stopLoss");
         ProjectToggle stopLossEnabled = toggle("启用止损", existingStopLoss != null && existingStopLoss.optBoolean("enabled", false));
         EditText stopTrigger = numberInput("止损触发价", existingStopLoss == null ? "" : number(existingStopLoss, "triggerPrice", ""));
         EditText stopPrice = numberInput("止损寄售价（整数）", existingStopLoss == null ? "" : number(existingStopLoss, "sellPrice", ""));
-        form.addView(stopLossEnabled); form.addView(stopTrigger, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(stopPrice, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        form.addView(stopLossEnabled); form.addView(labelled("止损触发价", stopTrigger)); form.addView(labelled("止损寄售价（整数）", stopPrice));
         EditText maxPosition = numberInput("最大持仓", existing == null ? "1" : number(existing, "maxPosition", "1"));
         EditText minProfit = numberInput("最低单件预期净利", existing == null ? "0" : number(existing, "minNetProfit", "0"));
         EditText volatility = numberInput("单周期最大波动 %", existing == null ? "0" : number(existing, "volatilityLimitPercent", "0"));
@@ -1199,11 +1205,11 @@ public final class MainActivity extends Activity {
         EditText interval = numberInput("监控间隔", existing == null ? "15" : number(existing, "intervalValue", "15"));
         OptionField intervalUnit = optionField("间隔单位", new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
         EditText password = passwordInput("交易密码（真实执行时填写）");
-        form.addView(maxPosition, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(minProfit, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(volatility, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(cooldown, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(interval, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(labelled("间隔单位", intervalUnit)); form.addView(password, marginParams(-1, dp(46), 0, 0, 0, 0));
+        form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit)); form.addView(labelled("交易密码（真实执行时填写）", password));
         showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, "保存", dialog -> {
             JSONObject body = new JSONObject();
             try {
-                body.put("phone", selectedPhone); body.put("groupId", first(target, "groupId", "id")); body.put("title", title); body.put("cover", first(target, "cover", "image"));
+                body.put("phone", strategyPhone); body.put("groupId", first(target, "groupId", "id")); body.put("title", title); body.put("cover", first(target, "cover", "image"));
                 body.put("executionMode", mode.value()); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.value());
                 body.put("maxPosition", intValue(maxPosition, 1)); body.put("minNetProfit", doubleValue(minProfit, 0)); body.put("volatilityLimitPercent", doubleValue(volatility, 0)); body.put("cooldownMinutes", intValue(cooldown, 10));
                 JSONObject buy = new JSONObject(); buy.put("enabled", buyEnabled.isChecked()); buy.put("maxPrice", doubleValue(buyPrice, 0)); buy.put("quantity", intValue(buyQuantity, 1)); body.put("buy", buy);
@@ -1574,7 +1580,7 @@ public final class MainActivity extends Activity {
             JSONObject task = tasks.optJSONObject(i);
             if (task == null) continue;
             String status = task.optString("status", "");
-            if (isTerminalTaskStatus(status)) continue;
+            if (isTerminalTaskStatus(status) || "failed".equals(status)) continue;
             String type = retired ? ("immediate_purchase".equals(task.optString("executionMode")) ? "立即买入" : "捡漏") : tradeTypeLabel(task.optString("type", ""));
             LinearLayout row = card();
             row.addView(text(type + " · " + first(task, "title", "name", "groupId", "id") + " · " + tradeStatusLabel(status, retired), 14, ink, Typeface.BOLD));
