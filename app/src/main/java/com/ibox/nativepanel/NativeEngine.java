@@ -59,6 +59,7 @@ public final class NativeEngine {
     private static final String LOTTERY_ACTIVITY_URL = "https://sail-api.ibox.art/activity-service/lottery-activitys";
     private static final String ORDER_LIST_URL = "https://sail-api.ibox.art/order-service/orders";
     private static final String PURCHASE_CONSIGNMENT_ORDER_LIST_URL = "https://sail-api.ibox.art/order-service/purchase-consignment-orders";
+    private static final String ADVANCE_ORDER_CANCEL_URL = "https://sail-api.ibox.art/order-service/advance-orders";
     private static final long CAPTCHA_TTL_MS = 2L * 60L * 1000L;
     private static final long WATCH_NOTIFY_WINDOW_MS = 5L * 60L * 1000L;
     private static final long MARKET_WATCH_MIN_INTERVAL_MS = 15L * 1000L;
@@ -195,6 +196,7 @@ public final class NativeEngine {
         if (route.path.startsWith("/retired-market/tasks/") && "DELETE".equals(verb)) return deleteTradeTask(route.segment(3), "retired_market");
 
         if (route.path.startsWith("/orders/") && route.path.endsWith("/payment") && "POST".equals(verb)) return platformOrderPayment(route.segment(2), body);
+        if (route.path.startsWith("/orders/") && route.path.endsWith("/cancel") && "POST".equals(verb)) return cancelPendingOrder(route.segment(2), body);
         if ("/orders".equals(route.path) && "GET".equals(verb)) return loadOrders(route.query("phone"));
         if (route.path.startsWith("/consignment-orders/") && route.path.endsWith("/cancel") && "POST".equals(verb)) {
             return cancelConsignmentOrder(route.segment(2), body);
@@ -202,6 +204,8 @@ public final class NativeEngine {
         if ("/notifications/bark".equals(route.path) && "GET".equals(verb)) return ok(barkSummary());
         if ("/notifications/bark".equals(route.path) && "PUT".equals(verb)) return saveBark(body);
         if ("/notifications/bark/test".equals(route.path) && "POST".equals(verb)) return testBark();
+        if ("/settings/trade-password".equals(route.path) && "GET".equals(verb)) return tradePasswordSummary();
+        if ("/settings/trade-password".equals(route.path) && "PUT".equals(verb)) return saveTradePassword(body);
 
         throw new NativeException("原生功能路径不存在：" + route.path);
     }
@@ -514,6 +518,7 @@ public final class NativeEngine {
             int orderType = integer(order.opt("orderType"), -1);
             if (orderType == 2) sellOrders.put(order);
             if (orderType == 1) {
+                order.put("type", "wanted_pending");
                 buyOrders.put(order);
                 if (integer(order.opt("orderStatus"), -1) == 0) wantedPendingOrders.put(order);
             }
@@ -1051,8 +1056,6 @@ public final class NativeEngine {
     }
 
     private JSONObject prepareFirstSaleTaskAccount(JSONObject task, String phone, String[] allowedActions) throws Exception {
-        String paymentPassword = task.optString("paymentPassword").trim();
-        if (paymentPassword.isEmpty()) throw new NativeException("首发任务需要支付密码");
         IBoxDirectClient.Account account = account(phone);
         JSONObject detail = firstSaleDetail(account, task.optString("groupId"));
         String saleId = detail.optString("saleId");
@@ -1098,7 +1101,6 @@ public final class NativeEngine {
         if (phones.length() == 0 || phone.isEmpty() || saleId.isEmpty() || !groupId.matches("\\d+")) throw new NativeException("首发任务缺少账号或发售编号");
         if (!contains(phones, phone)) throw new NativeException("首发任务来源账号未包含在执行账号中");
         for (int index = 0; index < phones.length(); index++) account(phones.optString(index));
-        if (task.optString("paymentPassword").trim().isEmpty()) throw new NativeException("首发任务需要支付密码");
         boolean immediate = "immediate".equals(task.optString("mode"));
         task.put("groupId", groupId);
         task.put("saleId", saleId);
@@ -1149,7 +1151,6 @@ public final class NativeEngine {
                 existing.put("phones", mergedPhones);
                 existing.put("sourcePhone", phone);
                 existing.put("paymentPlatformCode", task.optInt("paymentPlatformCode", 0));
-                existing.put("paymentPassword", task.optString("paymentPassword"));
                 existing.put("updatedAt", Instant.now().toString());
                 if (!store.saveFirstSaleTasks(tasks)) throw new NativeException("首发任务保存失败");
                 return ok(existing);
@@ -1338,9 +1339,7 @@ public final class NativeEngine {
             if (sellPrice != Math.rint(sellPrice)) throw new NativeException("量化止损寄售价必须为整数");
             if (quantity != 1) throw new NativeException("量化止损每次只能提交 1 件");
         }
-        if ((sellEnabled || stopLossEnabled) && strategy.optString("consignPassword").trim().isEmpty()) {
-            throw new NativeException("自动量化寄售需要交易密码");
-        }
+        if (sellEnabled || stopLossEnabled) requiredTradePassword(strategy);
     }
 
     private static boolean hasLiveQuantConflict(JSONArray strategies, String phone, String groupId, String exceptId) {
@@ -1535,7 +1534,7 @@ public final class NativeEngine {
                 if (!digitalCollectionId.matches("\\d+")) throw new NativeException("寄售任务需要选择持仓资产");
                 double triggerPrice = decimal(task.opt("triggerPrice"), Double.NaN);
                 if (!Double.isFinite(triggerPrice) || triggerPrice <= 0d) throw new NativeException("寄售任务需要触发行情价");
-                if (task.optString("consignPassword").trim().isEmpty()) throw new NativeException("寄售任务需要交易密码");
+                requiredTradePassword(task);
             }
         } else {
             double minimum = decimal(task.opt("minPrice"), 0d);
@@ -1881,6 +1880,141 @@ public final class NativeEngine {
         return ok(objectOf("cashierLink", cashierLink(account(phone), orderUuid, initiatorType)));
     }
 
+    private JSONObject cancelPendingOrder(String orderIdentifier, JSONObject body) throws Exception {
+        String phone = first(body, "phone", "sourcePhone");
+        if (phone.isEmpty()) throw new NativeException("取消待支付订单需要指定账号");
+        if (orderIdentifier == null || orderIdentifier.trim().isEmpty()) throw new NativeException("待支付订单编号无效");
+        IBoxDirectClient.Account account = account(phone);
+        JSONObject current = loadOrders(phone).optJSONObject("data");
+        JSONObject order = findPendingOrder(current, orderIdentifier.trim());
+        if (order == null) throw new NativeException("平台当前待支付列表中没有该订单");
+
+        String type = order.optString("type");
+        String officialOrderId;
+        String url;
+        if ("collection_pending".equals(type)) {
+            officialOrderId = first(order, "orderUuid", "orderId", "id");
+            if (officialOrderId.isEmpty()) throw new NativeException("普通购买待支付订单缺少订单号");
+            url = ORDER_LIST_URL + "/" + encodePath(officialOrderId) + "/cancel";
+        } else if ("wanted_pending".equals(type)) {
+            officialOrderId = first(order, "id", "orderId");
+            if (!officialOrderId.matches("\\d+")) throw new NativeException("求购待支付订单缺少平台订单编号");
+            url = ADVANCE_ORDER_CANCEL_URL + "/" + encodePath(officialOrderId) + "/cancel";
+        } else {
+            throw new NativeException("平台待支付订单类型无法确认");
+        }
+
+        client.requestAuthenticated(account, "POST", url, null, null, false, "取消待支付订单");
+        String orderUuid = first(order, "orderUuid", "orderUUId", "orderId", "id");
+        JSONObject local = clearCancelledPendingOrderSources(phone, orderUuid);
+        return ok(objectOf(
+                "phone", phone,
+                "orderUuid", orderUuid,
+                "type", type,
+                "local", local
+        ));
+    }
+
+    private JSONObject findPendingOrder(JSONObject data, String identifier) {
+        if (data == null || identifier == null || identifier.isEmpty()) return null;
+        JSONArray[] groups = {
+                data.optJSONArray("collectionPendingOrders"),
+                data.optJSONArray("wantedPendingOrders")
+        };
+        for (JSONArray group : groups) {
+            if (group == null) continue;
+            for (int index = 0; index < group.length(); index++) {
+                JSONObject order = group.optJSONObject(index);
+                if (order == null || integer(order.opt("orderStatus"), -1) != 0) continue;
+                String[] ids = {
+                        first(order, "orderUuid"),
+                        first(order, "orderId"),
+                        first(order, "id"),
+                        first(order, "orderNumber")
+                };
+                for (String id : ids) if (identifier.equals(id)) return order;
+            }
+        }
+        return null;
+    }
+
+    private JSONObject clearCancelledPendingOrderSources(String phone, String orderUuid) throws Exception {
+        int removedTasks = 0;
+        JSONArray tasks = store.getTradeTasks();
+        JSONArray remaining = new JSONArray();
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task != null && phone.equals(task.optString("phone")) && orderUuid.equals(first(task, "orderUuid", "orderId"))) {
+                removedTasks++;
+            } else if (task != null) {
+                remaining.put(task);
+            }
+        }
+        if (removedTasks > 0 && !store.saveTradeTasks(remaining)) throw new NativeException("取消订单成功，但本地交易任务清理失败");
+
+        int strategiesChanged = 0;
+        JSONArray strategies = store.getQuantStrategies();
+        String now = Instant.now().toString();
+        for (int index = 0; index < strategies.length(); index++) {
+            JSONObject strategy = strategies.optJSONObject(index);
+            if (strategy == null || !phone.equals(strategy.optString("phone")) || !orderUuid.equals(first(strategy, "orderUuid", "orderId"))) continue;
+            strategy.put("enabled", false);
+            strategy.put("status", "cancelled");
+            strategy.put("lastResult", "payment_order_cancelled");
+            strategy.put("cancelledAt", now);
+            strategy.remove("orderUuid");
+            strategy.remove("cashierLink");
+            strategy.remove("paymentStatus");
+            addEventQuietly(strategy, "payment_order_cancelled", "待支付订单已取消");
+            strategiesChanged++;
+        }
+        if (strategiesChanged > 0 && !store.saveQuantStrategies(strategies)) throw new NativeException("取消订单成功，但量化策略状态保存失败");
+
+        int firstSaleRunsChanged = clearCancelledFirstSaleRuns(phone, orderUuid, now);
+        return objectOf(
+                "removedTradeTasks", removedTasks,
+                "updatedQuantStrategies", strategiesChanged,
+                "updatedFirstSaleRuns", firstSaleRunsChanged
+        );
+    }
+
+    private int clearCancelledFirstSaleRuns(String phone, String orderUuid, String now) throws Exception {
+        JSONArray tasks = store.getFirstSaleTasks();
+        int changed = 0;
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            JSONObject runs = task == null ? null : task.optJSONObject("runs");
+            JSONObject run = runs == null ? null : runs.optJSONObject(phone);
+            if (run == null || !orderUuid.equals(first(run, "orderUuid", "orderId"))) continue;
+            run.put("status", "cancelled");
+            run.put("lastResult", "payment_order_cancelled");
+            run.put("message", "待支付订单已取消");
+            run.put("updatedAt", now);
+            run.remove("orderUuid");
+            run.remove("cashierLink");
+            run.remove("paymentStatus");
+            int total = 0;
+            int cancelled = 0;
+            int completed = 0;
+            Iterator<String> phones = runs.keys();
+            while (phones.hasNext()) {
+                JSONObject current = runs.optJSONObject(phones.next());
+                if (current == null) continue;
+                total++;
+                String status = current.optString("status");
+                if ("cancelled".equals(status)) cancelled++;
+                if ("payment_pending".equals(status) || "submitted".equals(status)) completed++;
+            }
+            task.put("enabled", false);
+            task.put("status", cancelled == total && total > 0 ? "cancelled" : completed > 0 ? "partial" : "failed");
+            task.put("lastResult", "payment_order_cancelled");
+            task.put("updatedAt", now);
+            changed++;
+        }
+        if (changed > 0 && !store.saveFirstSaleTasks(tasks)) throw new NativeException("取消订单成功，但首发任务状态保存失败");
+        return changed;
+    }
+
     private JSONObject deleteTradeTask(String id, String kind) throws Exception {
         JSONArray tasks = store.getTradeTasks();
         JSONArray remaining = new JSONArray();
@@ -2035,6 +2169,24 @@ public final class NativeEngine {
         if (!config.optBoolean("enabled", false)) throw new NativeException("请先保存并启用 Bark 通知");
         sendBark("iBox Bark 已连接", "通知推送已启用。", "active");
         return ok(new JSONObject());
+    }
+
+    private JSONObject tradePasswordSummary() throws JSONException {
+        return ok(objectOf("configured", !store.getTradePassword().isEmpty()));
+    }
+
+    private JSONObject saveTradePassword(JSONObject body) throws Exception {
+        String password = first(body, "tradePassword", "password").trim();
+        if (password.isEmpty()) throw new NativeException("请输入交易密码");
+        if (!store.saveTradePassword(password)) throw new NativeException("交易密码保存失败");
+        return tradePasswordSummary();
+    }
+
+    private String requiredTradePassword(JSONObject legacyTask) throws NativeException {
+        String password = store.getTradePassword();
+        if (password.isEmpty()) password = first(legacyTask, "consignPassword", "paymentPassword").trim();
+        if (password.isEmpty()) throw new NativeException("请先在设置中保存交易密码");
+        return password;
     }
 
     private void refreshMarketWatches(boolean force) throws Exception {
@@ -2586,8 +2738,7 @@ public final class NativeEngine {
         if ("consignment".equals(type)) {
             String collectionId = plan.optString("digitalCollectionId");
             int paymentCode = plan.optInt("paymentPlatformCode", 0);
-            String password = task.optString("consignPassword").trim();
-            if (password.isEmpty()) throw new NativeException("寄售任务缺少交易密码");
+            String password = requiredTradePassword(task);
             if (collectionId.isEmpty() || paymentCode <= 0) throw new NativeException("寄售预检结果无效");
             JSONObject request = objectOf(
                     "digitalCollectionId", integer(collectionId, 0),
@@ -2794,8 +2945,7 @@ public final class NativeEngine {
         JSONObject freshConfig = marketTradePublicConfig(account);
         String priceError = marketTradeConsignmentPriceError(salePrice, freshConfig);
         if (!priceError.isEmpty()) throw new NativeException(priceError);
-        String password = strategy.optString("consignPassword").trim();
-        if (password.isEmpty()) throw new NativeException("量化寄售缺少交易密码");
+        String password = requiredTradePassword(strategy);
         int paymentCode = paymentPlatformCode(account, 1, 0);
         JSONObject request = objectOf(
                 "digitalCollectionId", integer(digitalCollectionId, 0),

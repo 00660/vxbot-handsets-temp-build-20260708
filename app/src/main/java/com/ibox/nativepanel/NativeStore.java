@@ -32,6 +32,7 @@ public final class NativeStore {
     private static final String KEY_FIRST_SALE_TASKS = "first_sale_tasks_json";
     private static final String KEY_ASSET_COSTS = "asset_costs_json";
     private static final String KEY_BARK_CONFIG = "bark_config_json";
+    private static final String KEY_TRADE_PASSWORD = "trade_password";
     private static final Object LOCK = new Object();
 
     private final SharedPreferences preferences;
@@ -224,6 +225,28 @@ public final class NativeStore {
         return saveJsonArray(KEY_FIRST_SALE_TASKS, tasks);
     }
 
+    public String getTradePassword() {
+        synchronized (LOCK) {
+            return trim(preferences.getString(KEY_TRADE_PASSWORD, ""));
+        }
+    }
+
+    public boolean saveTradePassword(String password) {
+        synchronized (LOCK) {
+            String value = trim(password);
+            if (value.isEmpty()) return false;
+            JSONArray strategies = stripTaskPasswords(readArray(KEY_QUANT_STRATEGIES));
+            JSONArray tradeTasks = stripTaskPasswords(readArray(KEY_TRADE_TASKS));
+            JSONArray firstSaleTasks = stripTaskPasswords(readArray(KEY_FIRST_SALE_TASKS));
+            return preferences.edit()
+                    .putString(KEY_TRADE_PASSWORD, value)
+                    .putString(KEY_QUANT_STRATEGIES, strategies.toString())
+                    .putString(KEY_TRADE_TASKS, tradeTasks.toString())
+                    .putString(KEY_FIRST_SALE_TASKS, firstSaleTasks.toString())
+                    .commit();
+        }
+    }
+
     public double getAssetCost(String phone, String assetId) {
         synchronized (LOCK) {
             JSONObject accountCosts = readObject(KEY_ASSET_COSTS).optJSONObject(trim(phone));
@@ -399,6 +422,17 @@ public final class NativeStore {
             return new JSONObject();
         }
         return config;
+    }
+
+    private JSONArray stripTaskPasswords(JSONArray source) {
+        JSONArray sanitized = copyArray(source);
+        for (int index = 0; index < sanitized.length(); index++) {
+            JSONObject item = sanitized.optJSONObject(index);
+            if (item == null) continue;
+            item.remove("consignPassword");
+            item.remove("paymentPassword");
+        }
+        return sanitized;
     }
 
     private JSONArray copyArray(JSONArray source) {

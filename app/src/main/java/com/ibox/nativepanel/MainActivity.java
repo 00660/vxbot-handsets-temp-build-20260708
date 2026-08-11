@@ -1202,8 +1202,7 @@ public final class MainActivity extends Activity {
         EditText cooldown = numberInput("触发后冷却分钟", existing == null ? "10" : number(existing, "cooldownMinutes", "10"));
         EditText interval = numberInput("监控间隔", existing == null ? "15" : number(existing, "intervalValue", "15"));
         OptionField intervalUnit = optionField("间隔单位", new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
-        EditText password = passwordInput("卖出交易密码");
-        form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit)); form.addView(labelled("卖出交易密码", password));
+        form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit));
         showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, "保存", dialog -> {
             JSONObject body = new JSONObject();
             try {
@@ -1213,7 +1212,6 @@ public final class MainActivity extends Activity {
                 JSONObject buy = new JSONObject(); buy.put("enabled", buyEnabled.isChecked()); buy.put("maxPrice", doubleValue(buyPrice, 0)); buy.put("quantity", intValue(buyQuantity, 1)); body.put("buy", buy);
                 JSONObject sell = new JSONObject(); sell.put("enabled", sellEnabled.isChecked()); sell.put("minPrice", doubleValue(sellTrigger, 0)); sell.put("sellPrice", intValue(sellPrice, 0)); sell.put("quantity", intValue(sellQuantity, 1)); body.put("sell", sell);
                 JSONObject stopLoss = new JSONObject(); stopLoss.put("enabled", stopLossEnabled.isChecked()); stopLoss.put("triggerPrice", doubleValue(stopTrigger, 0)); stopLoss.put("sellPrice", intValue(stopPrice, 0)); body.put("stopLoss", stopLoss);
-                if (!password.getText().toString().trim().isEmpty()) body.put("consignPassword", password.getText().toString().trim());
             } catch (Exception ignored) { }
             String path = existing == null ? "/native/quant/strategies" : "/native/quant/strategies/" + Uri.encode(existing.optString("id"));
             request("保存策略", existing == null ? "POST" : "PUT", path, body, result -> { dialog.dismiss(); selectPage("quant"); });
@@ -1420,7 +1418,6 @@ public final class MainActivity extends Activity {
         EditText price = numberInput("寄售价格", Double.isFinite(floorPrice) && floorPrice == Math.rint(floorPrice) ? compactNumber(floorPrice) : "");
         price.setInputType(InputType.TYPE_CLASS_NUMBER);
         form.addView(price, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
-        EditText password = passwordInput("寄售交易密码"); form.addView(password, new LinearLayout.LayoutParams(-1, dp(46)));
         showProjectDialog("确认寄售", form, "确认寄售", dialog -> {
             if (selectedAsset[0] == null) { toast("请选择可寄售资产"); return; }
             double salePrice = doubleValue(price, Double.NaN);
@@ -1432,17 +1429,13 @@ public final class MainActivity extends Activity {
                 toast("当前无可用地板价，暂不能立即寄售");
                 return;
             }
-            if (password.getText().toString().trim().isEmpty()) {
-                toast("请输入寄售交易密码");
-                return;
-            }
             JSONObject body = new JSONObject();
             try {
                 body.put("type", "consignment"); body.put("phone", phone); body.put("groupId", first(asset, "groupId", "digitalCollectionGroupId", "collectionGroupId")); body.put("title", first(asset, "name", "title")); body.put("cover", first(asset, "cover", "image"));
                 body.put("price", salePrice); body.put("quantity", 1); body.put("autoStart", true); body.put("immediate", true);
                 String instanceId = selectedAsset[0].optString("instanceId");
                 if (!instanceId.matches("\\d+")) { toast("所选持仓缺少实例编号，请重新读取资产"); return; }
-                body.put("digitalCollectionId", instanceId); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds"); body.put("consignPassword", password.getText().toString().trim());
+                body.put("digitalCollectionId", instanceId); body.put("triggerPrice", floorPrice); body.put("monitorIntervalValue", 5); body.put("monitorIntervalUnit", "seconds");
             } catch (Exception ignored) { }
             request("提交寄售", "POST", "/native/market/trade/tasks", body, result -> {
                 dialog.dismiss();
@@ -1789,6 +1782,26 @@ public final class MainActivity extends Activity {
             header.addView(text(money(first(order, "price", "salePrice", "totalPrice", "amount")), 13, pending ? amber : success, Typeface.BOLD), new LinearLayout.LayoutParams(-2, -2));
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
             if (pending && !orderId.isEmpty()) {
+                LinearLayout actions = horizontal(Color.TRANSPARENT);
+                actions.setGravity(Gravity.CENTER_VERTICAL);
+                Button cancel = button("取消订单", false);
+                cancel.setTextColor(danger);
+                cancel.setOnClickListener(v -> showProjectDialog(
+                        "取消待支付订单",
+                        text("确认取消该待支付订单？取消后无法恢复，频繁取消可能触发平台禁购限制。", 14, muted, Typeface.NORMAL),
+                        "确认取消",
+                        dialog -> {
+                            dialog.dismiss();
+                            JSONObject body = new JSONObject();
+                            try {
+                                body.put("phone", first(order, "phone", selectedPhone));
+                            } catch (Exception ignored) {
+                            }
+                            request("取消待支付订单", "POST", "/native/orders/" + Uri.encode(orderId) + "/cancel", body,
+                                    result -> loadTradeDashboard(true));
+                        }
+                ));
+                actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(40), 1));
                 Button payment = button("进入支付", true);
                 payment.setOnClickListener(v -> {
                     JSONObject body = new JSONObject();
@@ -1800,7 +1813,10 @@ public final class MainActivity extends Activity {
                     request("获取支付链接", "POST", "/native/orders/" + Uri.encode(orderId) + "/payment", body,
                             result -> openWallet(first(result.optJSONObject("data"), "cashierLink", "paymentUrl")));
                 });
-                row.addView(payment, marginParams(-1, dp(40), 0, dp(10), 0, 0));
+                LinearLayout.LayoutParams paymentParams = new LinearLayout.LayoutParams(0, dp(40), 1);
+                paymentParams.setMargins(dp(8), 0, 0, 0);
+                actions.addView(payment, paymentParams);
+                row.addView(actions, marginParams(-1, dp(40), 0, dp(10), 0, 0));
             }
             target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
         }
@@ -2116,9 +2132,8 @@ public final class MainActivity extends Activity {
         LinearLayout form = vertical(Color.TRANSPARENT);
         OptionField mode = optionField("提交方式", new String[]{initialMode}, initialMode);
         EditText count = numberInput("购买数量", "1"); EditText paymentCode = numberInput("支付通道编号", "");
-        EditText paymentPassword = passwordInput("支付密码");
         form.addView(labelled("提交方式", mode));
-        form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentPassword, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        form.addView(count, marginParams(-1, dp(46), 0, 0, 0, dp(8))); form.addView(paymentCode, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         List<CheckBox> taskAccounts = accountSelection(form);
         showProjectDialog("加入首发抢购", form, "保存任务", dialog -> {
             JSONObject body = new JSONObject();
@@ -2129,7 +2144,6 @@ public final class MainActivity extends Activity {
                 body.put("cover", first(item, "cover", "image", "imageUrl", "coverUrl"));
                 body.put("num", intValue(count, 1));
                 body.put("paymentPlatformCode", intValue(paymentCode, 0));
-                body.put("paymentPassword", paymentPassword.getText().toString().trim());
                 body.put("phones", selectedPhones(taskAccounts));
                 body.put("sourcePhone", selectedPhone);
                 body.put("mode", mode.value());
@@ -2156,6 +2170,27 @@ public final class MainActivity extends Activity {
         test.setOnClickListener(v -> request("发送 Bark 测试", "POST", "/native/notifications/bark/test", null, result -> toast("测试请求已提交")));
         content.addView(bark, marginParams(-1, -2, 0, 0, 0, dp(12)));
 
+        LinearLayout tradeConfig = card();
+        tradeConfig.addView(text("交易配置", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
+        EditText tradePassword = passwordInput("输入交易密码");
+        tradeConfig.addView(labelled("预设交易密码", tradePassword));
+        TextView tradePasswordState = text("读取配置中", 12, muted, Typeface.NORMAL);
+        tradeConfig.addView(tradePasswordState, marginParams(-1, -2, 0, dp(2), 0, dp(8)));
+        Button saveTradePassword = button("保存交易密码", true);
+        tradeConfig.addView(saveTradePassword, new LinearLayout.LayoutParams(-1, dp(42)));
+        saveTradePassword.setOnClickListener(v -> {
+            String password = tradePassword.getText().toString().trim();
+            if (password.isEmpty()) { toast("请输入交易密码"); return; }
+            JSONObject body = new JSONObject();
+            try { body.put("tradePassword", password); } catch (Exception ignored) { }
+            request("保存交易密码", "PUT", "/native/settings/trade-password", body, result -> {
+                tradePassword.setText("");
+                fillTradePassword(result, tradePassword, tradePasswordState);
+                toast("交易密码已保存");
+            });
+        });
+        content.addView(tradeConfig, marginParams(-1, -2, 0, 0, 0, dp(12)));
+
         LinearLayout backgroundCard = card();
         backgroundCard.addView(text("后台同步", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(8)));
         ProjectToggle backgroundSync = toggle("保持状态通知", backgroundSyncEnabled());
@@ -2174,16 +2209,22 @@ public final class MainActivity extends Activity {
             }
         });
         content.addView(backgroundCard, marginParams(-1, -2, 0, 0, 0, dp(12)));
-
-        Button addAccount = button("短信登录 / 添加账号", true);
-        addAccount.setOnClickListener(v -> showLoginDialog());
-        content.addView(addAccount, marginParams(-1, dp(44), 0, 0, 0, dp(10)));
         load.performClick();
+        request("读取交易密码状态", "GET", "/native/settings/trade-password", null,
+                result -> fillTradePassword(result, tradePassword, tradePasswordState));
     }
 
     private void fillBark(JSONObject result, ProjectToggle enabled, EditText server, EditText key, EditText hour) {
         JSONObject data = result.optJSONObject("data"); if (data == null) data = result;
         enabled.setChecked(data.optBoolean("enabled", false)); server.setText(data.optString("server", "")); key.setText(data.optString("deviceKey", "")); hour.setText(String.valueOf(data.optInt("dailySummaryHour", 9)));
+    }
+
+    private void fillTradePassword(JSONObject result, EditText password, TextView state) {
+        JSONObject data = result.optJSONObject("data"); if (data == null) data = result;
+        boolean configured = data.optBoolean("configured", false);
+        password.setHint(configured ? "已保存，重新输入可覆盖" : "输入交易密码");
+        state.setText(configured ? "已保存，寄售和量化任务将自动使用" : "未保存，寄售和量化任务无法启动");
+        state.setTextColor(configured ? success : danger);
     }
 
     private void showJsonDialog(String title, JSONObject data) {
@@ -2705,6 +2746,7 @@ public final class MainActivity extends Activity {
         else if ("verification_required".equals(status)) label = "需要人机验证";
         else if ("payment_pending".equals(status)) label = "待支付";
         else if ("submitted".equals(status)) label = "已提交";
+        else if ("cancelled".equals(status)) label = "已取消";
         else if ("failed".equals(status)) label = "失败";
         else label = "等待同步";
         String message = first(run, "message");
