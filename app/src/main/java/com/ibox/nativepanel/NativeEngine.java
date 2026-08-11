@@ -3388,12 +3388,7 @@ public final class NativeEngine {
     }
 
     private static String ownedCollectionId(JSONObject entry, String groupId) {
-        String instanceId = first(entry, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID");
-        if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
-        JSONObject collection = entry == null ? null : entry.optJSONObject("digitalCollection");
-        instanceId = first(collection, "digitalCollectionId", "digitalCollectionID", "collectionId", "collectionID", "id");
-        if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
-        instanceId = first(entry, "id");
+        String instanceId = first(entry, "id");
         if (instanceId.matches("\\d+") && !instanceId.equals(groupId)) return instanceId;
         return "";
     }
