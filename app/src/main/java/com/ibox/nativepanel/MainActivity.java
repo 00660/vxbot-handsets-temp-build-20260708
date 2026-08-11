@@ -551,28 +551,40 @@ public final class MainActivity extends Activity {
             ImageView cover = coverImage(first(item, "cover", "image", "imageUrl", "coverUrl"), name);
             header.addView(cover, marginParams(dp(52), dp(52), 0, 0, dp(12), 0));
             LinearLayout info = vertical(Color.TRANSPARENT);
-            info.addView(text(name, 14, ink, Typeface.BOLD));
+            TextView nameView = text(name, 14, ink, Typeface.BOLD);
+            nameView.setSingleLine(true);
+            nameView.setEllipsize(TextUtils.TruncateAt.END);
+            nameView.setMinWidth(0);
+            info.addView(nameView);
             String position = "持仓 " + compactNumber(quantity) + " 件 · 成本 " + (hasCost ? money(String.valueOf(unitCost)) : "--");
-            info.addView(text(position, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(3), 0, 0));
+            TextView positionView = text(position, 11, muted, Typeface.NORMAL);
+            positionView.setSingleLine(true);
+            positionView.setEllipsize(TextUtils.TruncateAt.END);
+            positionView.setMinWidth(0);
+            info.addView(positionView, marginParams(-1, -2, 0, dp(3), 0, 0));
             if (consigning) {
                 info.addView(text(consignmentStateVerified ? "寄售中" : "寄售状态待同步", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
             }
-            header.addView(info, new LinearLayout.LayoutParams(0, -2, 0.76f));
+            header.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
             valuation.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
             TextView floor = text(hasPrice ? money(String.valueOf(floorPrice)) : (delisted ? "已退市" : "--"), 14, hasPrice ? success : muted, Typeface.BOLD);
             floor.setGravity(Gravity.RIGHT);
+            floor.setSingleLine(true);
             floor.setMaxLines(1);
             floor.setEllipsize(TextUtils.TruncateAt.END);
             floor.setIncludeFontPadding(false);
-            valuation.addView(floor, new LinearLayout.LayoutParams(-1, -2));
+            floor.setMinWidth(0);
+            valuation.addView(floor, new LinearLayout.LayoutParams(-2, -2));
             TextView floorLabel = text(hasPrice ? "地板价" : "", 10, muted, Typeface.NORMAL);
             floorLabel.setGravity(Gravity.RIGHT);
+            floorLabel.setSingleLine(true);
             floorLabel.setMaxLines(1);
             floorLabel.setEllipsize(TextUtils.TruncateAt.END);
             floorLabel.setIncludeFontPadding(false);
-            valuation.addView(floorLabel, marginParams(-1, -2, 0, dp(3), 0, 0));
-            header.addView(valuation, new LinearLayout.LayoutParams(0, dp(52), 0.24f));
+            floorLabel.setMinWidth(0);
+            valuation.addView(floorLabel, marginParams(-2, -2, 0, dp(3), 0, 0));
+            header.addView(valuation, new LinearLayout.LayoutParams(-2, dp(52)));
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
             LinearLayout footer = horizontal(Color.TRANSPARENT);
             footer.setGravity(Gravity.CENTER_VERTICAL);
@@ -596,7 +608,7 @@ public final class MainActivity extends Activity {
                 LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(0, dp(32), 0.42f);
                 cancelParams.setMargins(dp(6), 0, 0, 0);
                 footer.addView(cancel, cancelParams);
-            } else if (!consigning && consignmentStateVerified) {
+            } else if (!delisted && !consigning && consignmentStateVerified) {
                 Button consignment = button("寄售", false);
                 consignment.setMinWidth(0);
                 consignment.setMinimumWidth(0);
