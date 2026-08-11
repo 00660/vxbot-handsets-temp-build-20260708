@@ -1500,6 +1500,7 @@ public final class MainActivity extends Activity {
             sourceTarget.removeAllViews();
         }
         final JSONArray[] tradeTasks = new JSONArray[1];
+        final JSONArray[] tradeSyncFailures = new JSONArray[1];
         final JSONArray[] retiredTasks = new JSONArray[1];
         final JSONObject[] ordersData = new JSONObject[1];
         final boolean[] completed = new boolean[3];
@@ -1517,6 +1518,11 @@ public final class MainActivity extends Activity {
                 int visible = renderTradeTaskRows(tradeTasks[0], false, taskTarget);
                 visible += renderTradeTaskRows(retiredTasks[0], true, taskTarget);
                 if (visible == 0) taskTarget.addView(empty("暂无市场交易任务"));
+                if (tradeSyncFailures[0] != null && tradeSyncFailures[0].length() > 0) {
+                    JSONObject failure = tradeSyncFailures[0].optJSONObject(0);
+                    String message = failure == null ? "平台寄售状态同步失败" : first(failure, "message", "groupId");
+                    taskTarget.addView(text("寄售状态实时同步失败 · " + message, 12, danger, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+                }
             }
             if (failed[2]) {
                 renderRetry(orderTarget, "订单同步失败", () -> loadTradeDashboard(true));
@@ -1533,7 +1539,9 @@ public final class MainActivity extends Activity {
             }
         };
         request("同步交易任务", "GET", "/native/market/trade/tasks", null, result -> {
-            tradeTasks[0] = findArray(result.optJSONObject("data"), "tasks", "items", "list");
+            JSONObject data = result.optJSONObject("data");
+            tradeTasks[0] = findArray(data, "tasks", "items", "list");
+            tradeSyncFailures[0] = findArray(data == null ? null : data.optJSONObject("consignmentSync"), "failures");
             completed[0] = true;
             render.run();
         }, () -> {

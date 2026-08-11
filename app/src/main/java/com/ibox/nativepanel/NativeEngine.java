@@ -176,7 +176,7 @@ public final class NativeEngine {
         if (route.path.startsWith("/quant/strategies/") && route.path.endsWith("/disable") && "POST".equals(verb)) return setQuantEnabled(route.segment(3), false);
         if (route.path.startsWith("/quant/strategies/") && "DELETE".equals(verb)) return deleteQuantStrategy(route.segment(3));
 
-        if ("/market/trade/tasks".equals(route.path) && "GET".equals(verb)) return ok(objectOf("tasks", marketTradeTasks()));
+        if ("/market/trade/tasks".equals(route.path) && "GET".equals(verb)) return marketTradeTaskState();
         if ("/market/trade/tasks".equals(route.path) && "POST".equals(verb)) return createTradeTask(body, "market_trade");
         if (route.path.startsWith("/market/trade/tasks/") && route.path.contains("/captcha/")) return taskCaptcha("market_trade", route, verb, body);
         if (route.path.startsWith("/market/trade/tasks/") && route.path.endsWith("/enable") && "POST".equals(verb)) return setTradeEnabled(route.segment(4), true, "market_trade");
@@ -1619,6 +1619,75 @@ public final class NativeEngine {
             if (task != null && "market_trade".equals(task.optString("localType", "market_trade"))) result.put(task);
         }
         return result;
+    }
+
+    private JSONObject marketTradeTaskState() throws Exception {
+        JSONObject sync = reconcileConsignmentTasksFromPlatform();
+        return ok(objectOf("tasks", marketTradeTasks(), "consignmentSync", sync));
+    }
+
+    private JSONObject reconcileConsignmentTasksFromPlatform() throws JSONException {
+        JSONArray tasks = store.getTradeTasks();
+        Map<String, Set<String>> activeInstances = new HashMap<>();
+        Set<String> failedGroups = new HashSet<>();
+        JSONArray failures = new JSONArray();
+        int checkedGroups = 0;
+
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (!finishedConsignmentTask(task)) continue;
+            String phone = task.optString("phone");
+            String groupId = task.optString("groupId");
+            String key = phone + ":" + groupId;
+            if (activeInstances.containsKey(key) || failedGroups.contains(key)) continue;
+            try {
+                JSONArray active = activeConsignmentAssets(account(phone), groupId);
+                Set<String> ids = new HashSet<>();
+                for (int activeIndex = 0; activeIndex < active.length(); activeIndex++) {
+                    String instanceId = ownedCollectionId(active.optJSONObject(activeIndex), groupId);
+                    if (!instanceId.matches("\\d+")) throw new NativeException("平台寄售实例编号无效");
+                    ids.add(instanceId);
+                }
+                activeInstances.put(key, ids);
+                checkedGroups++;
+            } catch (Exception error) {
+                failedGroups.add(key);
+                failures.put(objectOf("phone", phone, "groupId", groupId, "message", message(error)));
+            }
+        }
+
+        JSONArray remaining = new JSONArray();
+        int removedTasks = 0;
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null) continue;
+            if (finishedConsignmentTask(task)) {
+                String key = task.optString("phone") + ":" + task.optString("groupId");
+                Set<String> ids = activeInstances.get(key);
+                if (ids != null && !ids.contains(task.optString("digitalCollectionId"))) {
+                    removedTasks++;
+                    continue;
+                }
+            }
+            remaining.put(task);
+        }
+        if (removedTasks > 0 && !store.saveTradeTasks(remaining)) {
+            failures.put(objectOf("message", "本地寄售任务状态保存失败"));
+            removedTasks = 0;
+        }
+        return objectOf(
+                "checkedAt", Instant.now().toString(),
+                "checkedGroups", checkedGroups,
+                "removedTasks", removedTasks,
+                "failures", failures
+        );
+    }
+
+    private static boolean finishedConsignmentTask(JSONObject task) {
+        if (task == null || !"consignment".equals(task.optString("type")) || task.optBoolean("enabled", false)
+                || !task.optString("digitalCollectionId").matches("\\d+")) return false;
+        String status = task.optString("status");
+        return "submitted".equals(status) || "cancelled".equals(status) || "failed".equals(status);
     }
 
     private JSONObject setTradeEnabled(String id, boolean enabled, String kind) throws Exception {
