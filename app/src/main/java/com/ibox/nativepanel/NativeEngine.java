@@ -295,6 +295,9 @@ public final class NativeEngine {
             }
             return ok(assets);
         } catch (Exception error) {
+            if (isExpiredLogin(error)) {
+                throw new NativeException("账号登录已失效，请重新登录后同步资产");
+            }
             JSONObject cache = stored == null ? null : stored.optJSONObject("assetCache");
             JSONObject snapshot = cache == null ? null : cache.optJSONObject("data");
             if (snapshot == null) throw error;
@@ -315,6 +318,11 @@ public final class NativeEngine {
             }
             return ok(fallback);
         }
+    }
+
+    private static boolean isExpiredLogin(Exception error) {
+        return error instanceof IBoxDirectClient.ApiException
+                && "401".equals(((IBoxDirectClient.ApiException) error).businessCode);
     }
 
     private void attachActiveConsignmentDetails(IBoxDirectClient.Account account, JSONObject assets) throws Exception {
