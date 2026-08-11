@@ -1182,8 +1182,6 @@ public final class MainActivity extends Activity {
         scroll.addView(form, new ScrollView.LayoutParams(-1, -2));
         String title = first(target, "name", "title", "groupId", "id");
         form.addView(text(title, 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(12)));
-        OptionField mode = optionField("执行方式", new String[]{"monitor", "live"}, existing == null ? "monitor" : existing.optString("executionMode", "monitor"));
-        form.addView(labelled("执行方式", mode));
         ProjectToggle buyEnabled = toggle("启用买入", existing == null || existing.optJSONObject("buy") == null || existing.optJSONObject("buy").optBoolean("enabled", true));
         EditText buyPrice = numberInput("最高买入价", existing == null ? moneyValue(first(target, "floorPrice", "price")) : number(existing.optJSONObject("buy"), "maxPrice", ""));
         EditText buyQuantity = numberInput("买入数量", existing == null ? "1" : number(existing.optJSONObject("buy"), "quantity", "1"));
@@ -1204,13 +1202,13 @@ public final class MainActivity extends Activity {
         EditText cooldown = numberInput("触发后冷却分钟", existing == null ? "10" : number(existing, "cooldownMinutes", "10"));
         EditText interval = numberInput("监控间隔", existing == null ? "15" : number(existing, "intervalValue", "15"));
         OptionField intervalUnit = optionField("间隔单位", new String[]{"seconds", "minutes", "hours"}, existing == null ? "seconds" : existing.optString("intervalUnit", "seconds"));
-        EditText password = passwordInput("交易密码（真实执行时填写）");
-        form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit)); form.addView(labelled("交易密码（真实执行时填写）", password));
+        EditText password = passwordInput("卖出交易密码");
+        form.addView(labelled("最大持仓", maxPosition)); form.addView(labelled("最低单件预期净利", minProfit)); form.addView(labelled("单周期最大波动 %", volatility)); form.addView(labelled("触发后冷却分钟", cooldown)); form.addView(labelled("监控间隔", interval)); form.addView(labelled("间隔单位", intervalUnit)); form.addView(labelled("卖出交易密码", password));
         showProjectDialog(existing == null ? "配置量化策略" : "修改量化策略", scroll, "保存", dialog -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("phone", strategyPhone); body.put("groupId", first(target, "groupId", "id")); body.put("title", title); body.put("cover", first(target, "cover", "image"));
-                body.put("executionMode", mode.value()); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.value());
+                body.put("executionMode", "live"); body.put("intervalValue", intValue(interval, 15)); body.put("intervalUnit", intervalUnit.value());
                 body.put("maxPosition", intValue(maxPosition, 1)); body.put("minNetProfit", doubleValue(minProfit, 0)); body.put("volatilityLimitPercent", doubleValue(volatility, 0)); body.put("cooldownMinutes", intValue(cooldown, 10));
                 JSONObject buy = new JSONObject(); buy.put("enabled", buyEnabled.isChecked()); buy.put("maxPrice", doubleValue(buyPrice, 0)); buy.put("quantity", intValue(buyQuantity, 1)); body.put("buy", buy);
                 JSONObject sell = new JSONObject(); sell.put("enabled", sellEnabled.isChecked()); sell.put("minPrice", doubleValue(sellTrigger, 0)); sell.put("sellPrice", intValue(sellPrice, 0)); sell.put("quantity", intValue(sellQuantity, 1)); body.put("sell", sell);
@@ -2507,8 +2505,6 @@ public final class MainActivity extends Activity {
     }
 
     private String optionLabel(String value) {
-        if ("monitor".equals(value)) return "仅监控";
-        if ("live".equals(value)) return "真实执行";
         if ("seconds".equals(value)) return "秒";
         if ("minutes".equals(value)) return "分钟";
         if ("hours".equals(value)) return "小时";
@@ -2774,7 +2770,7 @@ public final class MainActivity extends Activity {
         return "平台已记录";
     }
     private String strategyStatus(String status) { if (status == null) return "待处理"; switch (status) { case "monitoring": return "监控中"; case "paused": return "已暂停"; case "verification_required": return "需验证"; case "payment_pending": return "待支付"; case "submitted": return "已提交"; case "cancelled": return "已取消"; case "scheduled": return "已排程"; case "waiting_price": return "等待行情"; default: return status.isEmpty() ? "待处理" : status; } }
-    private String strategyMeta(JSONObject strategy) { return (strategy.optString("executionMode", "monitor").equals("live") ? "真实执行" : "仅监控") + " · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
+    private String strategyMeta(JSONObject strategy) { return "自动执行 · 账号 " + first(strategy, "phone", "sourcePhone") + " · 行情 " + money(first(strategy, "latestFloorPrice", "floorPrice")) + "\n买入 " + money(first(strategy.optJSONObject("buy"), "maxPrice")) + " · 卖出 " + money(first(strategy.optJSONObject("sell"), "sellPrice")) + " · 更新 " + time(first(strategy, "updatedAt", "lastCheckAt")); }
     private JSONArray findArray(JSONObject object, String... keys) { if (object == null) return null; for (String key : keys) { JSONArray array = object.optJSONArray(key); if (array != null) return array; } return null; }
     private JSONArray arrayOrEmpty(JSONArray source) { return source == null ? new JSONArray() : source; }
     private String pretty(JSONObject object) { if (object == null) return "暂无数据"; StringBuilder output = new StringBuilder(); Iterator<String> keys = object.keys(); while (keys.hasNext()) { String key = keys.next(); Object value = object.opt(key); output.append(key).append("：").append(value).append('\n'); } return output.toString(); }

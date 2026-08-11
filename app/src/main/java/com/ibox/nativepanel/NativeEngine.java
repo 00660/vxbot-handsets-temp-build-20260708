@@ -167,7 +167,7 @@ public final class NativeEngine {
         if (route.path.startsWith("/lottery/auto/") && route.path.endsWith("/enable") && "POST".equals(verb)) return setLotteryEnabled(route.segment(3), true);
         if (route.path.startsWith("/lottery/auto/") && route.path.endsWith("/disable") && "POST".equals(verb)) return setLotteryEnabled(route.segment(3), false);
 
-        if ("/quant/strategies".equals(route.path) && "GET".equals(verb)) return ok(objectOf("strategies", store.getQuantStrategies()));
+        if ("/quant/strategies".equals(route.path) && "GET".equals(verb)) return ok(objectOf("strategies", quantStrategyList()));
         if ("/quant/strategies".equals(route.path) && "POST".equals(verb)) return createQuantStrategy(body);
         if (route.path.startsWith("/quant/strategies/") && route.path.endsWith("/events") && "GET".equals(verb)) return quantEvents(route.segment(3));
         if (route.path.startsWith("/quant/strategies/") && route.path.contains("/captcha/")) return taskCaptcha("quant", route, verb, body);
@@ -1289,8 +1289,8 @@ public final class NativeEngine {
         if (!phone.matches("\\d{11}")) throw new NativeException("量化策略账号无效");
         account(phone);
         if (!groupId.matches("\\d+")) throw new NativeException("量化藏品编号无效");
-        String executionMode = strategy.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
-        if (!("monitor".equals(executionMode) || "live".equals(executionMode))) throw new NativeException("量化执行方式无效");
+        String executionMode = strategy.optString("executionMode", "live").trim().toLowerCase(Locale.ROOT);
+        if (!"live".equals(executionMode)) throw new NativeException("量化策略仅支持自动执行");
         int intervalValue = strategy.has("intervalValue") ? integer(strategy.opt("intervalValue"), -1) : 15;
         if (intervalValue < 1 || intervalValue > 86_400) throw new NativeException("量化监控间隔无效");
         String intervalUnit = strategy.optString("intervalUnit", "seconds").trim().toLowerCase(Locale.ROOT);
@@ -1338,8 +1338,8 @@ public final class NativeEngine {
             if (sellPrice != Math.rint(sellPrice)) throw new NativeException("量化止损寄售价必须为整数");
             if (quantity != 1) throw new NativeException("量化止损每次只能提交 1 件");
         }
-        if ("live".equals(executionMode) && (sellEnabled || stopLossEnabled) && strategy.optString("consignPassword").trim().isEmpty()) {
-            throw new NativeException("真实量化寄售需要交易密码");
+        if ((sellEnabled || stopLossEnabled) && strategy.optString("consignPassword").trim().isEmpty()) {
+            throw new NativeException("自动量化寄售需要交易密码");
         }
     }
 
@@ -1363,10 +1363,9 @@ public final class NativeEngine {
         if (!groupId.matches("\\d+")) throw new NativeException("量化藏品编号无效");
         strategy.put("phone", phone);
         strategy.put("groupId", groupId);
+        strategy.put("executionMode", "live");
         validateQuantStrategy(strategy);
-        String executionMode = strategy.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
-        strategy.put("executionMode", executionMode);
-        if ("live".equals(executionMode) && hasLiveQuantConflict(store.getQuantStrategies(), phone, groupId, "")) {
+        if (hasLiveQuantConflict(store.getQuantStrategies(), phone, groupId, "")) {
             throw new NativeException("同账号同藏品已有运行中的实时量化策略");
         }
         int intervalValue = strategy.optInt("intervalValue", 15);
@@ -1402,18 +1401,17 @@ public final class NativeEngine {
             }
             JSONObject candidate = copy(strategy);
             merge(candidate, body);
+            candidate.put("executionMode", "live");
             validateQuantStrategy(candidate);
             String candidatePhone = first(candidate, "phone", "sourcePhone");
             String candidateGroupId = first(candidate, "groupId", "collectionId", "id");
-            String executionMode = candidate.optString("executionMode", "monitor").trim().toLowerCase(Locale.ROOT);
-            candidate.put("executionMode", executionMode);
-            if ("live".equals(executionMode) && hasLiveQuantConflict(strategies, candidatePhone, candidateGroupId, id)) {
+            if (hasLiveQuantConflict(strategies, candidatePhone, candidateGroupId, id)) {
                 throw new NativeException("同账号同藏品已有运行中的实时量化策略");
             }
             merge(strategy, body);
             strategy.put("phone", candidatePhone);
             strategy.put("groupId", candidateGroupId);
-            strategy.put("executionMode", executionMode);
+            strategy.put("executionMode", "live");
             strategy.put("enabled", true);
             strategy.put("status", "monitoring");
             strategy.put("lastSignal", "idle");
@@ -1454,7 +1452,9 @@ public final class NativeEngine {
                 throw new NativeException("已提交或待支付的量化策略不能重新启动");
             }
             if (enabled) {
-                if ("live".equals(strategy.optString("executionMode")) && hasLiveQuantConflict(strategies, strategy.optString("phone"), strategy.optString("groupId"), id)) {
+                strategy.put("executionMode", "live");
+                validateQuantStrategy(strategy);
+                if (hasLiveQuantConflict(strategies, strategy.optString("phone"), strategy.optString("groupId"), id)) {
                     throw new NativeException("同账号同藏品已有运行中的实时量化策略");
                 }
                 IBoxDirectClient.Account direct = this.account(strategy.optString("phone"));
@@ -1496,6 +1496,24 @@ public final class NativeEngine {
             if (strategy != null && id.equals(strategy.optString("id"))) return ok(objectOf("events", strategy.optJSONArray("events") == null ? new JSONArray() : strategy.optJSONArray("events")));
         }
         throw new NativeException("量化策略不存在");
+    }
+
+    private JSONArray quantStrategyList() {
+        JSONArray strategies = store.getQuantStrategies();
+        boolean changed = false;
+        for (int index = 0; index < strategies.length(); index++) {
+            JSONObject strategy = strategies.optJSONObject(index);
+            if (strategy == null || !"monitor".equals(strategy.optString("executionMode"))) continue;
+            putQuietly(strategy, "executionMode", "live");
+            putQuietly(strategy, "enabled", false);
+            putQuietly(strategy, "status", "paused");
+            putQuietly(strategy, "lastResult", "mode_removed_requires_review");
+            putQuietly(strategy, "updatedAt", Instant.now().toString());
+            addEventQuietly(strategy, "mode_migrated", "仅监控模式已移除，请确认后重新启动");
+            changed = true;
+        }
+        if (changed) store.saveQuantStrategies(strategies);
+        return strategies;
     }
 
     private JSONObject createTradeTask(JSONObject body, String kind) throws Exception {
