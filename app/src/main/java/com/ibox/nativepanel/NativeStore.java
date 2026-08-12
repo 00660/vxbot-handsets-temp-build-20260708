@@ -30,6 +30,8 @@ public final class NativeStore {
     private static final String KEY_SYNTHESIS_TASKS = "synthesis_tasks_json";
     private static final String KEY_LOTTERY_TASKS = "lottery_tasks_json";
     private static final String KEY_FIRST_SALE_TASKS = "first_sale_tasks_json";
+    private static final String KEY_SYNTHESIS_ACTIVITY_CACHE = "synthesis_activity_cache_json";
+    private static final String KEY_FIRST_SALE_CACHE = "first_sale_cache_json";
     private static final String KEY_ASSET_COSTS = "asset_costs_json";
     private static final String KEY_BARK_CONFIG = "bark_config_json";
     private static final String KEY_BARK_SENT = "bark_sent_json";
@@ -226,6 +228,22 @@ public final class NativeStore {
         return saveJsonArray(KEY_FIRST_SALE_TASKS, tasks);
     }
 
+    public JSONObject getSynthesisActivityCache(String phone) {
+        return getAccountCache(KEY_SYNTHESIS_ACTIVITY_CACHE, phone);
+    }
+
+    public boolean saveSynthesisActivityCache(String phone, JSONObject data) {
+        return saveAccountCache(KEY_SYNTHESIS_ACTIVITY_CACHE, phone, data);
+    }
+
+    public JSONObject getFirstSaleCache(String phone) {
+        return getAccountCache(KEY_FIRST_SALE_CACHE, phone);
+    }
+
+    public boolean saveFirstSaleCache(String phone, JSONObject data) {
+        return saveAccountCache(KEY_FIRST_SALE_CACHE, phone, data);
+    }
+
     public String getTradePassword() {
         synchronized (LOCK) {
             return trim(preferences.getString(KEY_TRADE_PASSWORD, ""));
@@ -340,6 +358,27 @@ public final class NativeStore {
     private boolean saveJsonArray(String key, JSONArray values) {
         synchronized (LOCK) {
             return preferences.edit().putString(key, copyArray(values).toString()).commit();
+        }
+    }
+
+    private JSONObject getAccountCache(String key, String phone) {
+        synchronized (LOCK) {
+            JSONObject value = readObject(key).optJSONObject(trim(phone));
+            return value == null ? new JSONObject() : copyObject(value);
+        }
+    }
+
+    private boolean saveAccountCache(String key, String phone, JSONObject data) {
+        synchronized (LOCK) {
+            String account = trim(phone);
+            if (account.isEmpty() || data == null) return false;
+            JSONObject cache = readObject(key);
+            try {
+                cache.put(account, copyObject(data));
+            } catch (JSONException ignored) {
+                return false;
+            }
+            return preferences.edit().putString(key, cache.toString()).commit();
         }
     }
 

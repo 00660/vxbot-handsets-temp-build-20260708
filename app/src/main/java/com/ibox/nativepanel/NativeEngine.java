@@ -157,7 +157,12 @@ public final class NativeEngine {
         if ("/synthesis/tasks".equals(route.path) && "GET".equals(verb)) return ok(objectOf("tasks", store.getSynthesisTasks()));
         if ("/synthesis/tasks".equals(route.path) && "POST".equals(verb)) return createSynthesisTask(body);
         if (route.path.startsWith("/synthesis/tasks/") && route.path.endsWith("/cancel") && "POST".equals(verb)) return cancelStoredTask(store.getSynthesisTasks(), route.segment(3), "synthesis");
-        if (route.path.startsWith("/accounts/") && route.path.endsWith("/synthesis/activities") && "GET".equals(verb)) return synthesisActivities(route.segment(2));
+        if (route.path.startsWith("/accounts/") && route.path.endsWith("/synthesis/activities") && "GET".equals(verb)) {
+            String phone = route.segment(2);
+            JSONObject cached = store.getSynthesisActivityCache(phone);
+            if (!"1".equals(route.query("refresh")) && cached.length() > 0) return ok(cached);
+            return synthesisActivities(phone);
+        }
         if (route.path.startsWith("/accounts/") && route.path.contains("/synthesis/") && route.path.endsWith("/confirm") && "POST".equals(verb)) {
             return confirmSynthesis(route.segment(2), route.segment(4), body);
         }
@@ -166,7 +171,12 @@ public final class NativeEngine {
             return submitSynthesis(route.segment(2), route.segment(4), body);
         }
 
-        if ("/first-sales".equals(route.path) && "GET".equals(verb)) return firstSales(route.query("phone"));
+        if ("/first-sales".equals(route.path) && "GET".equals(verb)) {
+            String phone = route.query("phone");
+            JSONObject cached = store.getFirstSaleCache(phone);
+            if (!"1".equals(route.query("refresh")) && cached.length() > 0) return ok(cached);
+            return firstSales(phone);
+        }
         if ("/first-sales/tasks".equals(route.path) && "GET".equals(verb)) return ok(objectOf("tasks", store.getFirstSaleTasks()));
         if ("/first-sales/tasks".equals(route.path) && "POST".equals(verb)) return createFirstSaleTask(body);
         if ("/first-sales/orders".equals(route.path) && "POST".equals(verb)) return submitFirstSale(body, null);
@@ -175,7 +185,7 @@ public final class NativeEngine {
         if (route.path.startsWith("/first-sales/tasks/") && route.path.contains("/captcha/")) return taskCaptcha("first_sale", route, verb, body);
         if (route.path.startsWith("/accounts/") && route.path.endsWith("/first-sales/payment-platforms") && "GET".equals(verb)) return firstSalePaymentPlatforms(route.segment(2));
 
-        if ("/lottery/auto".equals(route.path) && "GET".equals(verb)) return lotteryState();
+        if ("/lottery/auto".equals(route.path) && "GET".equals(verb)) return lotteryState("1".equals(route.query("refresh")));
         if (route.path.startsWith("/lottery/auto/") && route.path.endsWith("/enable") && "POST".equals(verb)) return setLotteryEnabled(route.segment(3), true);
         if (route.path.startsWith("/lottery/auto/") && route.path.endsWith("/disable") && "POST".equals(verb)) return setLotteryEnabled(route.segment(3), false);
 
@@ -940,7 +950,9 @@ public final class NativeEngine {
         }
         JSONArray activities = new JSONArray();
         for (JSONObject activity : visible) activities.put(activity);
-        return ok(objectOf("mode", mode, "activities", activities, "updatedAt", Instant.now().toString()));
+        JSONObject result = objectOf("mode", mode, "activities", activities, "updatedAt", Instant.now().toString());
+        store.saveSynthesisActivityCache(phone, result);
+        return ok(result);
     }
 
     private JSONObject synthesisCenter(String phone, String syntheticId) throws Exception {
@@ -1090,7 +1102,9 @@ public final class NativeEngine {
         }
         JSONArray items = new JSONArray();
         for (JSONObject item : selected) items.put(item);
-        return ok(objectOf("mode", mode, "items", items, "updatedAt", Instant.now().toString()));
+        JSONObject result = objectOf("mode", mode, "items", items, "updatedAt", Instant.now().toString());
+        store.saveFirstSaleCache(account.phone, result);
+        return ok(result);
     }
 
     private JSONObject firstSalePaymentPlatforms(String phone) throws Exception {
@@ -1268,8 +1282,8 @@ public final class NativeEngine {
         return ok(data(response));
     }
 
-    private JSONObject lotteryState() throws Exception {
-        refreshLottery(true);
+    private JSONObject lotteryState(boolean refresh) throws Exception {
+        if (refresh || store.getLotteryTasks().length() == 0) refreshLottery(true);
         return ok(objectOf("activities", store.getLotteryTasks(), "intervalMs", 3000));
     }
 

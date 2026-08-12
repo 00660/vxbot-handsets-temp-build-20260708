@@ -135,7 +135,7 @@ public final class MainActivity extends Activity {
         engine = new NativeEngine(this);
         selectedPhone = engine.store().getSelectedPhone();
         accounts = engine.store().getAccounts();
-        io = Executors.newFixedThreadPool(3);
+        io = Executors.newFixedThreadPool(8);
         getWindow().setStatusBarColor(background);
         getWindow().setNavigationBarColor(background);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
@@ -787,7 +787,7 @@ public final class MainActivity extends Activity {
         addSectionTitle("合成活动");
         LinearLayout activityBox = vertical(Color.TRANSPARENT);
         content.addView(activityBox, new LinearLayout.LayoutParams(-1, -2));
-        renderLoading(taskBox, "任务同步中");
+        renderTaskList(engine.store().getSynthesisTasks(), "合成任务", taskBox, true);
         request("同步合成任务", "GET", "/native/synthesis/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
             taskBox.removeAllViews();
@@ -798,35 +798,43 @@ public final class MainActivity extends Activity {
     }
 
     private void loadSynthesisActivities(LinearLayout target) {
-        renderLoading(target, "活动同步中");
-        request("同步合成活动", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/activities", null, result -> {
-            target.removeAllViews();
+        JSONObject cached = engine.store().getSynthesisActivityCache(selectedPhone);
+        if (cached.length() == 0) renderLoading(target, "活动同步中");
+        else renderSynthesisActivities(cached, target, false);
+        request("刷新合成活动", "GET", "/native/accounts/" + Uri.encode(selectedPhone) + "/synthesis/activities?refresh=1", null, result -> {
             JSONObject data = result.optJSONObject("data");
-            JSONArray activities = findArray(data, "activities", "items", "list");
-            if (activities == null || activities.length() == 0) {
-                target.addView(empty("暂无可用合成活动"));
-                return;
-            }
-            for (int i = 0; i < activities.length(); i++) {
-                JSONObject activity = activities.optJSONObject(i);
-                if (activity == null) continue;
-                String title = first(activity, "title", "name", "activityName", "id");
-                String rawPhase = first(activity, "phase", "status");
-                boolean recentExpired = "recent_expired".equals(data == null ? "" : data.optString("mode")) || "recent_expired".equals(rawPhase);
-                boolean expired = recentExpired || "expired".equals(rawPhase) || "ended".equals(rawPhase);
-                String phase = recentExpired ? "最近结束" : synthesisPhaseLabel(rawPhase);
-                String period = expired ? first(activity, "endTime", "endAt", "startTime", "startAt") : first(activity, "startTime", "startAt");
-                LinearLayout row = card();
-                row.addView(text(title, 15, ink, Typeface.BOLD));
-                row.addView(text(phase + (period.isEmpty() ? "" : " · " + time(period)), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
-                LinearLayout detail = vertical(Color.TRANSPARENT);
-                detail.addView(empty("材料同步中"));
-                row.addView(detail, marginParams(-1, -2, 0, dp(4), 0, 0));
-                target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
-                String syntheticId = first(activity, "syntheticId", "id");
-                if (!syntheticId.isEmpty()) loadSynthesisCenter(syntheticId, activity, detail);
-            }
-        }, () -> renderRetry(target, "合成活动同步失败", () -> loadSynthesisActivities(target)));
+            renderSynthesisActivities(data, target, true);
+        }, () -> {
+            if (cached.length() == 0) renderRetry(target, "合成活动同步失败", () -> loadSynthesisActivities(target));
+        });
+    }
+
+    private void renderSynthesisActivities(JSONObject data, LinearLayout target, boolean loadDetails) {
+        target.removeAllViews();
+        JSONArray activities = findArray(data, "activities", "items", "list");
+        if (activities == null || activities.length() == 0) {
+            target.addView(empty("暂无可用合成活动"));
+            return;
+        }
+        for (int i = 0; i < activities.length(); i++) {
+            JSONObject activity = activities.optJSONObject(i);
+            if (activity == null) continue;
+            String title = first(activity, "title", "name", "activityName", "id");
+            String rawPhase = first(activity, "phase", "status");
+            boolean recentExpired = "recent_expired".equals(data == null ? "" : data.optString("mode")) || "recent_expired".equals(rawPhase);
+            boolean expired = recentExpired || "expired".equals(rawPhase) || "ended".equals(rawPhase);
+            String phase = recentExpired ? "最近结束" : synthesisPhaseLabel(rawPhase);
+            String period = expired ? first(activity, "endTime", "endAt", "startTime", "startAt") : first(activity, "startTime", "startAt");
+            LinearLayout row = card();
+            row.addView(text(title, 15, ink, Typeface.BOLD));
+            row.addView(text(phase + (period.isEmpty() ? "" : " · " + time(period)), 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+            LinearLayout detail = vertical(Color.TRANSPARENT);
+            detail.addView(empty("材料同步中"));
+            row.addView(detail, marginParams(-1, -2, 0, dp(4), 0, 0));
+            target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
+            String syntheticId = first(activity, "syntheticId", "id");
+            if (loadDetails && !syntheticId.isEmpty()) loadSynthesisCenter(syntheticId, activity, detail);
+        }
     }
 
     private void loadSynthesisCenter(String syntheticId, JSONObject activity, LinearLayout target) {
@@ -977,7 +985,10 @@ public final class MainActivity extends Activity {
         marketWatchBox = watchBox;
         content.addView(watchBox, new LinearLayout.LayoutParams(-1, -2));
         searchButton.setOnClickListener(v -> searchMarket(query.getText().toString(), resultBox, query, watchBox));
-        loadWatches(watchBox, true);
+        renderWatches(engine.store().getMarketWatches(), watchBox);
+        refreshHandler.postDelayed(() -> {
+            if ("market".equals(currentPage) && marketWatchBox == watchBox) loadWatches(watchBox, true, false);
+        }, 80L);
         refreshHandler.postDelayed(marketWatchRefresh, 15_000L);
     }
 
@@ -1025,13 +1036,18 @@ public final class MainActivity extends Activity {
     private void loadWatches(LinearLayout target, boolean refresh, boolean showLoading) {
         if (showLoading) renderLoading(target, "行情同步中");
         request(refresh ? "刷新行情监控" : "同步行情监控", "GET", "/native/market/watches" + (refresh ? "?refresh=1" : ""), null, result -> {
-            target.removeAllViews();
             JSONArray watches = findArray(result.optJSONObject("data"), "watches", "items", "list");
-            if (watches == null || watches.length() == 0) {
-                target.addView(empty("暂无价格监控项目"));
-                return;
-            }
-            for (int i = 0; i < watches.length(); i++) {
+            renderWatches(watches, target);
+        }, () -> renderRetry(target, "行情监控同步失败", () -> loadWatches(target, refresh)));
+    }
+
+    private void renderWatches(JSONArray watches, LinearLayout target) {
+        target.removeAllViews();
+        if (watches == null || watches.length() == 0) {
+            target.addView(empty("暂无价格监控项目"));
+            return;
+        }
+        for (int i = 0; i < watches.length(); i++) {
                 JSONObject watch = watches.optJSONObject(i);
                 if (watch == null) continue;
                 LinearLayout row = card();
@@ -1065,8 +1081,7 @@ public final class MainActivity extends Activity {
                 actions.addView(stop, marginParams(dp(82), dp(42), dp(8), 0, 0, 0));
                 row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
-            }
-        }, () -> renderRetry(target, "行情监控同步失败", () -> loadWatches(target, refresh)));
+        }
     }
 
     private void stopMarketWatchRefresh() {
@@ -1358,8 +1373,26 @@ public final class MainActivity extends Activity {
         content.addView(tradePendingSourceBox, marginParams(-1, -2, 0, 0, 0, dp(12)));
         addSectionTitle("订单记录");
         tradeOrderBox = vertical(Color.TRANSPARENT); content.addView(tradeOrderBox, new LinearLayout.LayoutParams(-1, -2));
-        loadTradeDashboard(true);
+        renderLocalTradeTasks(tradeTaskBox);
+        renderLoading(tradeOrderBox, "订单同步中");
+        loadTradeDashboard(false);
         refreshHandler.postDelayed(tradeRefresh, 15_000L);
+    }
+
+    private void renderLocalTradeTasks(LinearLayout target) {
+        JSONArray tasks = engine.store().getTradeTasks();
+        JSONArray market = new JSONArray();
+        JSONArray retired = new JSONArray();
+        for (int index = 0; index < tasks.length(); index++) {
+            JSONObject task = tasks.optJSONObject(index);
+            if (task == null) continue;
+            if ("retired_market".equals(task.optString("localType"))) retired.put(task);
+            else market.put(task);
+        }
+        target.removeAllViews();
+        int visible = renderTradeTaskRows(market, false, target);
+        visible += renderTradeTaskRows(retired, true, target);
+        if (visible == 0) target.addView(empty("暂无市场交易任务"));
     }
 
     private void searchTrade(String name, LinearLayout target) {
@@ -1605,30 +1638,31 @@ public final class MainActivity extends Activity {
         final boolean[] completed = new boolean[3];
         final boolean[] failed = new boolean[3];
         Runnable render = () -> {
-            if (!completed[0] || !completed[1] || !completed[2]) return;
-            taskTarget.removeAllViews();
-            orderTarget.removeAllViews();
+            if (completed[0] && completed[1]) {
+                taskTarget.removeAllViews();
+                if (failed[0] && failed[1]) {
+                    renderRetry(taskTarget, "交易任务同步失败", () -> loadTradeDashboard(true));
+                } else {
+                    int visible = renderTradeTaskRows(tradeTasks[0], false, taskTarget);
+                    visible += renderTradeTaskRows(retiredTasks[0], true, taskTarget);
+                    if (visible == 0) taskTarget.addView(empty("暂无市场交易任务"));
+                    if (tradeSyncFailures[0] != null && tradeSyncFailures[0].length() > 0) {
+                        JSONObject failure = tradeSyncFailures[0].optJSONObject(0);
+                        String message = failure == null ? "平台寄售状态同步失败" : first(failure, "message", "groupId");
+                        taskTarget.addView(text("寄售状态实时同步失败 · " + message, 12, danger, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
+                    }
+                }
+            }
+            if (completed[2]) {
+                orderTarget.removeAllViews();
+                if (failed[2]) renderRetry(orderTarget, "订单同步失败", () -> loadTradeDashboard(true));
+                else renderPlatformOrders(ordersData[0], orderTarget);
+            }
+            if (!completed[0] || !completed[1] || !completed[2] || (failed[0] && failed[1])) return;
             sourceTitle.setVisibility(View.GONE);
             sourceTarget.setVisibility(View.GONE);
             sourceTarget.removeAllViews();
-            if (failed[0] && failed[1]) {
-                renderRetry(taskTarget, "交易任务同步失败", () -> loadTradeDashboard(true));
-            } else {
-                int visible = renderTradeTaskRows(tradeTasks[0], false, taskTarget);
-                visible += renderTradeTaskRows(retiredTasks[0], true, taskTarget);
-                if (visible == 0) taskTarget.addView(empty("暂无市场交易任务"));
-                if (tradeSyncFailures[0] != null && tradeSyncFailures[0].length() > 0) {
-                    JSONObject failure = tradeSyncFailures[0].optJSONObject(0);
-                    String message = failure == null ? "平台寄售状态同步失败" : first(failure, "message", "groupId");
-                    taskTarget.addView(text("寄售状态实时同步失败 · " + message, 12, danger, Typeface.NORMAL), marginParams(-1, -2, 0, dp(8), 0, 0));
-                }
-            }
-            if (failed[2]) {
-                renderRetry(orderTarget, "订单同步失败", () -> loadTradeDashboard(true));
-                return;
-            }
-            renderPlatformOrders(ordersData[0], orderTarget);
-            if (failed[0] && failed[1]) return;
+            if (failed[2]) return;
             Set<String> pendingOrderIds = pendingOrderIds(ordersData[0]);
             int sourceCount = renderPendingTaskSources(tradeTasks[0], false, pendingOrderIds, sourceTarget);
             sourceCount += renderPendingTaskSources(retiredTasks[0], true, pendingOrderIds, sourceTarget);
@@ -2155,11 +2189,21 @@ public final class MainActivity extends Activity {
     }
 
     private void loadLottery(LinearLayout target) {
-        renderLoading(target, "抽奖同步中");
-        request("同步抽奖状态", "GET", "/native/lottery/auto", null, result -> {
-            target.removeAllViews(); JSONArray activities = findArray(result.optJSONObject("data"), "activities", "items", "list");
-            if (activities == null || activities.length() == 0) { target.addView(empty("暂无抽奖活动")); return; }
-            for (int i = 0; i < activities.length(); i++) {
+        JSONArray cached = engine.store().getLotteryTasks();
+        if (cached.length() == 0) renderLoading(target, "抽奖同步中");
+        else renderLotteryActivities(cached, target);
+        request("同步抽奖状态", "GET", "/native/lottery/auto?refresh=1", null, result -> {
+            JSONArray activities = findArray(result.optJSONObject("data"), "activities", "items", "list");
+            renderLotteryActivities(activities, target);
+        }, () -> {
+            if (cached.length() == 0) renderRetry(target, "抽奖活动同步失败", () -> loadLottery(target));
+        });
+    }
+
+    private void renderLotteryActivities(JSONArray activities, LinearLayout target) {
+        target.removeAllViews();
+        if (activities == null || activities.length() == 0) { target.addView(empty("暂无抽奖活动")); return; }
+        for (int i = 0; i < activities.length(); i++) {
                 JSONObject activity = activities.optJSONObject(i); if (activity == null) continue;
                 LinearLayout row = card();
                 row.addView(text(first(activity, "title", "name", "id") + " · " + lotteryPhaseLabel(activity), 15, ink, Typeface.BOLD));
@@ -2179,8 +2223,7 @@ public final class MainActivity extends Activity {
                     }
                 }
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
-            }
-        }, () -> renderRetry(target, "抽奖活动同步失败", () -> loadLottery(target)));
+        }
     }
 
     private void showFirstSale() {
@@ -2193,13 +2236,22 @@ public final class MainActivity extends Activity {
         content.addView(tasks, new LinearLayout.LayoutParams(-1, -2));
         if (selectedPhone.isEmpty()) sales.addView(empty("请先登录账号"));
         else loadFirstSales(sales);
+        renderFirstSaleTaskList(engine.store().getFirstSaleTasks(), tasks);
         loadFirstSaleTasks(tasks);
     }
 
     private void loadFirstSales(LinearLayout target) {
-        renderLoading(target, "首发项目同步中");
-        request("同步首发项目", "GET", "/native/first-sales?refresh=1&phone=" + Uri.encode(selectedPhone), null, result -> {
-            target.removeAllViews(); JSONArray items = findArray(result.optJSONObject("data"), "items", "sales", "list");
+        JSONObject cached = engine.store().getFirstSaleCache(selectedPhone);
+        if (cached.length() == 0) renderLoading(target, "首发项目同步中");
+        else renderFirstSales(cached, target, false);
+        request("同步首发项目", "GET", "/native/first-sales?refresh=1&phone=" + Uri.encode(selectedPhone), null,
+                result -> renderFirstSales(result.optJSONObject("data"), target, true), () -> {
+                    if (cached.length() == 0) renderRetry(target, "首发项目同步失败", () -> loadFirstSales(target));
+                });
+    }
+
+    private void renderFirstSales(JSONObject data, LinearLayout target, boolean actionable) {
+            target.removeAllViews(); JSONArray items = findArray(data, "items", "sales", "list");
             if (items == null || items.length() == 0) { target.addView(empty("暂无首发项目")); return; }
             for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.optJSONObject(i); if (item == null) continue;
@@ -2215,7 +2267,7 @@ public final class MainActivity extends Activity {
                 header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
                 row.addView(header, marginParams(-1, -2, 0, 0, 0, dp(8)));
                 String mode = item.optString("action", "");
-                boolean canPrepare = ("scheduled".equals(mode) || "immediate".equals(mode))
+                boolean canPrepare = actionable && ("scheduled".equals(mode) || "immediate".equals(mode))
                         && !"expired_placeholder".equals(item.optString("phase", ""))
                         && !first(item, "saleId", "id").isEmpty()
                         && !first(item, "groupId", "digitalCollectionGroupId").isEmpty()
@@ -2227,11 +2279,10 @@ public final class MainActivity extends Activity {
                 }
                 target.addView(row, marginParams(-1, -2, 0, 0, 0, dp(10)));
             }
-        }, () -> renderRetry(target, "首发项目同步失败", () -> loadFirstSales(target)));
     }
 
     private void loadFirstSaleTasks(LinearLayout target) {
-        renderLoading(target, "抢购任务同步中");
+        if (target.getChildCount() == 0) renderLoading(target, "抢购任务同步中");
         request("同步首发任务", "GET", "/native/first-sales/tasks", null, result -> {
             JSONArray tasks = findArray(result.optJSONObject("data"), "tasks", "items", "list");
             renderFirstSaleTaskList(tasks, target);
