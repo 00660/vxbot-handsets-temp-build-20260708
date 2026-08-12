@@ -33,6 +33,7 @@ public final class PanelSyncService extends Service {
         startForeground(NOTIFICATION_ID, notification("正在启动本机任务引擎"));
         engine = new NativeEngine(this);
         scheduler = Executors.newScheduledThreadPool(2);
+        scheduler.execute(() -> engine.refreshOfficialVersionIfStale());
         scheduler.scheduleWithFixedDelay(this::tick, 0, TASK_TICK_INTERVAL_MS, TimeUnit.MILLISECONDS);
         scheduler.scheduleWithFixedDelay(this::sync, 0, 1, TimeUnit.SECONDS);
     }

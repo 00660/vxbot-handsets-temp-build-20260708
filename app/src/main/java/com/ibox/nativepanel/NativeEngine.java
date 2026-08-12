@@ -72,6 +72,7 @@ public final class NativeEngine {
     private static final long IMMEDIATE_PURCHASE_STALE_MS = 60L * 1000L;
     private static final long ORDER_TASK_LINK_WINDOW_MS = 10L * 60L * 1000L;
     private static final long BARK_DEDUPE_WINDOW_MS = 5L * 60L * 1000L;
+    private static final long OFFICIAL_VERSION_REFRESH_MS = 6L * 60L * 60L * 1000L;
     private static final int LOTTERY_DRAWS_PER_REQUEST = 5;
     private static final int LOTTERY_MAX_DRAWS_PER_RUN = 100;
     private static final double QUANT_NET_PROCEEDS_RATE = 0.955d;
@@ -88,16 +89,43 @@ public final class NativeEngine {
     private final Map<String, IBoxDirectClient.SmsSession> smsSessions = new HashMap<>();
     private final Map<String, TaskCaptchaSession> taskCaptchaSessions = new HashMap<>();
     private final Set<String> submittingSyntheses = Collections.synchronizedSet(new HashSet<>());
+    private final Object officialVersionLock = new Object();
+    private boolean officialVersionRefreshInFlight;
     private volatile long lastMarketWatchAt;
     private volatile long lastLotteryRefreshAt;
 
     public NativeEngine(Context context) {
         store = new NativeStore(context);
-        client = new IBoxDirectClient(store.getOrCreateDeviceId());
+        client = new IBoxDirectClient(store.getOrCreateDeviceId(), store.getOfficialAppVersion(), store.getOfficialAppBuild());
     }
 
     public NativeStore store() {
         return store;
+    }
+
+    /** Refreshes the official request protocol version in the background. */
+    public void refreshOfficialVersionIfStale() {
+        long now = System.currentTimeMillis();
+        synchronized (officialVersionLock) {
+            if (officialVersionRefreshInFlight) return;
+            long fetchedAt = store.getOfficialAppVersionFetchedAt();
+            if (!store.getOfficialAppVersion().isEmpty() && now - fetchedAt < OFFICIAL_VERSION_REFRESH_MS) return;
+            officialVersionRefreshInFlight = true;
+        }
+        try {
+            JSONObject result = client.fetchOfficialVersion();
+            String version = result.optString("versionName", "");
+            String build = result.optString("versionCode", "");
+            if (!version.isEmpty() && !build.isEmpty() && store.saveOfficialAppVersion(version, build, now)) {
+                client.applyOfficialVersion(version, build);
+            }
+        } catch (Exception ignored) {
+            // Keep the last verified version; a version check must never block official API calls.
+        } finally {
+            synchronized (officialVersionLock) {
+                officialVersionRefreshInFlight = false;
+            }
+        }
     }
 
     /**

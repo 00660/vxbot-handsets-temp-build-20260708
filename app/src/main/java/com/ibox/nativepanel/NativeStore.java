@@ -36,6 +36,9 @@ public final class NativeStore {
     private static final String KEY_BARK_CONFIG = "bark_config_json";
     private static final String KEY_BARK_SENT = "bark_sent_json";
     private static final String KEY_TRADE_PASSWORD = "trade_password";
+    private static final String KEY_OFFICIAL_APP_VERSION = "official_app_version";
+    private static final String KEY_OFFICIAL_APP_BUILD = "official_app_build";
+    private static final String KEY_OFFICIAL_APP_VERSION_FETCHED_AT = "official_app_version_fetched_at";
     private static final Object LOCK = new Object();
 
     private final SharedPreferences preferences;
@@ -262,6 +265,37 @@ public final class NativeStore {
                     .putString(KEY_QUANT_STRATEGIES, strategies.toString())
                     .putString(KEY_TRADE_TASKS, tradeTasks.toString())
                     .putString(KEY_FIRST_SALE_TASKS, firstSaleTasks.toString())
+                    .commit();
+        }
+    }
+
+    public String getOfficialAppVersion() {
+        synchronized (LOCK) {
+            return trim(preferences.getString(KEY_OFFICIAL_APP_VERSION, ""));
+        }
+    }
+
+    public String getOfficialAppBuild() {
+        synchronized (LOCK) {
+            return trim(preferences.getString(KEY_OFFICIAL_APP_BUILD, ""));
+        }
+    }
+
+    public long getOfficialAppVersionFetchedAt() {
+        synchronized (LOCK) {
+            return preferences.getLong(KEY_OFFICIAL_APP_VERSION_FETCHED_AT, 0L);
+        }
+    }
+
+    public boolean saveOfficialAppVersion(String version, String build, long fetchedAt) {
+        synchronized (LOCK) {
+            String normalizedVersion = trim(version);
+            String normalizedBuild = trim(build);
+            if (normalizedVersion.isEmpty() || normalizedBuild.isEmpty() || fetchedAt <= 0L) return false;
+            return preferences.edit()
+                    .putString(KEY_OFFICIAL_APP_VERSION, normalizedVersion)
+                    .putString(KEY_OFFICIAL_APP_BUILD, normalizedBuild)
+                    .putLong(KEY_OFFICIAL_APP_VERSION_FETCHED_AT, fetchedAt)
                     .commit();
         }
     }

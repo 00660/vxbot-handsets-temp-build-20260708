@@ -136,6 +136,7 @@ public final class MainActivity extends Activity {
         selectedPhone = engine.store().getSelectedPhone();
         accounts = engine.store().getAccounts();
         io = Executors.newFixedThreadPool(8);
+        io.execute(() -> engine.refreshOfficialVersionIfStale());
         getWindow().setStatusBarColor(background);
         getWindow().setNavigationBarColor(background);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);

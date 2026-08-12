@@ -41,8 +41,9 @@ public final class IBoxDirectClient {
     private static final String LOGIN_URL = "https://sail-api.ibox.art/box-server/api/v1/login/verify";
     private static final String ASSETS_URL = "https://sail-api.ibox.art/personal-center-service/users/digital-collection-groups";
     private static final String MARKET_URL = "https://sail-api.ibox.art/public-service/markets";
-    private static final String APP_VERSION = "3.0.5";
-    private static final String APP_BUILD = "30005";
+    private static final String VERSION_URL = "https://sail-api.ibox.art/box-server/api/v1/setting/getVersion";
+    private static final String DEFAULT_APP_VERSION = "3.0.5";
+    private static final String DEFAULT_APP_BUILD = "30005";
     private static final String AES_KEY_CHARACTERS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static final String PUBLIC_KEY_HEX = "30819d300d06092a864886f70d010101050003818b0030818702818100984c206bc702184ef2a6be0dc2dbf14f9be338b2675e29722204e3425f338ec5f1dd3a0191bde6b52eda0147f909e0ea5e3ec17fd82372def4b9f755e16378a95006a9349a9350719fd352f863af8d29d8b2502d9572b2eb1048c01ae0ac587f3289c710e9b0447452435f46fe5574513d542691a8129d5bb94caab75c69cc71020103";
     private static final String RESPONSE_PRIVATE_KEY_B64 = "MIICdAIBADANBgkqhkiG9w0BAQEFAASCAl4wggJaAgEAAoGBAJhMIGvHAhhO8qa+DcLb8U+b4ziyZ14pciIE40JfM47F8d06AZG95rUu2gFH+Qng6l4+wX/YI3Le9Ln3VeFjeKlQBqk0mpNQcZ/TUvhjr40p2LJQLZVysusQSMAa4KxYfzKJxxDpsER0UkNfRv5VdFE9VCaRqBKdW7lMqrdcacxxAgEDAoGAGWIFZ0vVrrfTG8pXoHn9jUSl3shmj7GTBat7NbqIl8uoT4mq7Z+mc4fPADapgaV8ZQp1lU6wkyUoyak4+uXpcUtqqX3LbBRScLv3LcCePLYNtsGldoiqqDywtzzkVZDtqyyE0nZ+Bs10/o+OF7Ye8U0a3jvJYjzObb7xppbCrlMCQQDQ0CVT6jdi1LqNC44+E6cey6+HULLl7HFAN1TBfXUEjsIm3xVUDTkXV9vWqXy6UmOe7HXP4HwBIR6nptHKfLiFAkEAuraK7evTc65A3nxXoeZ5xrq6PvwbWMaIY+0f7Ak17l5tV8sMzq7ijDxwK0jzVmhFz8Z7Ww9JL2QIK1n+CVz9/QJBAIs1bjfxekHjJwiyXtQNGhSHylo1zJlIS4Ak4yuo+K20gW8/Y41eJg+P5+Rw/dGMQmny+TVAUqtracUZ4TGoewMCQHx5sfPyjPfJgJRS5RaZpoR8fCn9Z5CEWu1Iv/Kwzp7pnjqHXd8fQbLS9XIwojma2TUu/Odfhh+YBXI7/rDoqVMCQBUYFJvc5M8WnN3uOqxP11WwUSTKZpDugMiD63/bDcdESAcutglx5RMhszXFyfMr7K22Zc7F8BpY2HCzcRWp65o=";
@@ -51,14 +52,43 @@ public final class IBoxDirectClient {
 
     private final String deviceId;
     private final SecureRandom random = new SecureRandom();
+    private volatile String appVersion;
+    private volatile String appBuild;
 
     public IBoxDirectClient(String deviceId) {
+        this(deviceId, "", "");
+    }
+
+    public IBoxDirectClient(String deviceId, String appVersion, String appBuild) {
         String value = deviceId == null ? "" : deviceId.trim();
         this.deviceId = value.isEmpty() ? UUID.randomUUID().toString() : value;
+        this.appVersion = normalizeVersion(appVersion, DEFAULT_APP_VERSION);
+        this.appBuild = normalizeBuild(appBuild, DEFAULT_APP_BUILD);
     }
 
     public String getDeviceId() {
         return deviceId;
+    }
+
+    /** Reads the official APK update metadata without requiring an account. */
+    public JSONObject fetchOfficialVersion() throws Exception {
+        HttpResponse response = request("POST", VERSION_URL, baseHeaders(), "{}", null);
+        JSONObject payload = authenticatedPayload(response, "官方版本信息");
+        JSONObject data = payload.optJSONObject("data");
+        if (data == null) return new JSONObject();
+        String version = firstString(data, "curVersionName");
+        String build = firstString(data, "curVersion");
+        if (!isVersion(version) || !isBuild(build)) return new JSONObject();
+        JSONObject result = new JSONObject();
+        result.put("versionName", version);
+        result.put("versionCode", build);
+        result.put("url", firstString(data, "url"));
+        return result;
+    }
+
+    public void applyOfficialVersion(String version, String build) {
+        if (isVersion(version)) appVersion = version.trim();
+        if (isBuild(build)) appBuild = build.trim();
     }
 
     public SmsSession createSmsSession(String phone) throws ApiException {
@@ -442,8 +472,8 @@ public final class IBoxDirectClient {
         headers.put("MSG-ID", UUID.randomUUID().toString() + "_android");
         headers.put("PLATFORM-TYPE", "1");
         headers.put("DEVICE-ID", deviceId);
-        headers.put("APP-VERSION", APP_VERSION);
-        headers.put("APP-VERSION-NUMBER", APP_BUILD);
+        headers.put("APP-VERSION", appVersion);
+        headers.put("APP-VERSION-NUMBER", appBuild);
         headers.put("AllowOutTest", "1");
         headers.put("Content-Type", "application/json; charset=utf-8");
         headers.put("Accept", "application/json");
@@ -469,7 +499,23 @@ public final class IBoxDirectClient {
     private String userAgent() {
         String version = safeHeaderValue(Build.VERSION.RELEASE, "14");
         String model = safeHeaderValue(Build.MODEL, "Android");
-        return "ibox/" + APP_VERSION + "(Android;" + version + ";" + model + ")";
+        return "ibox/" + appVersion + "(Android;" + version + ";" + model + ")";
+    }
+
+    private static String normalizeVersion(String value, String fallback) {
+        return isVersion(value) ? value.trim() : fallback;
+    }
+
+    private static String normalizeBuild(String value, String fallback) {
+        return isBuild(value) ? value.trim() : fallback;
+    }
+
+    private static boolean isVersion(String value) {
+        return value != null && value.trim().matches("\\d+(\\.\\d+){1,3}");
+    }
+
+    private static boolean isBuild(String value) {
+        return value != null && value.trim().matches("\\d{1,12}") && !"0".equals(value.trim());
     }
 
     private EncryptedEnvelope createEncryptedEnvelope(JSONObject body) throws Exception {
