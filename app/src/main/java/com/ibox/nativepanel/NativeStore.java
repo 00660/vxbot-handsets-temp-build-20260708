@@ -32,6 +32,7 @@ public final class NativeStore {
     private static final String KEY_FIRST_SALE_TASKS = "first_sale_tasks_json";
     private static final String KEY_ASSET_COSTS = "asset_costs_json";
     private static final String KEY_BARK_CONFIG = "bark_config_json";
+    private static final String KEY_BARK_SENT = "bark_sent_json";
     private static final String KEY_TRADE_PASSWORD = "trade_password";
     private static final Object LOCK = new Object();
 
@@ -308,6 +309,28 @@ public final class NativeStore {
         return saveBarkConfig(config);
     }
 
+    public boolean wasBarkSentRecently(String signature, long now, long windowMs) {
+        synchronized (LOCK) {
+            long sentAt = readObject(KEY_BARK_SENT).optLong(trim(signature), 0L);
+            return sentAt > 0L && now >= sentAt && now - sentAt < Math.max(0L, windowMs);
+        }
+    }
+
+    public boolean markBarkSent(String signature, long now) {
+        synchronized (LOCK) {
+            String key = trim(signature);
+            if (key.isEmpty()) return false;
+            JSONObject sent = readObject(KEY_BARK_SENT);
+            if (sent.length() >= 100) sent = new JSONObject();
+            try {
+                sent.put(key, now);
+            } catch (JSONException ignored) {
+                return false;
+            }
+            return preferences.edit().putString(KEY_BARK_SENT, sent.toString()).commit();
+        }
+    }
+
     private JSONArray getJsonArray(String key) {
         synchronized (LOCK) {
             return copyArray(readArray(key));
@@ -418,6 +441,12 @@ public final class NativeStore {
             config.put("deviceKey", trim(config.optString("deviceKey", "")));
             int hour = config.optInt("dailySummaryHour", 9);
             config.put("dailySummaryHour", hour < 0 || hour > 23 ? 9 : hour);
+            config.put("notifyLockSuccess", config.optBoolean("notifyLockSuccess", false));
+            config.put("notifyPaymentPending", config.optBoolean("notifyPaymentPending", true));
+            config.put("notifyConsignmentSuccess", config.optBoolean("notifyConsignmentSuccess", true));
+            config.put("notifyCancelSuccess", config.optBoolean("notifyCancelSuccess", true));
+            config.put("notifyStrategyPaused", config.optBoolean("notifyStrategyPaused", true));
+            config.put("notifyApiError", config.optBoolean("notifyApiError", false));
         } catch (JSONException ignored) {
             return new JSONObject();
         }

@@ -48,12 +48,14 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -61,6 +63,7 @@ import java.util.function.Consumer;
 /** Native iBox panel client. The page never embeds a panel web document. */
 public final class MainActivity extends Activity {
     private static final String PREFS = "ibox_native_panel";
+    private static final long EXPECTED_PAYMENT_WINDOW_MS = 3L * 60L * 1000L;
     private static final String[] PAGE_KEYS = {
             "accounts", "synthesis", "market", "quant", "trade", "lottery", "first-sale", "settings"
     };
@@ -510,7 +513,11 @@ public final class MainActivity extends Activity {
             JSONObject assetData = cache == null ? null : cache.optJSONObject("data");
             JSONArray items = findArray(assetData, "items", "collections", "records", "list");
             card.addView(portfolioHeadline(assetData, cache != null && cache.optBoolean("stale", false)), marginParams(-1, -2, 0, 0, 0, dp(12)));
-            card.addView(metricGrid(assetData, items, phone), marginParams(-1, -2, 0, 0, 0, dp(14)));
+            TextView[] realizedProfit = new TextView[1];
+            TextView realizedState = text("已实现收益同步中", 11, muted, Typeface.NORMAL);
+            card.addView(metricGrid(assetData, items, phone, realizedProfit), marginParams(-1, -2, 0, 0, 0, dp(6)));
+            card.addView(realizedState, marginParams(-1, -2, 0, 0, 0, dp(14)));
+            loadAccountPerformance(phone, realizedProfit[0], realizedState);
             if (items != null && items.length() > 0) renderAssetRows(card, items, phone);
             else card.addView(text(cache == null ? "资产同步中" : "暂无资产明细", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(4)));
             content.addView(card, marginParams(-1, -2, 0, 0, 0, dp(14)));
@@ -518,10 +525,16 @@ public final class MainActivity extends Activity {
     }
 
     private void renderAssetRows(LinearLayout card, JSONArray items, String phone) {
-        card.addView(text("持仓明细 · " + items.length(), 14, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4)));
-        int limit = Math.min(8, items.length());
+        List<JSONObject> ranked = new ArrayList<>();
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.optJSONObject(index);
+            if (item != null) ranked.add(item);
+        }
+        Collections.sort(ranked, (left, right) -> Double.compare(assetUnrealizedProfit(right, phone), assetUnrealizedProfit(left, phone)));
+        int limit = Math.min(8, ranked.size());
+        card.addView(text("单藏品盈亏 · 前 " + limit + " / " + items.length(), 14, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4)));
         for (int i = 0; i < limit; i++) {
-            JSONObject item = items.optJSONObject(i);
+            JSONObject item = ranked.get(i);
             if (item == null) continue;
             String name = first(item, "name", "title", "collectionName", "digitalCollectionName", "id");
             String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
@@ -562,9 +575,9 @@ public final class MainActivity extends Activity {
             positionView.setEllipsize(TextUtils.TruncateAt.END);
             positionView.setMinWidth(0);
             info.addView(positionView, marginParams(-1, -2, 0, dp(3), 0, 0));
-            if (consigning) {
-                info.addView(text(consignmentStateVerified ? "寄售中" : "寄售状态待同步", 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
-            }
+            String assetState = consigning ? (consignmentStateVerified ? "寄售中" : "寄售状态待同步")
+                    : delisted ? "已退市" : consignmentStateVerified ? "可用" : "状态待同步";
+            info.addView(text(assetState, 11, consigning ? amber : delisted ? muted : success, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
             header.addView(info, new LinearLayout.LayoutParams(0, -2, 1f));
             LinearLayout valuation = vertical(Color.TRANSPARENT);
             valuation.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
@@ -591,8 +604,11 @@ public final class MainActivity extends Activity {
             LinearLayout footer = horizontal(Color.TRANSPARENT);
             footer.setGravity(Gravity.CENTER_VERTICAL);
             double totalValue = hasPrice ? quantity * floorPrice : 0d;
-            String performance = "总值 " + money(String.valueOf(totalValue)) + " · 收益率 " + (Double.isFinite(rate) ? signedPercent(rate) : "0%");
-            TextView performanceView = text(performance, 12, hasPrice ? success : muted, Typeface.BOLD);
+            double profit = hasCost && hasPrice ? quantity * (floorPrice - unitCost) : Double.NaN;
+            String performance = Double.isFinite(profit)
+                    ? "盈亏 " + signedMoney(profit) + " · 收益率 " + signedPercent(rate)
+                    : "总值 " + money(String.valueOf(totalValue)) + " · 收益率 --";
+            TextView performanceView = text(performance, 12, Double.isFinite(profit) ? (profit >= 0d ? success : danger) : muted, Typeface.BOLD);
             performanceView.setMaxLines(1);
             performanceView.setEllipsize(TextUtils.TruncateAt.END);
             performanceView.setIncludeFontPadding(false);
@@ -624,6 +640,50 @@ public final class MainActivity extends Activity {
             row.addView(footer, marginParams(-1, dp(32), 0, dp(6), 0, 0));
             card.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
+    }
+
+    private double assetUnrealizedProfit(JSONObject item, String phone) {
+        if (item == null) return Double.NEGATIVE_INFINITY;
+        String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
+        double quantity = Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 1d));
+        double unitCost = engine.store().getAssetCost(phone, id);
+        double floorPrice = parseDouble(first(item, "floorPrice", "price", "valuation", "marketPrice"), Double.NaN);
+        if (!Double.isFinite(unitCost) || !Double.isFinite(floorPrice)) return Double.NEGATIVE_INFINITY;
+        return quantity * (floorPrice - unitCost);
+    }
+
+    private void loadAccountPerformance(String phone, TextView realizedProfit, TextView state) {
+        if (realizedProfit == null || state == null) return;
+        request("同步已实现收益", "GET", "/native/accounts/" + Uri.encode(phone) + "/performance", null, result -> {
+            JSONObject data = result.optJSONObject("data");
+            if (data == null) data = result;
+            int completed = Math.max(0, data.optInt("completedSales", 0));
+            int covered = Math.max(0, data.optInt("costCoveredSales", 0));
+            if (completed == 0) {
+                realizedProfit.setText(money("0"));
+                realizedProfit.setTextColor(ink);
+                state.setText("暂无已完成卖出订单");
+                return;
+            }
+            if (covered == 0) {
+                realizedProfit.setText("--");
+                realizedProfit.setTextColor(muted);
+                state.setText("已完成 " + completed + " 笔卖出 · 对应成本未覆盖");
+                return;
+            }
+            double profit = data.optDouble("realizedProfit", 0d);
+            realizedProfit.setText(signedMoney(profit));
+            realizedProfit.setTextColor(profit >= 0d ? success : danger);
+            String summary = "已实现收益估算覆盖 " + covered + " / " + completed + " 笔 · 已扣 4.5% 服务费";
+            if (!data.optBoolean("historyComplete", true)) {
+                summary += " · 历史读取 " + data.optInt("historyLoaded", 0) + " / " + data.optInt("historyTotal", 0);
+            }
+            state.setText(summary);
+        }, () -> {
+            realizedProfit.setText("--");
+            realizedProfit.setTextColor(muted);
+            state.setText("已实现收益同步失败");
+        });
     }
 
     private void showConsignmentCancelPicker(String phone, String name, JSONArray listings) {
@@ -1836,6 +1896,9 @@ public final class MainActivity extends Activity {
             String createdAt = first(order, "createdAt", "createTime");
             if (!createdAt.isEmpty()) metadata += " · " + time(createdAt);
             details.addView(text(metadata, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(5), 0, 0));
+            if (pending) {
+                details.addView(text(pendingPaymentTime(createdAt), 11, amber, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
+            }
             header.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
             header.addView(text(money(first(order, "price", "salePrice", "totalPrice", "amount")), 13, pending ? amber : success, Typeface.BOLD), new LinearLayout.LayoutParams(-2, -2));
             row.addView(header, new LinearLayout.LayoutParams(-1, -2));
@@ -2221,10 +2284,38 @@ public final class MainActivity extends Activity {
         ProjectToggle enabled = toggle("启用推送", false); bark.addView(enabled);
         EditText server = input("服务地址"); EditText key = passwordInput("设备密钥"); EditText hour = numberInput("每日汇总小时（0-23）", "9");
         bark.addView(server, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(key, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(hour, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        bark.addView(text("通知规则", 13, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
+        ProjectToggle notifyLockSuccess = toggle("锁单成功", false);
+        ProjectToggle notifyPaymentPending = toggle("订单待支付", true);
+        ProjectToggle notifyConsignmentSuccess = toggle("寄售成功", true);
+        ProjectToggle notifyCancelSuccess = toggle("取消成功", true);
+        ProjectToggle notifyStrategyPaused = toggle("策略暂停", true);
+        ProjectToggle notifyApiError = toggle("接口异常", false);
+        bark.addView(notifyLockSuccess);
+        bark.addView(notifyPaymentPending);
+        bark.addView(notifyConsignmentSuccess);
+        bark.addView(notifyCancelSuccess);
+        bark.addView(notifyStrategyPaused);
+        bark.addView(notifyApiError, marginParams(-1, -2, 0, 0, 0, dp(8)));
         LinearLayout barkActions = horizontal(Color.TRANSPARENT); Button load = button("读取", false); Button save = button("保存", true); Button test = button("测试", false);
         barkActions.addView(load, new LinearLayout.LayoutParams(0, dp(42), 1)); barkActions.addView(save, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); barkActions.addView(test, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); bark.addView(barkActions, new LinearLayout.LayoutParams(-1, -2));
-        load.setOnClickListener(v -> request("读取 Bark", "GET", "/native/notifications/bark", null, result -> fillBark(result, enabled, server, key, hour)));
-        save.setOnClickListener(v -> { JSONObject body = new JSONObject(); try { body.put("enabled", enabled.isChecked()); body.put("server", server.getText().toString().trim()); body.put("deviceKey", key.getText().toString().trim()); body.put("dailySummaryHour", intValue(hour, 9)); } catch (Exception ignored) { } request("保存 Bark", "PUT", "/native/notifications/bark", body, result -> toast("Bark 配置已保存")); });
+        load.setOnClickListener(v -> request("读取 Bark", "GET", "/native/notifications/bark", null, result -> fillBark(result, enabled, server, key, hour, notifyLockSuccess, notifyPaymentPending, notifyConsignmentSuccess, notifyCancelSuccess, notifyStrategyPaused, notifyApiError)));
+        save.setOnClickListener(v -> {
+            JSONObject body = new JSONObject();
+            try {
+                body.put("enabled", enabled.isChecked());
+                body.put("server", server.getText().toString().trim());
+                body.put("deviceKey", key.getText().toString().trim());
+                body.put("dailySummaryHour", intValue(hour, 9));
+                body.put("notifyLockSuccess", notifyLockSuccess.isChecked());
+                body.put("notifyPaymentPending", notifyPaymentPending.isChecked());
+                body.put("notifyConsignmentSuccess", notifyConsignmentSuccess.isChecked());
+                body.put("notifyCancelSuccess", notifyCancelSuccess.isChecked());
+                body.put("notifyStrategyPaused", notifyStrategyPaused.isChecked());
+                body.put("notifyApiError", notifyApiError.isChecked());
+            } catch (Exception ignored) { }
+            request("保存 Bark", "PUT", "/native/notifications/bark", body, result -> toast("Bark 配置已保存"));
+        });
         test.setOnClickListener(v -> request("发送 Bark 测试", "POST", "/native/notifications/bark/test", null, result -> toast("测试请求已提交")));
         content.addView(bark, marginParams(-1, -2, 0, 0, 0, dp(12)));
 
@@ -2272,9 +2363,18 @@ public final class MainActivity extends Activity {
                 result -> fillTradePassword(result, tradePassword, tradePasswordState));
     }
 
-    private void fillBark(JSONObject result, ProjectToggle enabled, EditText server, EditText key, EditText hour) {
+    private void fillBark(JSONObject result, ProjectToggle enabled, EditText server, EditText key, EditText hour,
+                          ProjectToggle notifyLockSuccess, ProjectToggle notifyPaymentPending,
+                          ProjectToggle notifyConsignmentSuccess, ProjectToggle notifyCancelSuccess,
+                          ProjectToggle notifyStrategyPaused, ProjectToggle notifyApiError) {
         JSONObject data = result.optJSONObject("data"); if (data == null) data = result;
         enabled.setChecked(data.optBoolean("enabled", false)); server.setText(data.optString("server", "")); key.setText(data.optString("deviceKey", "")); hour.setText(String.valueOf(data.optInt("dailySummaryHour", 9)));
+        notifyLockSuccess.setChecked(data.optBoolean("notifyLockSuccess", false));
+        notifyPaymentPending.setChecked(data.optBoolean("notifyPaymentPending", true));
+        notifyConsignmentSuccess.setChecked(data.optBoolean("notifyConsignmentSuccess", true));
+        notifyCancelSuccess.setChecked(data.optBoolean("notifyCancelSuccess", true));
+        notifyStrategyPaused.setChecked(data.optBoolean("notifyStrategyPaused", true));
+        notifyApiError.setChecked(data.optBoolean("notifyApiError", false));
     }
 
     private void fillTradePassword(JSONObject result, EditText password, TextView state) {
@@ -2497,59 +2597,72 @@ public final class MainActivity extends Activity {
         return headline;
     }
 
-    private LinearLayout metricGrid(JSONObject data, JSONArray items, String phone) {
+    private LinearLayout metricGrid(JSONObject data, JSONArray items, String phone, TextView[] realizedProfitTarget) {
         LinearLayout grid = vertical(Color.TRANSPARENT);
         double costBasis = 0d;
         double costQuantity = 0d;
-        double pricedCostValue = 0d;
-        double pricedCostQuantity = 0d;
+        double unrealizedCost = 0d;
+        double unrealizedProfit = 0d;
+        double unrealizedQuantity = 0d;
+        double totalQuantity = 0d;
         int itemCount = items == null ? 0 : items.length();
         for (int index = 0; index < itemCount; index++) {
             JSONObject item = items.optJSONObject(index);
             if (item == null) continue;
             String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
             double quantity = Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 1d));
+            totalQuantity += quantity;
             double unitCost = engine.store().getAssetCost(phone, id);
             double floorPrice = parseDouble(first(item, "floorPrice", "price", "valuation", "marketPrice"), Double.NaN);
             if (Double.isFinite(unitCost)) {
                 costBasis += quantity * unitCost;
                 costQuantity += quantity;
                 if (Double.isFinite(floorPrice)) {
-                    pricedCostValue += quantity * floorPrice;
-                    pricedCostQuantity += quantity;
+                    unrealizedCost += quantity * unitCost;
+                    unrealizedProfit += quantity * (floorPrice - unitCost);
+                    unrealizedQuantity += quantity;
                 }
             }
         }
-        boolean hasReturn = costQuantity > 0d && Double.compare(pricedCostQuantity, costQuantity) == 0;
-        double returnRate = hasReturn && costBasis > 0d ? (pricedCostValue - costBasis) / costBasis * 100d : Double.NaN;
+        double returnRate = unrealizedCost > 0d ? unrealizedProfit / unrealizedCost * 100d : Double.NaN;
         String cost = costQuantity > 0d ? money(String.valueOf(costBasis)) : "待录入";
         double estimatedValue = parseDouble(first(data, "estimatedValue"), 0d);
         String totalValue = money(String.valueOf(Double.isFinite(estimatedValue) && estimatedValue >= 0d ? estimatedValue : 0d));
-        String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "0%";
-        String[][] values = {
-                {"持仓数量", first(data, "total", "totalCount", "count")},
-                {"持仓成本", cost},
-                {"总值", totalValue},
-                {"收益率", rate}
-        };
-        for (int index = 0; index < values.length; index += 2) {
-            LinearLayout row = horizontal(Color.TRANSPARENT);
-            row.setWeightSum(2f);
-            addMetricCell(row, values[index][0], values[index][1], ink, false);
-            addMetricCell(row, values[index + 1][0], values[index + 1][1], index + 1 == 3 && Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : ink, true);
-            grid.addView(row, marginParams(-1, dp(62), 0, index == 0 ? 0 : dp(6), 0, 0));
-        }
+        String rate = Double.isFinite(returnRate) ? signedPercent(returnRate) : "--";
+        String unrealized = unrealizedQuantity > 0d ? signedMoney(unrealizedProfit) : "--";
+
+        LinearLayout positionRow = horizontal(Color.TRANSPARENT);
+        addMetricCell(positionRow, "持仓数量", first(data, "total", "totalCount", "count"), ink, false);
+        addMetricCell(positionRow, "当前市值", totalValue, ink, true);
+        grid.addView(positionRow, marginParams(-1, dp(62), 0, 0, 0, 0));
+
+        LinearLayout profitRow = horizontal(Color.TRANSPARENT);
+        addMetricCell(profitRow, "持仓成本", cost, ink, false);
+        addMetricCell(profitRow, "未实现收益", unrealized, unrealizedQuantity > 0d ? (unrealizedProfit >= 0d ? success : danger) : muted, true);
+        grid.addView(profitRow, marginParams(-1, dp(62), 0, dp(6), 0, 0));
+
+        LinearLayout resultRow = horizontal(Color.TRANSPARENT);
+        TextView realizedProfit = addMetricCell(resultRow, "已实现收益", "--", muted, false);
+        addMetricCell(resultRow, "持仓收益率", rate, Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : muted, true);
+        grid.addView(resultRow, marginParams(-1, dp(62), 0, dp(6), 0, 0));
+        if (realizedProfitTarget != null && realizedProfitTarget.length > 0) realizedProfitTarget[0] = realizedProfit;
+
+        String coverage = "成本覆盖 " + compactNumber(costQuantity) + " / " + compactNumber(totalQuantity)
+                + " 件 · 未实现收益覆盖 " + compactNumber(unrealizedQuantity) + " 件";
+        grid.addView(text(coverage, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
         return grid;
     }
 
-    private void addMetricCell(LinearLayout row, String label, String value, int valueColor, boolean last) {
+    private TextView addMetricCell(LinearLayout row, String label, String value, int valueColor, boolean last) {
         LinearLayout cell = vertical(0xfff3f8f5);
         cell.setPadding(dp(11), dp(8), dp(11), dp(7));
         cell.addView(text(label, 11, muted, Typeface.NORMAL));
-        cell.addView(text(value == null || value.isEmpty() ? "--" : value, 15, valueColor, Typeface.BOLD), marginParams(-1, -2, 0, dp(3), 0, 0));
+        TextView valueView = text(value == null || value.isEmpty() ? "--" : value, 15, valueColor, Typeface.BOLD);
+        cell.addView(valueView, marginParams(-1, -2, 0, dp(3), 0, 0));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
         if (!last) params.setMargins(0, 0, dp(6), 0);
         row.addView(cell, params);
+        return valueView;
     }
 
     private LinearLayout labelled(String title, View view) { LinearLayout box = vertical(Color.TRANSPARENT); box.addView(text(title, 12, muted, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(4))); box.addView(view, marginParams(-1, dp(46), 0, 0, 0, dp(8))); return box; }
@@ -2746,6 +2859,34 @@ public final class MainActivity extends Activity {
     private String compactNumber(double value) { return value == Math.rint(value) ? String.valueOf((long) value) : String.format(Locale.US, "%.2f", value); }
     private String watchDelta(String changeValue, String percentValue) { double change = parseDouble(changeValue, Double.NaN); double percent = parseDouble(percentValue, Double.NaN); if (!Double.isFinite(change)) return "基准价"; String sign = change > 0d ? "+" : ""; String percentText = Double.isFinite(percent) ? " (" + (percent > 0d ? "+" : "") + String.format(Locale.US, "%.2f", percent) + "%)" : ""; return "变化 " + sign + String.format(Locale.US, "%.2f", change) + percentText; }
     private String time(String value) { if (value == null || value.isEmpty()) return "-"; try { return new SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date.from(java.time.Instant.parse(value))); } catch (Exception error) { return value.length() > 16 ? value.substring(0, 16).replace('T', ' ') : value; } }
+    private String pendingPaymentTime(String createdAt) {
+        long created = timestamp(createdAt);
+        if (created <= 0L) return "每 15 秒核对平台状态";
+        long remaining = EXPECTED_PAYMENT_WINDOW_MS - Math.max(0L, System.currentTimeMillis() - created);
+        if (remaining <= 0L) return "预计已超时，等待平台同步 · 每 15 秒核对平台状态";
+        long seconds = (remaining + 999L) / 1000L;
+        return String.format(Locale.CHINA, "预计剩余 %02d:%02d · 每 15 秒核对平台状态", seconds / 60L, seconds % 60L);
+    }
+    private long timestamp(String value) {
+        if (value == null || value.trim().isEmpty()) return 0L;
+        String source = value.trim();
+        try { return java.time.Instant.parse(source).toEpochMilli(); } catch (Exception ignored) { }
+        try {
+            long numeric = Long.parseLong(source);
+            return numeric > 0L && numeric < 10_000_000_000L ? numeric * 1000L : numeric;
+        } catch (Exception ignored) { }
+        String[] patterns = {"yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm"};
+        for (String pattern : patterns) {
+            try {
+                SimpleDateFormat format = new SimpleDateFormat(pattern, Locale.CHINA);
+                format.setLenient(false);
+                format.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+                Date parsed = format.parse(source);
+                if (parsed != null) return parsed.getTime();
+            } catch (Exception ignored) { }
+        }
+        return 0L;
+    }
     private double parseDouble(String value, double fallback) { try { return Double.parseDouble(value.trim()); } catch (Exception error) { return fallback; } }
     private double doubleValue(EditText input, double fallback) { return parseDouble(input.getText().toString(), fallback); }
     private int intValue(EditText input, int fallback) { try { return Integer.parseInt(input.getText().toString().trim()); } catch (Exception error) { return fallback; } }
