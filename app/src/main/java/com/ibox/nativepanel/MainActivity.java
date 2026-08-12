@@ -514,10 +514,8 @@ public final class MainActivity extends Activity {
             JSONArray items = findArray(assetData, "items", "collections", "records", "list");
             card.addView(portfolioHeadline(assetData, cache != null && cache.optBoolean("stale", false)), marginParams(-1, -2, 0, 0, 0, dp(12)));
             TextView[] realizedProfit = new TextView[1];
-            TextView realizedState = text("已实现收益同步中", 11, muted, Typeface.NORMAL);
-            card.addView(metricGrid(assetData, items, phone, realizedProfit), marginParams(-1, -2, 0, 0, 0, dp(6)));
-            card.addView(realizedState, marginParams(-1, -2, 0, 0, 0, dp(14)));
-            loadAccountPerformance(phone, realizedProfit[0], realizedState);
+            card.addView(metricGrid(assetData, items, phone, realizedProfit), marginParams(-1, -2, 0, 0, 0, dp(14)));
+            loadAccountPerformance(phone, realizedProfit[0]);
             if (items != null && items.length() > 0) renderAssetRows(card, items, phone);
             else card.addView(text(cache == null ? "资产同步中" : "暂无资产明细", 12, muted, Typeface.NORMAL), marginParams(-1, -2, 0, 0, 0, dp(4)));
             content.addView(card, marginParams(-1, -2, 0, 0, 0, dp(14)));
@@ -652,8 +650,8 @@ public final class MainActivity extends Activity {
         return quantity * (floorPrice - unitCost);
     }
 
-    private void loadAccountPerformance(String phone, TextView realizedProfit, TextView state) {
-        if (realizedProfit == null || state == null) return;
+    private void loadAccountPerformance(String phone, TextView realizedProfit) {
+        if (realizedProfit == null) return;
         request("同步已实现收益", "GET", "/native/accounts/" + Uri.encode(phone) + "/performance", null, result -> {
             JSONObject data = result.optJSONObject("data");
             if (data == null) data = result;
@@ -662,27 +660,19 @@ public final class MainActivity extends Activity {
             if (completed == 0) {
                 realizedProfit.setText(money("0"));
                 realizedProfit.setTextColor(ink);
-                state.setText("暂无已完成卖出订单");
                 return;
             }
             if (covered == 0) {
                 realizedProfit.setText("--");
                 realizedProfit.setTextColor(muted);
-                state.setText("已完成 " + completed + " 笔卖出 · 对应成本未覆盖");
                 return;
             }
             double profit = data.optDouble("realizedProfit", 0d);
             realizedProfit.setText(signedMoney(profit));
             realizedProfit.setTextColor(profit >= 0d ? success : danger);
-            String summary = "已实现收益估算覆盖 " + covered + " / " + completed + " 笔 · 已扣 4.5% 服务费";
-            if (!data.optBoolean("historyComplete", true)) {
-                summary += " · 历史读取 " + data.optInt("historyLoaded", 0) + " / " + data.optInt("historyTotal", 0);
-            }
-            state.setText(summary);
         }, () -> {
             realizedProfit.setText("--");
             realizedProfit.setTextColor(muted);
-            state.setText("已实现收益同步失败");
         });
     }
 
@@ -2613,14 +2603,12 @@ public final class MainActivity extends Activity {
         double unrealizedCost = 0d;
         double unrealizedProfit = 0d;
         double unrealizedQuantity = 0d;
-        double totalQuantity = 0d;
         int itemCount = items == null ? 0 : items.length();
         for (int index = 0; index < itemCount; index++) {
             JSONObject item = items.optJSONObject(index);
             if (item == null) continue;
             String id = first(item, "id", "groupId", "collectionId", "digitalCollectionId");
             double quantity = Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 1d));
-            totalQuantity += quantity;
             double unitCost = engine.store().getAssetCost(phone, id);
             double floorPrice = parseDouble(first(item, "floorPrice", "price", "valuation", "marketPrice"), Double.NaN);
             if (Double.isFinite(unitCost)) {
@@ -2655,10 +2643,6 @@ public final class MainActivity extends Activity {
         addMetricCell(resultRow, "持仓收益率", rate, Double.isFinite(returnRate) ? (returnRate >= 0d ? success : danger) : muted, true);
         grid.addView(resultRow, marginParams(-1, dp(62), 0, dp(6), 0, 0));
         if (realizedProfitTarget != null && realizedProfitTarget.length > 0) realizedProfitTarget[0] = realizedProfit;
-
-        String coverage = "成本覆盖 " + compactNumber(costQuantity) + " / " + compactNumber(totalQuantity)
-                + " 件 · 未实现收益覆盖 " + compactNumber(unrealizedQuantity) + " 件";
-        grid.addView(text(coverage, 11, muted, Typeface.NORMAL), marginParams(-1, -2, 0, dp(6), 0, 0));
         return grid;
     }
 
