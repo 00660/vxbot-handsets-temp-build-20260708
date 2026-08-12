@@ -2582,8 +2582,18 @@ public final class MainActivity extends Activity {
         String estimate = first(data, "estimatedValue");
         JSONArray items = findArray(data, "items", "collections", "records", "list");
         String pricedQuantity = first(data, "pricedQuantity");
+        double totalQuantity = parseDouble(first(data, "total", "totalCount", "count"), Double.NaN);
+        if (!Double.isFinite(totalQuantity)) {
+            totalQuantity = 0d;
+            if (items != null) {
+                for (int index = 0; index < items.length(); index++) {
+                    JSONObject item = items.optJSONObject(index);
+                    if (item != null) totalQuantity += Math.max(0d, parseDouble(first(item, "quantity", "num", "count", "holdNum"), 0d));
+                }
+            }
+        }
         String valuationCoverage = "已估值 " + (pricedQuantity.isEmpty() ? "0" : compactNumber(parseDouble(pricedQuantity, 0d)))
-                + " / " + (items == null ? "0" : compactNumber(items.length()));
+                + " / " + compactNumber(totalQuantity) + " 件";
         value.addView(text(money(estimate.isEmpty() ? "0" : estimate), 28, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
         value.addView(text(valuationCoverage, 11, muted, Typeface.NORMAL));
         headline.addView(value, new LinearLayout.LayoutParams(0, -2, 1));
