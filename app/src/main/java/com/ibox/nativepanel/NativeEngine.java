@@ -2691,7 +2691,7 @@ public final class NativeEngine {
                 }
                 taskRun(task, phone, "payment_pending", cashierMessage,
                         objectOf("orderUuid", orderUuid, "cashierLink", cashier, "paymentStatus", "pending", "result", order));
-                sendBarkBestEffort(task, "notifyPaymentPending", "iBox 首发订单待支付", task.optString("title") + " · 账号 " + phone + " · 订单 " + orderUuid, "active");
+                sendBarkBestEffort(task, "notifyPaymentPending", "iBox 首发订单待支付", task.optString("title") + " · 账号 " + phone + " · 订单 " + orderUuid, "active", cashier);
             } catch (Exception error) {
                 if (captchaRequired(error)) {
                     taskRun(task, phone, "verification_required", message(error));
@@ -3137,7 +3137,7 @@ public final class NativeEngine {
         task.put("lastResult", "payment_pending");
         task.put("submittedAt", Instant.now().toString());
         try {
-            sendBark("notifyPaymentPending", "iBox 求购待支付", task.optString("title") + " · 订单 " + orderUuid + " 已创建，等待钱包支付。", "active");
+            sendBark("notifyPaymentPending", "iBox 求购待支付", task.optString("title") + " · 订单 " + orderUuid + " 已创建，等待钱包支付。", "active", cashier);
         } catch (Exception error) {
             task.put("notificationError", message(error));
         }
@@ -3194,7 +3194,7 @@ public final class NativeEngine {
         task.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
         task.put("lockedAt", Instant.now().toString());
         sendBarkBestEffort(task, "notifyLockSuccess", "iBox 捡漏锁单成功", task.optString("title") + " · ¥" + candidate.optString("price"), "active");
-        sendBarkBestEffort(task, "notifyPaymentPending", "iBox 捡漏订单待支付", task.optString("title") + " · ¥" + candidate.optString("price") + "，等待钱包支付。", "active");
+        sendBarkBestEffort(task, "notifyPaymentPending", "iBox 捡漏订单待支付", task.optString("title") + " · ¥" + candidate.optString("price") + "，等待钱包支付。", "active", cashier);
     }
 
     private void processImmediatePurchaseTask(JSONObject task) throws Exception {
@@ -3232,7 +3232,7 @@ public final class NativeEngine {
         task.put("updatedAt", Instant.now().toString());
         addEvent(task, "payment_pending", "订单已创建，等待钱包支付");
         sendBarkBestEffort(task, "notifyLockSuccess", "iBox 立即买入锁单成功", task.optString("title") + " · ¥" + candidate.optString("price"), "active");
-        sendBarkBestEffort(task, "notifyPaymentPending", "iBox 立即买入待支付", task.optString("title") + " · 订单 " + orderUuid, "active");
+        sendBarkBestEffort(task, "notifyPaymentPending", "iBox 立即买入待支付", task.optString("title") + " · 订单 " + orderUuid, "active", cashier);
     }
 
     private boolean tryQuantBuy(JSONObject strategy, IBoxDirectClient.Account account, JSONObject candidate) throws Exception {
@@ -3283,7 +3283,7 @@ public final class NativeEngine {
         strategy.put("lastResult", cashier.isEmpty() ? cashierError : "payment_pending");
         strategy.put("submittedAt", Instant.now().toString());
         sendBarkBestEffort(strategy, "notifyLockSuccess", "iBox 量化锁单成功", strategy.optString("title") + " · ¥" + candidate.optString("price"), "active");
-        sendBarkBestEffort(strategy, "notifyPaymentPending", "iBox 量化订单待支付", strategy.optString("title") + " · 订单 " + orderUuid, "active");
+        sendBarkBestEffort(strategy, "notifyPaymentPending", "iBox 量化订单待支付", strategy.optString("title") + " · 订单 " + orderUuid, "active", cashier);
         return true;
     }
 
@@ -4395,10 +4395,15 @@ public final class NativeEngine {
     }
 
     private synchronized void sendBark(String eventKey, String title, String body, String level) throws Exception {
+        sendBark(eventKey, title, body, level, "");
+    }
+
+    private synchronized void sendBark(String eventKey, String title, String body, String level, String actionUrl) throws Exception {
         JSONObject config = barkSummary();
         if (!config.optBoolean("enabled", false)) return;
         if (eventKey != null && eventKey.startsWith("notify") && !config.optBoolean(eventKey, false)) return;
-        String signature = Integer.toHexString((String.valueOf(eventKey) + "\n" + title + "\n" + body).hashCode());
+        String url = actionUrl == null ? "" : actionUrl.trim();
+        String signature = Integer.toHexString((String.valueOf(eventKey) + "\n" + title + "\n" + body + "\n" + url).hashCode());
         long now = System.currentTimeMillis();
         if (!"test".equals(eventKey) && store.wasBarkSentRecently(signature, now, BARK_DEDUPE_WINDOW_MS)) return;
         JSONObject payload = objectOf(
@@ -4408,6 +4413,7 @@ public final class NativeEngine {
                 "group", "iBox",
                 "level", level == null || level.trim().isEmpty() ? "active" : level.trim()
         );
+        if (!url.isEmpty()) payload.put("url", url);
         HttpURLConnection connection = null;
         try {
             URL target = new URL(config.optString("server") + "/push");
@@ -4433,8 +4439,12 @@ public final class NativeEngine {
     }
 
     private void sendBarkBestEffort(JSONObject state, String eventKey, String title, String body, String level) {
+        sendBarkBestEffort(state, eventKey, title, body, level, "");
+    }
+
+    private void sendBarkBestEffort(JSONObject state, String eventKey, String title, String body, String level, String actionUrl) {
         try {
-            sendBark(eventKey, title, body, level);
+            sendBark(eventKey, title, body, level, actionUrl);
             state.remove("notificationError");
         } catch (Exception error) {
             putQuietly(state, "notificationError", message(error));
