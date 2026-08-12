@@ -2282,8 +2282,8 @@ public final class MainActivity extends Activity {
 
         LinearLayout bark = card(); bark.addView(text("Bark 通知", 16, ink, Typeface.BOLD), marginParams(-1, -2, 0, 0, 0, dp(10)));
         ProjectToggle enabled = toggle("启用推送", false); bark.addView(enabled);
-        EditText server = input("服务地址"); EditText key = passwordInput("设备密钥"); EditText hour = numberInput("每日汇总小时（0-23）", "9");
-        bark.addView(server, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(key, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(hour, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
+        EditText endpoint = input("设备 Key 或完整 Bark 地址"); EditText hour = numberInput("每日汇总小时（0-23）", "9");
+        bark.addView(endpoint, marginParams(-1, dp(46), 0, 0, 0, dp(8))); bark.addView(hour, marginParams(-1, dp(46), 0, 0, 0, dp(8)));
         bark.addView(text("通知规则", 13, ink, Typeface.BOLD), marginParams(-1, -2, 0, dp(4), 0, 0));
         ProjectToggle notifyLockSuccess = toggle("锁单成功", false);
         ProjectToggle notifyPaymentPending = toggle("订单待支付", true);
@@ -2299,13 +2299,12 @@ public final class MainActivity extends Activity {
         bark.addView(notifyApiError, marginParams(-1, -2, 0, 0, 0, dp(8)));
         LinearLayout barkActions = horizontal(Color.TRANSPARENT); Button load = button("读取", false); Button save = button("保存", true); Button test = button("测试", false);
         barkActions.addView(load, new LinearLayout.LayoutParams(0, dp(42), 1)); barkActions.addView(save, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); barkActions.addView(test, marginParams(dp(86), dp(42), dp(8), 0, 0, 0)); bark.addView(barkActions, new LinearLayout.LayoutParams(-1, -2));
-        load.setOnClickListener(v -> request("读取 Bark", "GET", "/native/notifications/bark", null, result -> fillBark(result, enabled, server, key, hour, notifyLockSuccess, notifyPaymentPending, notifyConsignmentSuccess, notifyCancelSuccess, notifyStrategyPaused, notifyApiError)));
+        load.setOnClickListener(v -> request("读取 Bark", "GET", "/native/notifications/bark", null, result -> fillBark(result, enabled, endpoint, hour, notifyLockSuccess, notifyPaymentPending, notifyConsignmentSuccess, notifyCancelSuccess, notifyStrategyPaused, notifyApiError)));
         save.setOnClickListener(v -> {
             JSONObject body = new JSONObject();
             try {
                 body.put("enabled", enabled.isChecked());
-                body.put("server", server.getText().toString().trim());
-                body.put("deviceKey", key.getText().toString().trim());
+                body.put("endpoint", endpoint.getText().toString().trim());
                 body.put("dailySummaryHour", intValue(hour, 9));
                 body.put("notifyLockSuccess", notifyLockSuccess.isChecked());
                 body.put("notifyPaymentPending", notifyPaymentPending.isChecked());
@@ -2363,12 +2362,12 @@ public final class MainActivity extends Activity {
                 result -> fillTradePassword(result, tradePassword, tradePasswordState));
     }
 
-    private void fillBark(JSONObject result, ProjectToggle enabled, EditText server, EditText key, EditText hour,
+    private void fillBark(JSONObject result, ProjectToggle enabled, EditText endpoint, EditText hour,
                           ProjectToggle notifyLockSuccess, ProjectToggle notifyPaymentPending,
                           ProjectToggle notifyConsignmentSuccess, ProjectToggle notifyCancelSuccess,
                           ProjectToggle notifyStrategyPaused, ProjectToggle notifyApiError) {
         JSONObject data = result.optJSONObject("data"); if (data == null) data = result;
-        enabled.setChecked(data.optBoolean("enabled", false)); server.setText(data.optString("server", "")); key.setText(data.optString("deviceKey", "")); hour.setText(String.valueOf(data.optInt("dailySummaryHour", 9)));
+        enabled.setChecked(data.optBoolean("enabled", false)); endpoint.setText(data.optString("endpoint", "")); hour.setText(String.valueOf(data.optInt("dailySummaryHour", 9)));
         notifyLockSuccess.setChecked(data.optBoolean("notifyLockSuccess", false));
         notifyPaymentPending.setChecked(data.optBoolean("notifyPaymentPending", true));
         notifyConsignmentSuccess.setChecked(data.optBoolean("notifyConsignmentSuccess", true));

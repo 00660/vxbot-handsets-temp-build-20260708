@@ -10,6 +10,8 @@ import org.json.JSONObject;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -35,6 +37,7 @@ public final class NativeEngine {
     public static final String CAPTCHA_ID = "0d4b08eac1cbdcad36bbf607c5bf3e1b";
 
     private static final String PREFIX = "/native";
+    private static final String DEFAULT_BARK_SERVER = "https://api.day.app";
     private static final String TIME_API_URL = "https://timeapi.io/api/time/current/zone?timeZone=UTC";
     private static final String SYNTHESIS_ACTIVITY_LIST_URL = "https://sail-api.ibox.art/synthesis-service/synthetic/activity/list";
     private static final String SYNTHESIS_ACTIVITY_DETAIL_URL = "https://sail-api.ibox.art/synthesis-service/synthetic/activity/detail";
@@ -2391,6 +2394,7 @@ public final class NativeEngine {
         try {
             config.put("configured", configured);
             config.put("enabled", config.optBoolean("enabled", false) && configured);
+            config.put("endpoint", formatBarkEndpoint(config.optString("server"), config.optString("deviceKey")));
         } catch (JSONException ignored) {
             // JSONObject supports primitive fields.
         }
@@ -2400,13 +2404,17 @@ public final class NativeEngine {
     private JSONObject saveBark(JSONObject body) throws Exception {
         JSONObject input = body == null ? new JSONObject() : body;
         boolean enabled = input.optBoolean("enabled", false);
-        String server = normalizeBarkServer(input.optString("server", ""));
-        String key = input.optString("deviceKey", "").trim();
+        BarkEndpoint endpoint = input.has("endpoint")
+                ? parseBarkEndpoint(input.optString("endpoint", ""))
+                : new BarkEndpoint(normalizeBarkServer(input.optString("server", "")), input.optString("deviceKey", "").trim());
+        String server = endpoint.server;
+        String key = endpoint.deviceKey;
         int hour = input.optInt("dailySummaryHour", 9);
         if (server.isEmpty()) throw new NativeException("Bark 服务地址无效");
         if (hour < 0 || hour > 23) throw new NativeException("每日汇总小时必须在 0 到 23 之间");
-        if (enabled && (key.isEmpty() || key.length() > 512 || key.contains(" "))) throw new NativeException("Bark 设备密钥无效");
+        if (enabled && !validBarkKey(key)) throw new NativeException("Bark 设备 Key 无效");
         JSONObject config = copy(input);
+        config.remove("endpoint");
         config.put("enabled", enabled);
         config.put("server", server);
         config.put("deviceKey", key);
@@ -4435,10 +4443,67 @@ public final class NativeEngine {
 
     private static String normalizeBarkServer(String source) {
         String value = source == null ? "" : source.trim();
-        if (value.isEmpty()) return "https://api.day.app";
+        if (value.isEmpty()) return DEFAULT_BARK_SERVER;
         if (!(value.startsWith("https://") || value.startsWith("http://"))) return "";
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
         return value;
+    }
+
+    private static BarkEndpoint parseBarkEndpoint(String source) throws NativeException {
+        String value = source == null ? "" : source.trim();
+        if (value.isEmpty()) return new BarkEndpoint(DEFAULT_BARK_SERVER, "");
+        if (!value.contains("://")) {
+            if (!validBarkKey(value)) throw new NativeException("Bark 设备 Key 无效");
+            return new BarkEndpoint(DEFAULT_BARK_SERVER, value);
+        }
+        try {
+            URI uri = new URI(value);
+            String scheme = uri.getScheme();
+            if (scheme == null || !("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
+                throw new NativeException("Bark 地址无效");
+            }
+            String rawPath = uri.getRawPath() == null ? "" : uri.getRawPath();
+            while (rawPath.endsWith("/")) rawPath = rawPath.substring(0, rawPath.length() - 1);
+            int separator = rawPath.lastIndexOf('/');
+            if (separator < 0 || separator == rawPath.length() - 1) throw new NativeException("Bark 地址缺少设备 Key");
+            String rawKey = rawPath.substring(separator + 1);
+            String key = new URI("https://bark.local/" + rawKey).getPath().substring(1);
+            if (!validBarkKey(key)) throw new NativeException("Bark 设备 Key 无效");
+            String basePath = rawPath.substring(0, separator);
+            String server = scheme.toLowerCase(Locale.ROOT) + "://" + uri.getRawAuthority() + basePath;
+            return new BarkEndpoint(server, key);
+        } catch (URISyntaxException error) {
+            throw new NativeException("Bark 地址无效");
+        }
+    }
+
+    private static String formatBarkEndpoint(String server, String deviceKey) {
+        String key = deviceKey == null ? "" : deviceKey.trim();
+        if (key.isEmpty()) return "";
+        String base = server == null ? "" : server.trim();
+        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+        if (base.isEmpty() || DEFAULT_BARK_SERVER.equalsIgnoreCase(base)) return key;
+        return base + "/" + key;
+    }
+
+    private static boolean validBarkKey(String key) {
+        if (key == null || key.isEmpty() || key.length() > 512) return false;
+        for (int index = 0; index < key.length(); index++) {
+            char value = key.charAt(index);
+            if (Character.isWhitespace(value) || value == '/' || value == '\\' || value == '?' || value == '#') return false;
+        }
+        return true;
+    }
+
+    private static final class BarkEndpoint {
+        final String server;
+        final String deviceKey;
+
+        BarkEndpoint(String server, String deviceKey) {
+            this.server = server;
+            this.deviceKey = deviceKey;
+        }
     }
 
     private static boolean captchaRequired(Exception error) {
