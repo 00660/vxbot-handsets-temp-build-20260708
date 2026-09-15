@@ -28,7 +28,7 @@ public final class PanelImageDeliveryFlow {
     private static final long TARGET_TIMEOUT_MS = 30000L;
     private static final long CONFIRM_TIMEOUT_MS = 30000L;
     private static final long SEND_TIMEOUT_MS = 30000L;
-    private static final long SUBMIT_TIMEOUT_MS = 15000L;
+    private static final long SUBMIT_TIMEOUT_MS = 60000L;
 
     private static final class ShareAsset {
         final Uri contentUri;
@@ -234,7 +234,13 @@ public final class PanelImageDeliveryFlow {
         long deadline = SystemClock.uptimeMillis() + SUBMIT_TIMEOUT_MS;
         int absentFrames = 0;
         while (SystemClock.uptimeMillis() < deadline) {
-            ConfirmState current = findConfirmState(OcrHelper.inspect(context, hs), targetKey);
+            OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+            if (screen == null || screen.width <= 0 || screen.height <= 0 || screen.items.isEmpty()) {
+                absentFrames = 0;
+                SystemClock.sleep(submitPoll(config));
+                continue;
+            }
+            ConfirmState current = findConfirmState(screen, targetKey);
             if (current == null) {
                 absentFrames++;
                 if (absentFrames >= STABLE_FRAME_COUNT) {
