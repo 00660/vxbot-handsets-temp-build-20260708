@@ -28,15 +28,17 @@ final class RobotDeliveryImage {
     }
 
     static File create(Context context, String title, String text, String event, String deliveryId) throws Exception {
+        boolean announcement = "announcement_published".equals(event);
         Paint titlePaint = paint(50f, Color.rgb(20, 33, 47), true);
         Paint bodyPaint = paint(34f, Color.rgb(67, 84, 101), false);
         Paint labelPaint = paint(25f, Color.rgb(0, 106, 101), true);
         List<String> titleLines = wrap(clean(title, "iBox 实时提醒"), titlePaint, CONTENT_WIDTH - 88, 2);
-        List<String> bodyLines = wrap(clean(text, "检测到新的业务事件，请查看面板详情。"), bodyPaint, CONTENT_WIDTH - 88, 12);
+        String body = announcement ? cleanBody(text, "正文无可提取文字，请查看原文。") : clean(text, "检测到新的业务事件，请查看面板详情。");
+        List<String> bodyLines = wrap(body, bodyPaint, CONTENT_WIDTH - 88, announcement ? 220 : 12);
         int titleBlock = Math.max(1, titleLines.size()) * 64;
         int bodyBlock = Math.max(1, bodyLines.size()) * 49;
         int bodyBottom = OUTER + 192 + titleBlock + 22 + 62 + bodyBlock;
-        int height = Math.max(620, Math.min(1680, bodyBottom + 198));
+        int height = Math.max(620, announcement ? bodyBottom + 198 : Math.min(1680, bodyBottom + 198));
 
         Bitmap bitmap = Bitmap.createBitmap(WIDTH, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
@@ -53,7 +55,7 @@ final class RobotDeliveryImage {
         Paint brandPaint = paint(30f, Color.rgb(17, 43, 60), true);
         canvas.drawText("iBox", OUTER + 44, OUTER + 90, brandPaint);
         Paint descriptorPaint = paint(25f, Color.rgb(105, 125, 142), false);
-        canvas.drawText("交易与行情提醒", OUTER + 142, OUTER + 90, descriptorPaint);
+        canvas.drawText(announcement ? "官方公告" : "交易与行情提醒", OUTER + 142, OUTER + 90, descriptorPaint);
 
         String label = eventLabel(event);
         float labelWidth = Math.max(150f, labelPaint.measureText(label) + 54f);
@@ -128,6 +130,10 @@ final class RobotDeliveryImage {
                     segment = segment.substring(count);
                 }
             }
+            if (!segment.isEmpty()) {
+                remaining = segment + (newline >= 0 ? remaining.substring(newline) : "");
+                break;
+            }
             remaining = newline >= 0 ? remaining.substring(newline + 1) : "";
         }
         if (!remaining.isEmpty() && !lines.isEmpty()) {
@@ -146,8 +152,15 @@ final class RobotDeliveryImage {
         return result.isEmpty() ? fallback : result;
     }
 
+    private static String cleanBody(String value, String fallback) {
+        String result = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n')
+                .replaceAll("[\\u0000-\\u0009\\u000b-\\u001f\\u007f]+", " ").replaceAll("\n{3,}", "\n\n").trim();
+        return result.isEmpty() ? fallback : result;
+    }
+
     private static String eventLabel(String event) {
         String value = event == null ? "" : event.trim();
+        if ("announcement_published".equals(value)) return "新公告";
         if (value.contains("market_watch")) return "行情提醒";
         if (value.contains("quant")) return "量化交易";
         if (value.contains("first_sale")) return "首发任务";
