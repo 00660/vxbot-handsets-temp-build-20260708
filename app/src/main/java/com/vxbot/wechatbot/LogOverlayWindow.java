@@ -24,7 +24,6 @@ import android.widget.TextView;
 public final class LogOverlayWindow {
     private static final int PANEL_WIDTH_DP = 300;
     private static final int PANEL_HEIGHT_DP = 300;
-    private static final int DOT_SIZE_DP = 38;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -40,18 +39,20 @@ public final class LogOverlayWindow {
     private FrameLayout root;
     private FrameLayout panelView;
     private FrameLayout panelHeader;
-    private TextView dotView;
     private TextView logText;
     private boolean receiverRegistered;
-    private boolean collapsed;
+    private Runnable onClose;
     private float downRawX;
     private float downRawY;
     private int downX;
     private int downY;
-    private boolean moved;
 
     public LogOverlayWindow(Context context) {
         this.context = context.getApplicationContext();
+    }
+
+    public void setOnClose(Runnable action) {
+        onClose = action;
     }
 
     public void show() {
@@ -69,7 +70,6 @@ public final class LogOverlayWindow {
                 root = new FrameLayout(context);
                 params = buildParams();
                 buildViews();
-                applyCollapsed(false);
                 windowManager.addView(root, params);
                 registerReceiver();
                 update();
@@ -93,7 +93,6 @@ public final class LogOverlayWindow {
             root = null;
             panelView = null;
             panelHeader = null;
-            dotView = null;
             logText = null;
             params = null;
             windowManager = null;
@@ -104,10 +103,9 @@ public final class LogOverlayWindow {
         handler.post(() -> {
             if (root == null) {
                 show();
-                handler.post(() -> applyCollapsed(false));
-                return;
+            } else {
+                update();
             }
-            applyCollapsed(false);
         });
     }
 
@@ -187,41 +185,19 @@ public final class LogOverlayWindow {
         FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP | Gravity.END);
         closeParams.setMargins(0, dp(4), dp(4), 0);
         panelHeader.addView(close, closeParams);
-        close.setOnClickListener(v -> applyCollapsed(true));
+        close.setOnClickListener(v -> {
+            hide();
+            if (onClose != null) {
+                onClose.run();
+            }
+        });
         root.addView(panelView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
-        attachDrag(panelHeader, false);
-
-        dotView = new TextView(context);
-        dotView.setText("军");
-        dotView.setTextColor(Color.WHITE);
-        dotView.setTextSize(14);
-        dotView.setTypeface(Typeface.DEFAULT_BOLD);
-        dotView.setGravity(Gravity.CENTER);
-        dotView.setBackground(circleBackground(0xFF1677FF));
-        root.addView(dotView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
-        dotView.setOnClickListener(v -> applyCollapsed(false));
-        attachDrag(dotView, true);
+        attachDrag(panelHeader);
     }
 
-    private void applyCollapsed(boolean nextCollapsed) {
-        if (root == null || panelView == null || dotView == null) {
-            return;
-        }
-        collapsed = nextCollapsed;
-        panelView.setVisibility(collapsed ? View.GONE : View.VISIBLE);
-        dotView.setVisibility(collapsed ? View.VISIBLE : View.GONE);
-        resize(collapsed ? dp(DOT_SIZE_DP) : dp(PANEL_WIDTH_DP),
-                collapsed ? dp(DOT_SIZE_DP) : dp(PANEL_HEIGHT_DP));
-        if (!collapsed) {
-            update();
-        }
-    }
-
-    private void attachDrag(View view, boolean tapToExpand) {
+    private void attachDrag(View view) {
         view.setOnTouchListener((v, event) -> {
             if (params == null || windowManager == null) {
                 return false;
@@ -232,14 +208,10 @@ public final class LogOverlayWindow {
                     downRawY = event.getRawY();
                     downX = params.x;
                     downY = params.y;
-                    moved = false;
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     int dx = Math.round(event.getRawX() - downRawX);
                     int dy = Math.round(event.getRawY() - downRawY);
-                    if (Math.abs(dx) > dp(3) || Math.abs(dy) > dp(3)) {
-                        moved = true;
-                    }
                     params.x = Math.max(0, downX + dx);
                     params.y = Math.max(0, downY + dy);
                     try {
@@ -251,26 +223,11 @@ public final class LogOverlayWindow {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     savePosition();
-                    if (tapToExpand && !moved) {
-                        applyCollapsed(false);
-                    }
                     return true;
                 default:
                     return true;
             }
         });
-    }
-
-    private void resize(int width, int height) {
-        if (params == null || windowManager == null || root == null) {
-            return;
-        }
-        params.width = width;
-        params.height = height;
-        try {
-            windowManager.updateViewLayout(root, params);
-        } catch (Exception ignored) {
-        }
     }
 
     private void savePosition() {
@@ -307,7 +264,6 @@ public final class LogOverlayWindow {
         root = null;
         panelView = null;
         panelHeader = null;
-        dotView = null;
         logText = null;
         params = null;
         windowManager = null;

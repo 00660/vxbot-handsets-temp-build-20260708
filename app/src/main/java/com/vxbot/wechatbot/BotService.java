@@ -50,11 +50,15 @@ public final class BotService extends Service {
     private boolean pendingRecoveryAttempted;
     private volatile boolean botStartedOnce;
     private volatile boolean operationActive;
+    private boolean logOverlayDismissedByUser;
     private LogOverlayWindow logOverlay;
     private ControlOverlayWindow controlOverlay;
     private BotHttpServer robotHttpServer;
     private final SharedPreferences.OnSharedPreferenceChangeListener configListener = (prefs, key) -> {
         if (key == null || "enableLogOverlay".equals(key) || "keepLogOverlayDuringOperation".equals(key)) {
+            if (key == null || "enableLogOverlay".equals(key)) {
+                logOverlayDismissedByUser = false;
+            }
             syncLogOverlay(BotConfig.load(this));
         }
         if (isInputModeSettingKey(key)) {
@@ -88,8 +92,15 @@ public final class BotService extends Service {
         MorningGreetingScheduler.schedule(this);
         GarbageCleaner.runIfDue(this, "service-create");
         controlOverlay = new ControlOverlayWindow(this);
-        controlOverlay.show();
         logOverlay = new LogOverlayWindow(this);
+        controlOverlay.setOnShowLogs(this::showOperationLogOverlay);
+        logOverlay.setOnClose(() -> {
+            logOverlayDismissedByUser = true;
+            if (running && controlOverlay != null) {
+                controlOverlay.show();
+            }
+        });
+        controlOverlay.show();
         BotConfig.prefs(this).registerOnSharedPreferenceChangeListener(configListener);
         BotConfig initialConfig = BotConfig.load(this);
         robotHttpServer = new BotHttpServer(this, this::enqueueRobotHttpDelivery);
@@ -144,10 +155,7 @@ public final class BotService extends Service {
             return START_NOT_STICKY;
         }
         if (ACTION_SHOW_LOG_OVERLAY.equals(action)) {
-            syncLogOverlay(BotConfig.load(this));
-            if (logOverlay != null) {
-                logOverlay.expand();
-            }
+            showOperationLogOverlay();
             return START_STICKY;
         }
         if (shouldSkipActionForPause(action)) {
@@ -218,7 +226,7 @@ public final class BotService extends Service {
             }
             syncLogOverlay(config);
             if (intent != null && intent.getBooleanExtra("showLogOverlay", false) && logOverlay != null) {
-                logOverlay.expand();
+                showOperationLogOverlay();
             }
             boolean ok = daemonManager.ensureRunning(this, config);
             if (ok) {
@@ -281,12 +289,38 @@ public final class BotService extends Service {
             return;
         }
         if (config.enableLogOverlay) {
-            if (operationActive && !config.keepLogOverlayDuringOperation) {
+            if (logOverlayDismissedByUser) {
+                if (controlOverlay != null) {
+                    controlOverlay.show();
+                }
                 return;
+            }
+            if (operationActive && !config.keepLogOverlayDuringOperation) {
+                logOverlay.hide();
+                if (controlOverlay != null) {
+                    controlOverlay.show();
+                }
+                return;
+            }
+            if (controlOverlay != null) {
+                controlOverlay.hide();
             }
             logOverlay.show();
         } else {
             logOverlay.hide();
+            if (controlOverlay != null) {
+                controlOverlay.show();
+            }
+        }
+    }
+
+    private void showOperationLogOverlay() {
+        logOverlayDismissedByUser = false;
+        if (controlOverlay != null) {
+            controlOverlay.hide();
+        }
+        if (logOverlay != null) {
+            logOverlay.expand();
         }
     }
 
@@ -1085,6 +1119,9 @@ public final class BotService extends Service {
         operationActive = true;
         if (config.enableLogOverlay && !config.keepLogOverlayDuringOperation && logOverlay != null) {
             logOverlay.hide();
+            if (controlOverlay != null) {
+                controlOverlay.show();
+            }
             BotLog.i(this, "overlay.pause", "自动操作期间临时隐藏悬浮日志，避免污染 OCR");
             SystemClock.sleep(200);
         } else if (config.enableLogOverlay && config.keepLogOverlayDuringOperation) {

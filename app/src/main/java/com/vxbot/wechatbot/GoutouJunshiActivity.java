@@ -182,7 +182,7 @@ public final class GoutouJunshiActivity extends Activity {
         if (BotService.isRunning()) service.setAction(BotService.ACTION_SHOW_LOG_OVERLAY);
         else service.setAction(BotService.ACTION_START).putExtra("showLogOverlay", true);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        toast("实时处理悬浮窗已打开；点右上角 × 收起，点蓝色“军”圆点展开");
+        toast("实时处理悬浮窗已打开；关闭后回到控制圆点，可从竖排菜单再次打开操作日志");
     }
 
     private void renderKnowledge() {

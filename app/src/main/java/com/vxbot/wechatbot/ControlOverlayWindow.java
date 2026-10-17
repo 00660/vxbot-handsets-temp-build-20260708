@@ -23,8 +23,8 @@ import android.widget.TextView;
 
 public final class ControlOverlayWindow {
     private static final int DOT_SIZE_DP = 28;
-    private static final int PANEL_WIDTH_DP = 234;
-    private static final int PANEL_HEIGHT_DP = 44;
+    private static final int PANEL_WIDTH_DP = 148;
+    private static final int PANEL_HEIGHT_DP = 220;
     private static final int SHOW_IME_PICKER_DELAY_MS = 50;
     private static final int RESTORE_NOT_FOCUSABLE_DELAY_MS = 1200;
     private static final long IME_PICKER_CLICK_COOLDOWN_MS = 1500L;
@@ -43,6 +43,7 @@ public final class ControlOverlayWindow {
     private FrameLayout root;
     private TextView dotView;
     private TextView pauseButton;
+    private Runnable showLogsAction;
     private boolean receiverRegistered;
     private boolean expanded;
     private float downRawX;
@@ -54,6 +55,10 @@ public final class ControlOverlayWindow {
 
     public ControlOverlayWindow(Context context) {
         this.context = context.getApplicationContext();
+    }
+
+    public void setOnShowLogs(Runnable action) {
+        showLogsAction = action;
     }
 
     public void show() {
@@ -119,7 +124,7 @@ public final class ControlOverlayWindow {
         attachDrag(dotView, true);
 
         LinearLayout panel = new LinearLayout(context);
-        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER);
         panel.setPadding(dp(6), dp(5), dp(6), dp(5));
         panel.setBackground(roundBackground(0xEE111827));
@@ -127,7 +132,7 @@ public final class ControlOverlayWindow {
 
         TextView imeButton = actionButton("输入法");
         imeButton.setOnClickListener(v -> showInputMethodPicker());
-        panel.addView(imeButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        addMenuButton(panel, imeButton, false);
 
         TextView strategistButton = actionButton("军师");
         strategistButton.setOnClickListener(v -> {
@@ -139,30 +144,41 @@ public final class ControlOverlayWindow {
                 BotLog.e(context, "control.goutou.open.fail", "军师分析页打开失败: " + e.getMessage());
             }
         });
-        LinearLayout.LayoutParams strategistParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-        strategistParams.setMargins(dp(6), 0, 0, 0);
-        panel.addView(strategistButton, strategistParams);
+        addMenuButton(panel, strategistButton, true);
 
         pauseButton = actionButton("");
         pauseButton.setOnClickListener(v -> {
             BotRuntimeControls.togglePaused(context);
             updatePauseButton();
         });
-        LinearLayout.LayoutParams pauseParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-        pauseParams.setMargins(dp(6), 0, 0, 0);
-        panel.addView(pauseButton, pauseParams);
+        addMenuButton(panel, pauseButton, true);
+
+        TextView logsButton = actionButton("操作日志");
+        logsButton.setOnClickListener(v -> {
+            if (showLogsAction != null) {
+                showLogsAction.run();
+            }
+        });
+        addMenuButton(panel, logsButton, true);
 
         TextView collapseButton = actionButton("收起");
         collapseButton.setBackground(roundBackground(0xFF475569));
         collapseButton.setOnClickListener(v -> setExpanded(false));
-        LinearLayout.LayoutParams collapseParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
-        collapseParams.setMargins(dp(6), 0, 0, 0);
-        panel.addView(collapseButton, collapseParams);
+        addMenuButton(panel, collapseButton, true);
 
         root.addView(panel, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
         attachDrag(panel, false);
+    }
+
+    private void addMenuButton(LinearLayout panel, TextView button, boolean withTopMargin) {
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(38));
+        if (withTopMargin) {
+            buttonParams.topMargin = dp(5);
+        }
+        panel.addView(button, buttonParams);
     }
 
     private TextView actionButton(String text) {
