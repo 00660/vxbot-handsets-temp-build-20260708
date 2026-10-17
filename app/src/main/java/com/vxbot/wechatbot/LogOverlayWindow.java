@@ -99,7 +99,9 @@ public final class LogOverlayWindow {
     public void update() {
         handler.post(() -> {
             if (logText != null) {
-                logText.setText(compactLog(BotLog.readTailNewestFirst(context, 5000)));
+                String analysis = GoutouJunshiStore.latestSummary(context);
+                String logs = compactLog(BotLog.readTailNewestFirst(context, 5000));
+                logText.setText(analysis.isEmpty() ? logs : analysis + "\n" + logs);
             }
         });
     }

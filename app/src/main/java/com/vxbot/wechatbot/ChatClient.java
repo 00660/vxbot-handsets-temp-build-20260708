@@ -19,6 +19,11 @@ import java.util.regex.Pattern;
 
 public final class ChatClient {
     public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route) throws Exception {
+        return requestReply(context, config, message, history, route, null);
+    }
+
+    public String requestReply(Context context, BotConfig config, WxMessage message, List<String> history,
+                               MessageRouter.Route route, OcrHelper.Screen screen) throws Exception {
         if (route.kind == MessageRouter.Kind.CODEX) {
             if (config.enableHappyDirectCodex) {
                 try {
@@ -49,6 +54,12 @@ public final class ChatClient {
                 throw new IllegalStateException("Happy Codex 请求失败: " + e.getMessage(), e);
             }
         }
+        if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi
+                && GoutouJunshiClient.isExplicitBoundary(message.text)) {
+            GoutouJunshiStore.saveAnalysis(context, message.sessionName, message.senderName,
+                    GoutouJunshiStore.boundaryAnalysis(message.sessionName, message.senderName));
+            return "";
+        }
         if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
             throw new IllegalStateException("chatEndpoint 未配置");
         }
@@ -64,6 +75,18 @@ public final class ChatClient {
             BotLog.i(context, "chat.tool.direct", "实时工具直出 mode=" + route.kind
                     + " bytes=" + toolContext.getBytes(StandardCharsets.UTF_8).length);
             return stripToolLabels(formatToolReply(route.kind, toolContext));
+        }
+        if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi
+                && !shouldAutoWebSearch(userText)) {
+            try {
+                String reply = new GoutouJunshiClient().requestReply(context, config, message, history,
+                        toolContext, screen);
+                if ("__GOUTOU_NO_REPLY__".equals(reply)) return reply;
+                if (reply != null && !reply.trim().isEmpty()) return reply.trim();
+                if (GoutouJunshiClient.isExplicitBoundary(message.text)) return "";
+            } catch (Exception e) {
+                BotLog.w(context, "goutou.fallback", "军师自动分析失败，回落普通聊天回复: " + e.getMessage());
+            }
         }
         for (int i = 0; i < 2; i++) {
             try {
@@ -297,7 +320,8 @@ public final class ChatClient {
         return reply.trim();
     }
 
-    private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history, MessageRouter.Route route, String toolContext) throws Exception {
+    private String requestOnce(Context context, BotConfig config, WxMessage message, List<String> history,
+                              MessageRouter.Route route, String toolContext) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("model", config.model);
         String userText = MessageRouter.stripBotMention(message.text, config);

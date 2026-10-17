@@ -61,6 +61,10 @@
             android:launchMode="singleTask"
             android:theme="@style/KeepAwakeTheme" />
 
+        <activity
+            android:name=".GoutouJunshiActivity"
+            android:exported="false" />
+
         <service
             android:name=".BotService"
             android:exported="false"

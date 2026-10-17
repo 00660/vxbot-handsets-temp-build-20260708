@@ -3,6 +3,7 @@
 这是机器人 APK 的干净源码仓库，只保留编译和协同开发需要的内容：
 
 - `app/`：Android APK 主工程。
+- `third_party/goutoujunshi-jev-chat/`：狗头军师来源 Android 适配、参考资料与许可文件。
 - `src/dev/handsets/daemon/`：APK 内置 hs daemon 源码，供 `HsDaemonManager` 通过 root/shizuku 链路启动。
 - `.github/workflows/wechatbot-apk.yml`：GitHub Actions 远端构建 APK，并把最新 APK 发布到 `apk-build-output` 分支。
 
@@ -11,8 +12,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`216`
-- `versionName`：`0.1.216-gxaz-code-only-reply`
+- `versionCode`：`246`
+- `versionName`：`0.1.246-goutoujunshi-auto-strategy`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -24,6 +25,9 @@
 - 白名单隔离：上下文、发起人锁、喷子目标、恋人目标均按群隔离。
 - 人物画像：白名单群消息按群、成员、日期分组落盘；群里发送 `人物画像`、`昨日总结`、`谁是话痨`、`昨天说了啥` 会把压缩后的成员统计和发言样本交给上游大模型分析，返回话痨排行、性格画像、昨天/今天干了啥说了啥和群聊重点，上游失败时回落本地统计。
 - 普通聊天：调用 OpenAI 兼容接口回复，支持文字/语音回复开关。
+- 狗头军师自动策略：普通聊天自动从承接、降压、调侃、轻推、约见、澄清、收线七类策略中判断；策略接口负责判断与候选排序，聊天接口生成三条候选及“更像我一点”。分析页保留事实、推测、未知、风险、下一步、停止条件、候选理由与可能代价，并自动发送排序第一的候选。策略接口与模型可独立配置，留空时复用当前聊天接口；策略本身不需要手动选择。明确停止联系的原话会停止发送。每次处理时会在本机 OCR 当前微信会话可见消息，并将识别文字、通知内容和关系资料发往配置的模型接口；截图不落盘。
+- 狗头军师联系人与知识：可维护联系人关系、阶段、目标、别名和背景笔记，新增带标签的常驻/匹配知识；另提供最近分析页、五种消息方向趋势示例和带 `timestamp,sender,message` 的 CSV K 线导入。历史跨重启保存默认关闭，可在功能开关单独启用。
+- 狗头军师来源与许可：集成来源、参考资料、Android 原始适配和示例见 [`third_party/goutoujunshi-jev-chat/`](third_party/goutoujunshi-jev-chat)，许可署名见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 - Happy Codex：命中 `codex`、`代码`、`报错`、`bug`、`修复` 的技术请求时，优先调用容器内 Happy Codex 桥接接口；桥接服务复用 Happy 终端授权拉起/复用 Codex 会话，失败时回退普通上游。
 - 语音回复：TTS 生成后通过微信“按住说话”录音发送，支持千问/豆包/MiMo TTS 下拉切换、发音人和语速配置；豆包支持浏览器 Cookie JSON 文件或完整 Cookie 文件导入，界面不展示 Cookie 原文，三段 Cookie 仅作兜底，MiMo 使用 `api-key` 调用小米 `mimo-v2.5-tts`，失败自动回退千问。
 - TTS 试听：功能页提供 `试听 TTS`，按当前 provider、角色、语速或控制参数生成一句测试语并在 APK 内播放。
@@ -57,6 +61,9 @@
 - 消息分类：`app/src/main/java/com/vxbot/wechatbot/MessageRouter.java`
 - 人物画像存储：`app/src/main/java/com/vxbot/wechatbot/PersonaStore.java`
 - 上游文字请求：`app/src/main/java/com/vxbot/wechatbot/ChatClient.java`
+- 狗头军师自动判断、候选生成/排序与完整分析：`app/src/main/java/com/vxbot/wechatbot/GoutouJunshiClient.java`
+- 狗头军师本地联系人、聊天历史、知识笔记和趋势存储：`app/src/main/java/com/vxbot/wechatbot/GoutouJunshiStore.java`
+- 狗头军师管理界面与内置参考检索：`app/src/main/java/com/vxbot/wechatbot/GoutouJunshiActivity.java`、`GoutouReferenceLibrary.java`
 - 微信操作：`app/src/main/java/com/vxbot/wechatbot/WechatDriver.java`
 - OCR/找图找色：`app/src/main/java/com/vxbot/wechatbot/OcrHelper.java`
 - 图片流程：`app/src/main/java/com/vxbot/wechatbot/ImageFlow.java`

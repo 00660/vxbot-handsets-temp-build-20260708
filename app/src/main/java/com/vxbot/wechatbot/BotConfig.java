@@ -259,6 +259,9 @@ public final class BotConfig {
     public final String followUpSenderWhitelist;
     public final String activeMode;
     public final String chatEndpoint;
+    public final String goutouStrategyEndpoint;
+    public final String goutouStrategyApiKey;
+    public final String goutouStrategyModel;
     public final String happyCodexEndpoint;
     public final String happyDirectServerUrl;
     public final String happyDirectToken;
@@ -322,6 +325,7 @@ public final class BotConfig {
     public final int shareSubmitPollMs;
     public final int inputModeToggleSettleMs;
     public final int quotedImageOpenDelayMs;
+    public final int goutouContextHistoryCount;
     public final boolean enableImageAnalysis;
     public final boolean enableImage;
     public final boolean enableTroll;
@@ -332,6 +336,8 @@ public final class BotConfig {
     public final boolean enableNews;
     public final boolean enableWeather;
     public final boolean enableVideoParse;
+    public final boolean enableGoutouJunshi;
+    public final boolean saveGoutouJunshiHistory;
     public final boolean enableLogOverlay;
     public final boolean keepLogOverlayDuringOperation;
     public final boolean enableNoRootKeepAwake;
@@ -356,6 +362,9 @@ public final class BotConfig {
         followUpSenderWhitelist = prefs.getString("followUpSenderWhitelist", "");
         activeMode = prefs.getString("activeMode", "root");
         chatEndpoint = normalizeChatEndpoint(prefs.getString("chatEndpoint", DEFAULT_CHAT_ENDPOINT));
+        goutouStrategyEndpoint = prefs.getString("goutouStrategyEndpoint", "").trim().replaceAll("/+$", "");
+        goutouStrategyApiKey = prefs.getString("goutouStrategyApiKey", "").trim();
+        goutouStrategyModel = prefs.getString("goutouStrategyModel", "").trim();
         happyCodexEndpoint = normalizeHappyCodexEndpoint(prefs.getString("happyCodexEndpoint", DEFAULT_HAPPY_CODEX_ENDPOINT));
         happyDirectServerUrl = normalizeBaseUrl(prefs.getString("happyDirectServerUrl", DEFAULT_HAPPY_DIRECT_SERVER_URL), DEFAULT_HAPPY_DIRECT_SERVER_URL);
         happyDirectToken = prefs.getString("happyDirectToken", "").trim();
@@ -423,6 +432,7 @@ public final class BotConfig {
         shareSubmitPollMs = clampInt(prefs.getInt("shareSubmitPollMs", 350), 100, 5000);
         inputModeToggleSettleMs = clampInt(prefs.getInt("inputModeToggleSettleMs", 1200), 300, 10000);
         quotedImageOpenDelayMs = clampInt(prefs.getInt("quotedImageOpenDelayMs", 800), 800, 5000);
+        goutouContextHistoryCount = clampInt(prefs.getInt("goutouContextHistoryCount", 20), 0, 100);
         enableImageAnalysis = prefs.getBoolean("enableImageAnalysis", true);
         enableImage = prefs.getBoolean("enableImage", true);
         enableTroll = prefs.getBoolean("enableTroll", true);
@@ -433,6 +443,8 @@ public final class BotConfig {
         enableNews = prefs.getBoolean("enableNews", true);
         enableWeather = prefs.getBoolean("enableWeather", true);
         enableVideoParse = prefs.getBoolean("enableVideoParse", true);
+        enableGoutouJunshi = prefs.getBoolean("enableGoutouJunshi", true);
+        saveGoutouJunshiHistory = prefs.getBoolean("saveGoutouJunshiHistory", false);
         enableLogOverlay = prefs.getBoolean("enableLogOverlay", false);
         keepLogOverlayDuringOperation = prefs.getBoolean("keepLogOverlayDuringOperation", true);
         enableNoRootKeepAwake = prefs.getBoolean("enableNoRootKeepAwake", true);

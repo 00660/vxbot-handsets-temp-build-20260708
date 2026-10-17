@@ -77,6 +77,9 @@ public final class MainActivity extends Activity {
     private EditText allowedSessions;
     private EditText followUpSenderWhitelist;
     private EditText chatEndpoint;
+    private EditText goutouStrategyEndpoint;
+    private EditText goutouStrategyApiKey;
+    private EditText goutouStrategyModel;
     private EditText happyCodexEndpoint;
     private Switch enableHappyDirectCodex;
     private EditText happyDirectServerUrl;
@@ -147,6 +150,7 @@ public final class MainActivity extends Activity {
     private EditText shareSubmitPollMs;
     private EditText inputModeToggleSettleMs;
     private EditText quotedImageOpenDelayMs;
+    private EditText goutouContextHistoryCount;
     private EditText broadcastMessage;
     private EditText broadcastGapMs;
     private EditText broadcastSearchResultWaitMs;
@@ -161,6 +165,8 @@ public final class MainActivity extends Activity {
     private Switch enableNews;
     private Switch enableWeather;
     private Switch enableVideoParse;
+    private Switch enableGoutouJunshi;
+    private Switch saveGoutouJunshiHistory;
     private Switch enableLogOverlay;
     private Switch keepLogOverlayDuringOperation;
     private Switch enableNoRootKeepAwake;
@@ -344,6 +350,9 @@ public final class MainActivity extends Activity {
 
         LinearLayout upstreamPage = page(content, "上游模型");
         chatEndpoint = edit(upstreamPage, "OpenAI 兼容接口", BotConfig.DEFAULT_CHAT_ENDPOINT, false);
+        goutouStrategyEndpoint = edit(upstreamPage, "军师策略接口完整 URL（留空复用聊天接口）", "OpenAI 兼容 /v1/chat/completions URL", false);
+        goutouStrategyApiKey = edit(upstreamPage, "军师策略判断 API Key（同一服务可留空）", "", false);
+        goutouStrategyModel = edit(upstreamPage, "军师策略判断模型（留空复用聊天模型）", "", false);
         happyCodexEndpoint = edit(upstreamPage, "Happy Codex 桥接接口", BotConfig.DEFAULT_HAPPY_CODEX_ENDPOINT, false);
         enableHappyDirectCodex = switchRow(upstreamPage, "Happy Codex 直连 session");
         happyDirectServerUrl = edit(upstreamPage, "Happy Server", BotConfig.DEFAULT_HAPPY_DIRECT_SERVER_URL, false);
@@ -438,6 +447,14 @@ public final class MainActivity extends Activity {
         enableNews = switchRow(featuresPage, "新闻/微博热点");
         enableWeather = switchRow(featuresPage, "天气查询");
         enableVideoParse = switchRow(featuresPage, "短视频/图集解析");
+        enableGoutouJunshi = switchRow(featuresPage, "狗头军师自动策略与候选排序");
+        saveGoutouJunshiHistory = switchRow(featuresPage, "在本机持续保存军师聊天历史（默认关闭）");
+        goutouContextHistoryCount = edit(featuresPage, "军师上下文历史条数（0-100）", "20", false);
+        TextView goutouPrivacy = text("狗头军师会在目标微信会话打开后复用本机 Paddle OCR 读取当前可见消息，并把识别文字、通知内容和配置的关系资料发送到策略/聊天接口。截图不存盘；跨重启聊天历史默认关闭。最近分析结果会保存在本机供查看。", 12, MUTED, Typeface.NORMAL);
+        goutouPrivacy.setPadding(0, dp(4), 0, dp(8));
+        featuresPage.addView(goutouPrivacy);
+        featuresPage.addView(buttonRow(button("军师联系人、知识、趋势与分析",
+                v -> startActivity(new Intent(this, GoutouJunshiActivity.class)))));
         ttsProvider = spinner(featuresPage, "TTS 引擎", BotConfig.TTS_PROVIDER_LABELS);
         ttsProvider.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -833,6 +850,9 @@ public final class MainActivity extends Activity {
             followUpSenderWhitelist.setText(config.followUpSenderWhitelist);
             activeMode.setSelection("shizuku".equals(config.activeMode) ? 1 : 0);
             chatEndpoint.setText(config.chatEndpoint);
+            goutouStrategyEndpoint.setText(config.goutouStrategyEndpoint);
+            goutouStrategyApiKey.setText(config.goutouStrategyApiKey);
+            goutouStrategyModel.setText(config.goutouStrategyModel);
             happyCodexEndpoint.setText(config.happyCodexEndpoint);
             enableHappyDirectCodex.setChecked(config.enableHappyDirectCodex);
             happyDirectServerUrl.setText(config.happyDirectServerUrl);
@@ -902,6 +922,9 @@ public final class MainActivity extends Activity {
             enableNews.setChecked(config.enableNews);
             enableWeather.setChecked(config.enableWeather);
             enableVideoParse.setChecked(config.enableVideoParse);
+            enableGoutouJunshi.setChecked(config.enableGoutouJunshi);
+            saveGoutouJunshiHistory.setChecked(config.saveGoutouJunshiHistory);
+            goutouContextHistoryCount.setText(String.valueOf(config.goutouContextHistoryCount));
             normalReplyAsVoice.setChecked(config.normalReplyAsVoice);
             syncInputModeFromVoiceSwitch.setChecked(config.syncInputModeFromVoiceSwitch);
             enableNoRootKeepAwake.setChecked(config.enableNoRootKeepAwake);
@@ -940,6 +963,9 @@ public final class MainActivity extends Activity {
         e.putString("followUpSenderWhitelist", followUpSenderWhitelist.getText().toString());
         e.putString("activeMode", activeMode.getSelectedItem().toString());
         e.putString("chatEndpoint", chatEndpoint.getText().toString());
+        e.putString("goutouStrategyEndpoint", goutouStrategyEndpoint.getText().toString());
+        e.putString("goutouStrategyApiKey", goutouStrategyApiKey.getText().toString());
+        e.putString("goutouStrategyModel", goutouStrategyModel.getText().toString());
         e.putString("happyCodexEndpoint", happyCodexEndpoint.getText().toString());
         e.putBoolean("enableHappyDirectCodex", enableHappyDirectCodex.isChecked());
         e.putString("happyDirectServerUrl", happyDirectServerUrl.getText().toString());
@@ -1004,6 +1030,9 @@ public final class MainActivity extends Activity {
         e.putBoolean("enableNews", enableNews.isChecked());
         e.putBoolean("enableWeather", enableWeather.isChecked());
         e.putBoolean("enableVideoParse", enableVideoParse.isChecked());
+        e.putBoolean("enableGoutouJunshi", enableGoutouJunshi.isChecked());
+        e.putBoolean("saveGoutouJunshiHistory", saveGoutouJunshiHistory.isChecked());
+        e.putInt("goutouContextHistoryCount", intValue(goutouContextHistoryCount, 20));
         e.putBoolean("normalReplyAsVoice", newNormalVoice);
         e.putBoolean("syncInputModeFromVoiceSwitch", newSyncInputMode);
         e.putBoolean("enableNoRootKeepAwake", enableNoRootKeepAwake.isChecked());

@@ -337,6 +337,7 @@ public final class BotService extends Service {
             BotLog.w(this, "notice.skip.whitelist", "群不在白名单 " + message.sessionName);
             return;
         }
+        if (config.saveGoutouJunshiHistory) GoutouJunshiStore.recordInbound(this, message);
         if (!MessageRouter.isProfilePersonaCommand(message.text)
                 && !MessageRouter.isPersonaCommand(message.text)) {
             personaStore.remember(this, message);
@@ -569,6 +570,14 @@ public final class BotService extends Service {
         if (skipIfPaused("reply.skip.paused", "机器人已暂停，跳过回复 " + message.display())) {
             return;
         }
+        if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi
+                && GoutouJunshiClient.isExplicitBoundary(message.text)) {
+            GoutouJunshiStore.saveAnalysis(this, message.sessionName, message.senderName,
+                    GoutouJunshiStore.boundaryAnalysis(message.sessionName, message.senderName));
+            PendingReplyStore.clearIfMatches(this, message);
+            BotLog.i(this, "goutou.stop", "收到明确停止联系要求，本轮不打开会话也不发送回复 " + message.display());
+            return;
+        }
         if (!daemonManager.ensureRunning(this, config)) {
             BotLog.e(this, "reply.abort", "hs daemon 未就绪");
             return;
@@ -675,10 +684,22 @@ public final class BotService extends Service {
                     BotLog.i(this, "license.request", "请求 18088 注册机面板 " + message.display());
                     return new LicensePanelClient().request(this, config, message.text);
                 }
+                if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi) {
+                    if (!openFuture.get()) return "";
+                    OcrHelper.Screen screen = OcrHelper.inspect(this, new HsClient(config.hsPort));
+                    BotLog.i(this, "goutou.ocr", "分析当前微信会话可见 OCR 内容 items="
+                            + (screen == null ? 0 : screen.items.size()) + " session=" + message.sessionName);
+                    return new ChatClient().requestReply(this, config, message, history, route, screen);
+                }
                 BotLog.i(this, "relay.start", "请求上游 " + config.chatEndpoint + " / mode=" + route.kind + " / " + message.display());
                 return new ChatClient().requestReply(this, config, message, history, route);
             });
             String reply = replyFuture.get();
+            if ("__GOUTOU_NO_REPLY__".equals(reply)) {
+                PendingReplyStore.clearIfMatches(this, message);
+                driver.leaveWechatIfForeground(this, "goutou-no-reply");
+                return;
+            }
             Future<VoiceReply.PreparedVoice> preparedVoiceFuture = null;
             if ("__TTS_FLOW__".equals(reply)) {
                 preparedVoiceFuture = prepareVoiceAsync(parallel, config, route.instruction, "tts-command");
@@ -759,6 +780,9 @@ public final class BotService extends Service {
                 if (sent) {
                     clearPendingReplyAfterSend(route, message);
                     sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
+                    if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi && config.saveGoutouJunshiHistory) {
+                        GoutouJunshiStore.recordOutbound(this, message, reply);
+                    }
                 }
                 return;
             }
@@ -766,6 +790,9 @@ public final class BotService extends Service {
             if (sent) {
                 clearPendingReplyAfterSend(route, message);
                 sessionStore.rememberBot(message.sessionName, config.primaryBotName(), reply);
+                if (route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi && config.saveGoutouJunshiHistory) {
+                    GoutouJunshiStore.recordOutbound(this, message, reply);
+                }
                 if (keepForeground) {
                     startCodexForegroundWatcher(config, message);
                 }

@@ -129,6 +129,20 @@ public final class ControlOverlayWindow {
         imeButton.setOnClickListener(v -> showInputMethodPicker());
         panel.addView(imeButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 
+        TextView strategistButton = actionButton("军师");
+        strategistButton.setOnClickListener(v -> {
+            try {
+                Intent intent = new Intent(context, GoutouJunshiActivity.class);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            } catch (Exception e) {
+                BotLog.e(context, "control.goutou.open.fail", "军师分析页打开失败: " + e.getMessage());
+            }
+        });
+        LinearLayout.LayoutParams strategistParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f);
+        strategistParams.setMargins(dp(6), 0, 0, 0);
+        panel.addView(strategistButton, strategistParams);
+
         pauseButton = actionButton("");
         pauseButton.setOnClickListener(v -> {
             BotRuntimeControls.togglePaused(context);
