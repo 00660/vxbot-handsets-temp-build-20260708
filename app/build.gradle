@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 250
-        versionName "0.1.250-goutou-overlay-open"
+        versionCode 251
+        versionName "0.1.251-ble-hid"
         multiDexKeepProguard file("multidex-keep.pro")
         externalNativeBuild {
             cmake {

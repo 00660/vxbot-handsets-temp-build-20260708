@@ -205,12 +205,31 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        connectHidDevice();
         fullScreenPanelAlpha = clampFloat(BotConfig.prefs(this).getFloat("fullScreenPanelAlpha", fullScreenPanelAlpha), 0.15f, 0.95f);
         buildUi();
         loadConfigIntoUi();
         selectTab(0);
         requestPostNotificationIfNeeded();
         KeepAliveScheduler.startBotService(this, "activity-launch");
+    }
+
+    private void connectHidDevice() {
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.BLUETOOTH_CONNECT}, 6412);
+            return;
+        }
+        HidBleClient.connectAsync();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 6412 && grantResults.length > 0 &&
+                grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            HidBleClient.connectAsync();
+        }
     }
 
     @Override

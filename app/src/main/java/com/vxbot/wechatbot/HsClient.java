@@ -75,28 +75,27 @@ public final class HsClient {
     }
 
     public String tap(int x, int y) throws Exception {
-        return command("tap x=" + x + " y=" + y);
+        return HidBleClient.tap(x, y);
     }
 
     public String swipe(int x1, int y1, int x2, int y2, int durationMs) throws Exception {
-        return command("swipe x1=" + x1 + " y1=" + y1 + " x2=" + x2 + " y2=" + y2
-                + " dur=" + durationMs);
+        return HidBleClient.swipe(x1, y1, x2, y2, durationMs);
     }
 
     public String down(int x, int y) throws Exception {
-        return command("down x=" + x + " y=" + y);
+        return HidBleClient.down(x, y);
     }
 
     public String up(int x, int y) throws Exception {
-        return command("up x=" + x + " y=" + y);
+        return HidBleClient.up();
     }
 
     public String key(String name) throws Exception {
-        return command("key " + name);
+        return HidBleClient.key(name);
     }
 
     public String keyCode(int code) throws Exception {
-        return command("key code=" + code);
+        return HidBleClient.keyCode(code);
     }
 
     public String clipSet(String text) throws Exception {
