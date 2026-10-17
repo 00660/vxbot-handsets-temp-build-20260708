@@ -100,6 +100,17 @@ public final class LogOverlayWindow {
         });
     }
 
+    public void expand() {
+        handler.post(() -> {
+            if (root == null) {
+                show();
+                handler.post(() -> applyCollapsed(false));
+                return;
+            }
+            applyCollapsed(false);
+        });
+    }
+
     public void update() {
         handler.post(() -> {
             if (logText != null) {

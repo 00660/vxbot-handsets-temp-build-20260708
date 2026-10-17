@@ -24,6 +24,7 @@ import java.util.concurrent.Future;
 public final class BotService extends Service {
     public static final String ACTION_START = "com.vxbot.wechatbot.START";
     public static final String ACTION_STOP = "com.vxbot.wechatbot.STOP";
+    public static final String ACTION_SHOW_LOG_OVERLAY = "com.vxbot.wechatbot.SHOW_LOG_OVERLAY";
     public static final String ACTION_HANDLE_NOTIFICATION = "com.vxbot.wechatbot.HANDLE_NOTIFICATION";
     public static final String ACTION_TEST_OCR = "com.vxbot.wechatbot.TEST_OCR";
     public static final String ACTION_DUMP_OCR = "com.vxbot.wechatbot.DUMP_OCR";
@@ -142,6 +143,13 @@ public final class BotService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (ACTION_SHOW_LOG_OVERLAY.equals(action)) {
+            syncLogOverlay(BotConfig.load(this));
+            if (logOverlay != null) {
+                logOverlay.expand();
+            }
+            return START_STICKY;
+        }
         if (shouldSkipActionForPause(action)) {
             BotLog.w(this, "runtime.pause.skip_action", "机器人已暂停，跳过 action=" + action + " reason=" + reason);
             return START_STICKY;
@@ -209,6 +217,9 @@ public final class BotService extends Service {
                 return;
             }
             syncLogOverlay(config);
+            if (intent != null && intent.getBooleanExtra("showLogOverlay", false) && logOverlay != null) {
+                logOverlay.expand();
+            }
             boolean ok = daemonManager.ensureRunning(this, config);
             if (ok) {
                 botStartedOnce = true;

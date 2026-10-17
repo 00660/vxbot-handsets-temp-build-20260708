@@ -178,11 +178,10 @@ public final class GoutouJunshiActivity extends Activity {
                 .putBoolean("enableLogOverlay", true)
                 .putBoolean("keepLogOverlayDuringOperation", true)
                 .apply();
-        if (!BotService.isRunning()) {
-            Intent service = new Intent(this, BotService.class);
-            service.setAction(BotService.ACTION_START);
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-        }
+        Intent service = new Intent(this, BotService.class);
+        if (BotService.isRunning()) service.setAction(BotService.ACTION_SHOW_LOG_OVERLAY);
+        else service.setAction(BotService.ACTION_START).putExtra("showLogOverlay", true);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
         toast("实时处理悬浮窗已打开；点右上角 × 收起，点蓝色“军”圆点展开");
     }
 

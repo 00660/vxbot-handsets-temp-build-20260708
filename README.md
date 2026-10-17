@@ -12,8 +12,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`249`
-- `versionName`：`0.1.249-goutou-ui-actions`
+- `versionCode`：`250`
+- `versionName`：`0.1.250-goutou-overlay-open`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -155,6 +155,7 @@ am start-foreground-service -n com.vxbot.wechatbot/.BotService -a com.vxbot.wech
 
 ## 最近交接
 
+- 2026-10-17：狗头军师“查看实时处理”现在会主动展开现有悬浮窗；机器人未运行时启动服务并在窗口出现后展开。版本升到 `versionCode=250` / `versionName=0.1.250-goutou-overlay-open`。
 - 2026-10-17：整理狗头军师页面按钮。把“查看实时处理”设为主按钮，说明悬浮窗会展示消息路由和处理记录；联系人、笔记、CSV 导入和分析入口改成清晰的操作文案，按钮使用统一圆角与按压反馈。版本升到 `versionCode=249` / `versionName=0.1.249-goutou-ui-actions`。
 - 2026-07-12：修复重启后机器人/HS 不恢复。临时暂停状态不再跨开机保留；`BootReceiver` 收到开机或用户解锁广播后先恢复 `BotService`，再执行调度与清理。打开 APK 时会尝试恢复未暂停的机器人，但不会擅自清除当前暂停，状态页明确显示“小圆点暂停=已启用（机器人启动被阻止）”；手动点击“启动机器人”会解除暂停。HS 端口 15 秒未就绪时额外记录 `app_process` 的退出码、stdout 和 Java stderr。版本升到 `versionCode=163` / `versionName=0.1.163-boot-hs-recovery`。
 - 2026-07-10：修复 MTK proc 虚拟麦注入结束后循环导致的尾部重复/拖尾。v151 已能正确解析嵌套 WAV 并按 `controlRate=32000` 注入，但 `VmicInjector` 仍写 `loop 1`，TTS 播完后内核会从头循环；v152 改为写 `loop 0`，让源 PCM 结束后输出静音，不重复开头。版本升到 `versionCode=152` / `versionName=0.1.151-vmic-no-loop`。
