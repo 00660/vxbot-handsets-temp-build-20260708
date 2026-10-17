@@ -58,10 +58,8 @@ public final class ChatClient {
                 && GoutouJunshiClient.isExplicitBoundary(message.text)) {
             GoutouJunshiStore.saveAnalysis(context, message.sessionName, message.senderName,
                     GoutouJunshiStore.boundaryAnalysis(message.sessionName, message.senderName));
+            BotLog.i(context, "goutou.stop", "普通聊天识别到明确联系边界，军师已停止回复");
             return "";
-        }
-        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
-            throw new IllegalStateException("chatEndpoint 未配置");
         }
         Exception last = null;
         String userText = MessageRouter.stripBotMention(message.text, config);
@@ -82,11 +80,17 @@ public final class ChatClient {
                 String reply = new GoutouJunshiClient().requestReply(context, config, message, history,
                         toolContext, screen);
                 if ("__GOUTOU_NO_REPLY__".equals(reply)) return reply;
-                if (reply != null && !reply.trim().isEmpty()) return reply.trim();
+                if (reply != null && !reply.trim().isEmpty()) {
+                    BotLog.i(context, "goutou.reply.selected", "已返回军师排序第一候选，进入机器人发送流程");
+                    return reply.trim();
+                }
                 if (GoutouJunshiClient.isExplicitBoundary(message.text)) return "";
             } catch (Exception e) {
                 BotLog.w(context, "goutou.fallback", "军师自动分析失败，回落普通聊天回复: " + e.getMessage());
             }
+        }
+        if (config.chatEndpoint == null || config.chatEndpoint.trim().isEmpty()) {
+            throw new IllegalStateException("chatEndpoint 未配置，且狗头军师策略请求不可用");
         }
         for (int i = 0; i < 2; i++) {
             try {

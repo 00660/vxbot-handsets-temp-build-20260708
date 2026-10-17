@@ -3,12 +3,16 @@ package com.vxbot.wechatbot;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,6 +36,12 @@ import java.util.List;
 
 /** Management and review screens for the integrated dog-head strategist. */
 public final class GoutouJunshiActivity extends Activity {
+    private static final int BG = 0xFFF6F8FB;
+    private static final int INK = 0xFF182033;
+    private static final int MUTED = 0xFF5E6B82;
+    private static final int NAV = 0xFF0F172A;
+    private static final int BLUE = 0xFF1677FF;
+    private static final int TEAL = 0xFF0EA5A3;
     private static final int TAB_CONTACTS = 0;
     private static final int TAB_KNOWLEDGE = 1;
     private static final int TAB_TRENDS = 2;
@@ -39,6 +49,7 @@ public final class GoutouJunshiActivity extends Activity {
     private static final int CSV_REQUEST = 54;
     private LinearLayout body;
     private int selectedTab;
+    private final List<TextView> navTabs = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,31 +62,54 @@ public final class GoutouJunshiActivity extends Activity {
     private void buildShell() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(246, 248, 251));
-        root.setPadding(dp(16), dp(14), dp(16), dp(8));
-        TextView title = text("狗头军师", 24, 0xFF17212B, true);
-        root.addView(title);
-        TextView subtitle = text("普通聊天自动判断七类策略、生成三条候选并按排序自动回复。", 13, 0xFF667085, false);
-        subtitle.setPadding(0, dp(4), 0, dp(12));
-        root.addView(subtitle);
+        root.setBackgroundColor(BG);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setPadding(dp(20), dp(16), dp(20), dp(14));
+        header.setBackgroundColor(NAV);
+        TextView title = text("狗头军师", 22, Color.WHITE, true);
+        header.addView(title);
+        TextView subtitle = text("自动判断七类策略 · 生成候选 · 按排序自动回复", 12, 0xFFB8C2D3, false);
+        subtitle.setPadding(0, dp(3), 0, 0);
+        header.addView(subtitle);
+        root.addView(header);
         LinearLayout nav = new LinearLayout(this);
         nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setGravity(Gravity.CENTER_VERTICAL);
+        nav.setPadding(dp(8), dp(6), dp(8), dp(6));
+        nav.setBackground(round(0xFFE9EEF5, dp(14), 0, 0));
+        LinearLayout.LayoutParams navParams = new LinearLayout.LayoutParams(-1, dp(48));
+        navParams.setMargins(dp(16), dp(12), dp(16), dp(4));
+        root.addView(nav, navParams);
         String[] labels = {"联系人", "知识", "趋势", "分析"};
+        navTabs.clear();
         for (int i = 0; i < labels.length; i++) {
             final int target = i;
-            Button button = new Button(this);
-            button.setText(labels[i]);
-            button.setAllCaps(false);
-            button.setOnClickListener(v -> { selectedTab = target; render(); });
-            nav.addView(button, new LinearLayout.LayoutParams(0, dp(46), 1f));
+            TextView tab = text(labels[i], 13, MUTED, true);
+            tab.setGravity(Gravity.CENTER);
+            tab.setPadding(dp(4), 0, dp(4), 0);
+            tab.setOnClickListener(v -> { selectedTab = target; updateNavigation(); render(); });
+            navTabs.add(tab);
+            nav.addView(tab, new LinearLayout.LayoutParams(0, -1, 1f));
         }
-        root.addView(nav);
         ScrollView scroll = new ScrollView(this);
+        scroll.setClipToPadding(false);
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(16), dp(8), dp(16), dp(20));
         scroll.addView(body, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         setContentView(root);
+        updateNavigation();
+    }
+
+    private void updateNavigation() {
+        for (int i = 0; i < navTabs.size(); i++) {
+            TextView tab = navTabs.get(i);
+            boolean selected = i == selectedTab;
+            tab.setTextColor(selected ? Color.WHITE : MUTED);
+            tab.setBackground(round(selected ? NAV : Color.TRANSPARENT, dp(11), 0, 0));
+        }
     }
 
     private void render() {
@@ -89,14 +123,15 @@ public final class GoutouJunshiActivity extends Activity {
     }
 
     private void renderContacts() {
-        body.addView(text("联系人关系档案", 18, 0xFF17212B, true), topMargin());
-        body.addView(text("联系人按微信会话名和发送人匹配。阶段、目标、关系和背景会进入自动策略上下文。", 13, 0xFF667085, false));
+        body.addView(text("联系人关系档案", 18, INK, true), topMargin());
+        body.addView(text("联系人资料完全可选，用来补充关系阶段、目标和背景。不设置联系人时，所有普通聊天仍会进入七类策略自动判断。", 13, MUTED, false));
+        body.addView(action("打开军师操作流悬浮窗", v -> openStrategyOverlay()), topMarginSmall());
         body.addView(action("新增联系人资料", v -> editProfile(null)), topMargin());
         List<GoutouJunshiStore.Profile> profiles = GoutouJunshiStore.profiles(this);
-        if (profiles.isEmpty()) body.addView(text("还没有手动维护的联系人。机器人仍会记录白名单会话上下文。", 14, 0xFF667085, false), topMargin());
+        if (profiles.isEmpty()) body.addView(text("还没有手动维护的联系人。机器人仍会记录白名单会话上下文。", 14, MUTED, false), topMargin());
         for (GoutouJunshiStore.Profile profile : profiles) {
             LinearLayout card = card();
-            card.addView(text(profile.name + (profile.session.isEmpty() ? "" : " · " + profile.session), 16, 0xFF17212B, true));
+            card.addView(text(profile.name + (profile.session.isEmpty() ? "" : " · " + profile.session), 16, INK, true));
             card.addView(text("关系：" + show(profile.relationship) + "\n阶段：" + show(profile.stage)
                     + "\n本轮目标：" + show(profile.goal) + "\n背景：" + show(profile.background), 13, 0xFF475467, false));
             LinearLayout actions = row();
@@ -122,23 +157,42 @@ public final class GoutouJunshiActivity extends Activity {
         EditText background = field(fields, "补充背景、偏好、共同经历或边界", profile.background, true);
         ScrollView scroll = new ScrollView(this);
         scroll.addView(fields);
-        new AlertDialog.Builder(this).setTitle(source == null ? "新增联系人资料" : "编辑联系人资料")
+        showStyled(new AlertDialog.Builder(this).setTitle(source == null ? "新增联系人资料" : "编辑联系人资料")
                 .setView(scroll).setNegativeButton("取消", null).setPositiveButton("保存", (d, w) -> {
                     profile.name = value(name); profile.session = value(session); profile.aliases = value(aliases);
                     profile.relationship = value(relationship); profile.stage = value(stage); profile.goal = value(goal);
                     profile.background = value(background);
                     if (profile.name.isEmpty()) toast("请填写联系人名"); else { GoutouJunshiStore.saveProfile(this, profile); render(); }
-                }).show();
+                }).create());
+    }
+
+    private void openStrategyOverlay() {
+        if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+            toast("先授予悬浮窗权限，返回后再点一次");
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName())));
+            return;
+        }
+        BotConfig.prefs(this).edit()
+                .putBoolean("enableLogOverlay", true)
+                .putBoolean("keepLogOverlayDuringOperation", true)
+                .apply();
+        if (!BotService.isRunning()) {
+            Intent service = new Intent(this, BotService.class);
+            service.setAction(BotService.ACTION_START);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        }
+        toast("军师操作流悬浮窗已打开；点右上角 x 收起，点蓝色“军”圆点展开");
     }
 
     private void renderKnowledge() {
-        body.addView(text("知识笔记", 18, 0xFF17212B, true), topMargin());
-        body.addView(text("笔记按标题、标签和最近消息匹配；常驻笔记每轮都会带入分析。上游关系沟通知识库也随应用完整保留。", 13, 0xFF667085, false));
+        body.addView(text("知识笔记", 18, INK, true), topMargin());
+        body.addView(text("笔记按标题、标签和最近消息匹配；常驻笔记每轮都会带入分析。上游关系沟通知识库也随应用完整保留。", 13, MUTED, false));
         body.addView(action("查看内置关系知识库", v -> showReferenceLibrary()), topMarginSmall());
         body.addView(action("新增知识笔记", v -> editNote(null)), topMargin());
         for (GoutouJunshiStore.Note note : GoutouJunshiStore.notes(this)) {
             LinearLayout card = card();
-            card.addView(text(note.title + (note.alwaysOn ? " · 常驻" : "") + (!note.enabled ? " · 已停用" : ""), 16, 0xFF17212B, true));
+            card.addView(text(note.title + (note.alwaysOn ? " · 常驻" : "") + (!note.enabled ? " · 已停用" : ""), 16, INK, true));
             card.addView(text(note.content + (note.tags.isEmpty() ? "" : "\n标签：" + note.tags), 13, 0xFF475467, false));
             LinearLayout actions = row();
             actions.addView(smallButton("编辑", v -> editNote(note)), weight());
@@ -162,7 +216,7 @@ public final class GoutouJunshiActivity extends Activity {
             list.append("\n这些资料作为知识库素材供你查看和整理；策略会结合你维护的笔记与会话内容，不会未经证据把资料当作当前聊天事实。");
             ScrollView view = new ScrollView(this); TextView text = text(list.toString(), 13, 0xFF344054, false);
             text.setPadding(dp(16), dp(10), dp(16), dp(10)); view.addView(text);
-            new AlertDialog.Builder(this).setTitle("内置知识资料").setView(view).setPositiveButton("关闭", null).show();
+            showStyled(new AlertDialog.Builder(this).setTitle("内置知识资料").setView(view).setPositiveButton("关闭", null).create());
         } catch (Exception e) { toast("知识资料读取失败：" + e.getMessage()); }
     }
 
@@ -184,20 +238,20 @@ public final class GoutouJunshiActivity extends Activity {
         EditText title = field(fields, "标题", note.title, false);
         EditText content = field(fields, "知识内容", note.content, true);
         EditText tags = field(fields, "匹配标签，逗号分开", note.tags, false);
-        CheckBox always = new CheckBox(this); always.setText("常驻注入"); always.setChecked(note.alwaysOn); fields.addView(always);
-        CheckBox enabled = new CheckBox(this); enabled.setText("启用"); enabled.setChecked(note.enabled); fields.addView(enabled);
-        new AlertDialog.Builder(this).setTitle(source == null ? "新增知识笔记" : "编辑知识笔记")
+        CheckBox always = checkBox("常驻注入", note.alwaysOn); fields.addView(always);
+        CheckBox enabled = checkBox("启用", note.enabled); fields.addView(enabled);
+        showStyled(new AlertDialog.Builder(this).setTitle(source == null ? "新增知识笔记" : "编辑知识笔记")
                 .setView(fields).setNegativeButton("取消", null).setPositiveButton("保存", (d, w) -> {
                     note.title = value(title); note.content = value(content); note.tags = value(tags);
                     note.alwaysOn = always.isChecked(); note.enabled = enabled.isChecked();
                     if (note.title.isEmpty() || note.content.isEmpty()) toast("标题和内容都要填写");
                     else { GoutouJunshiStore.saveNote(this, note); render(); }
-                }).show();
+                }).create());
     }
 
     private void renderTrends() {
-        body.addView(text("关系趋势 K 线", 18, 0xFF17212B, true), topMargin());
-        body.addView(text("图表只显示消息方向的净差（对方 +1、自己 −1），不代表关系质量或成功率。可查看五种示例走势或导入聊天 CSV。", 13, 0xFF667085, false));
+        body.addView(text("关系趋势 K 线", 18, INK, true), topMargin());
+        body.addView(text("图表只显示消息方向的净差（对方 +1、自己 −1），不代表关系质量或成功率。可查看五种示例走势或导入聊天 CSV。", 13, MUTED, false));
         String[] examples = {"双向升温", "热聊后降温", "冲突后修复", "忙但仍兑现", "明确边界后收线"};
         for (String name : examples) body.addView(action(name, v -> {
             List<GoutouJunshiStore.TrendCandle> data = exampleTrend(name);
@@ -208,17 +262,17 @@ public final class GoutouJunshiActivity extends Activity {
             intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("text/*");
             startActivityForResult(intent, CSV_REQUEST);
         }), topMargin());
-        body.addView(text("CSV 列：timestamp,sender,message；sender 取 me 或 other，时间按升序排列。", 12, 0xFF667085, false), topMarginSmall());
+        body.addView(text("CSV 列：timestamp,sender,message；sender 取 me 或 other，时间按升序排列。", 12, MUTED, false), topMarginSmall());
         for (GoutouJunshiStore.TrendCandle candle : GoutouJunshiStore.trend(this, "CSV 导入")) {
             body.addView(text(candle.date + "  净差 " + candle.open + " → " + candle.close, 12, 0xFF475467, false));
         }
     }
 
     private void renderAnalysis() {
-        body.addView(text("最近分析", 18, 0xFF17212B, true), topMargin());
-        body.addView(text("自动策略在后台运行；机器人会直接发送排序第一的候选。下面可查看事实、未知、下一步、停止条件、候选理由和更贴近你口吻的版本。", 13, 0xFF667085, false));
+        body.addView(text("最近分析", 18, INK, true), topMargin());
+        body.addView(text("自动策略在后台运行；机器人会直接发送排序第一的候选。下面可查看事实、未知、下一步、停止条件、候选理由和更贴近你口吻的版本。", 13, MUTED, false));
         List<JSONObject> analyses = GoutouJunshiStore.recentAnalyses(this);
-        if (analyses.isEmpty()) body.addView(text("还没有分析记录。", 14, 0xFF667085, false), topMargin());
+        if (analyses.isEmpty()) body.addView(text("还没有分析记录。", 14, MUTED, false), topMargin());
         for (JSONObject analysis : analyses) {
             LinearLayout card = card();
             card.addView(text(analysis.optString("session") + " · " + analysis.optString("sender"), 15, 0xFF17212B, true));
@@ -236,7 +290,7 @@ public final class GoutouJunshiActivity extends Activity {
         TextView content = text(report, 14, 0xFF344054, false);
         content.setPadding(dp(18), dp(10), dp(18), dp(14));
         scroll.addView(content);
-        new AlertDialog.Builder(this).setTitle("完整策略分析").setView(scroll).setPositiveButton("关闭", null).show();
+        showStyled(new AlertDialog.Builder(this).setTitle("完整策略分析").setView(scroll).setPositiveButton("关闭", null).create());
     }
 
     private void showTrend(String name, List<GoutouJunshiStore.TrendCandle> candles) {
@@ -245,7 +299,7 @@ public final class GoutouJunshiActivity extends Activity {
         TextView caveat = text(name + "\n消息方向净差，不是关系质量或成功率。", 13, 0xFF667085, false);
         caveat.setPadding(dp(12), dp(8), dp(12), dp(4)); content.addView(caveat);
         content.addView(new TrendChart(this, candles), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)));
-        new AlertDialog.Builder(this).setTitle("关系趋势").setView(content).setPositiveButton("关闭", null).show();
+        showStyled(new AlertDialog.Builder(this).setTitle("关系趋势").setView(content).setPositiveButton("关闭", null).create());
     }
 
     private List<GoutouJunshiStore.TrendCandle> exampleTrend(String name) {
@@ -335,14 +389,37 @@ public final class GoutouJunshiActivity extends Activity {
 
     private EditText field(LinearLayout parent, String hint, String value, boolean multiline) {
         EditText edit = new EditText(this); edit.setHint(hint); edit.setText(value); edit.setTextSize(14);
-        if (multiline) { edit.setMinLines(2); edit.setGravity(Gravity.TOP); }
-        parent.addView(edit, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        edit.setTextColor(INK); edit.setHintTextColor(0xFF98A2B3);
+        edit.setPadding(dp(13), dp(10), dp(13), dp(10));
+        edit.setBackground(round(0xFFF8FAFC, dp(12), dp(1), 0xFFD9E1EC));
+        if (multiline) { edit.setMinLines(3); edit.setGravity(Gravity.TOP); }
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(5), 0, dp(7));
+        parent.addView(edit, params);
         return edit;
     }
 
+    private CheckBox checkBox(String label, boolean checked) {
+        CheckBox box = new CheckBox(this);
+        box.setText(label); box.setTextColor(INK); box.setTextSize(14); box.setChecked(checked);
+        box.setButtonTintList(new ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}}, new int[]{TEAL, 0xFF98A2B3}));
+        box.setPadding(dp(2), dp(6), 0, dp(6));
+        return box;
+    }
+
+    private void showStyled(AlertDialog dialog) {
+        dialog.show();
+        if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(round(Color.WHITE, dp(18), dp(1), 0xFFE3E8EF));
+        if (dialog.getButton(AlertDialog.BUTTON_POSITIVE) != null) {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(BLUE);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        }
+        if (dialog.getButton(AlertDialog.BUTTON_NEGATIVE) != null) dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(MUTED);
+    }
+
     private void confirm(String message, Runnable yes) {
-        new AlertDialog.Builder(this).setMessage(message).setNegativeButton("取消", null)
-                .setPositiveButton("删除", (d, w) -> yes.run()).show();
+        showStyled(new AlertDialog.Builder(this).setMessage(message).setNegativeButton("取消", null)
+                .setPositiveButton("删除", (d, w) -> yes.run()).create());
     }
 
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_LONG).show(); }
@@ -356,16 +433,35 @@ public final class GoutouJunshiActivity extends Activity {
         GoutouJunshiStore.Note n = new GoutouJunshiStore.Note(); n.id=p.id; n.title=p.title; n.content=p.content;
         n.tags=p.tags; n.alwaysOn=p.alwaysOn; n.enabled=p.enabled; return n;
     }
-    private LinearLayout card() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL); view.setPadding(dp(14), dp(12), dp(14), dp(12)); view.setBackgroundColor(Color.WHITE); return view; }
+    private LinearLayout card() {
+        LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.VERTICAL);
+        view.setPadding(dp(15), dp(13), dp(15), dp(13));
+        view.setBackground(round(Color.WHITE, dp(16), dp(1), 0xFFE3E8EF));
+        return view;
+    }
     private LinearLayout row() { LinearLayout view = new LinearLayout(this); view.setOrientation(LinearLayout.HORIZONTAL); return view; }
     private LinearLayout.LayoutParams topMargin() { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2); p.topMargin = dp(12); return p; }
     private LinearLayout.LayoutParams topMarginSmall() { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2); p.topMargin = dp(6); return p; }
     private LinearLayout.LayoutParams weight() { LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(42), 1); p.setMargins(dp(3), dp(4), dp(3), dp(2)); return p; }
-    private Button smallButton(String title, View.OnClickListener click) { Button b = new Button(this); b.setText(title); b.setAllCaps(false); b.setOnClickListener(click); return b; }
-    private Button action(String title, View.OnClickListener click) { Button b = smallButton(title, click); b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START); return b; }
+    private Button smallButton(String title, View.OnClickListener click) {
+        Button b = new Button(this); b.setText(title); b.setAllCaps(false); b.setTextColor(BLUE); b.setTextSize(13);
+        b.setMinHeight(0); b.setMinimumHeight(0); b.setElevation(0); b.setStateListAnimator(null); b.setPadding(dp(12), 0, dp(12), 0);
+        b.setBackground(round(0xFFF0F6FF, dp(11), dp(1), 0xFFD8E7FF)); b.setOnClickListener(click); return b;
+    }
+    private Button action(String title, View.OnClickListener click) {
+        Button b = smallButton(title, click); b.setTextColor(INK); b.setTextSize(14);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START); b.setPadding(dp(14), 0, dp(14), 0);
+        b.setBackground(round(Color.WHITE, dp(13), dp(1), 0xFFE3E8EF));
+        return b;
+    }
     private TextView text(String value, int size, int color, boolean bold) {
         TextView view = new TextView(this); view.setText(value); view.setTextSize(size); view.setTextColor(color);
         if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD); view.setPadding(0, dp(4), 0, dp(4)); return view;
+    }
+    private GradientDrawable round(int color, int radius, int strokeWidth, int strokeColor) {
+        GradientDrawable bg = new GradientDrawable(); bg.setColor(color); bg.setCornerRadius(radius);
+        if (strokeWidth > 0) bg.setStroke(strokeWidth, strokeColor);
+        return bg;
     }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 

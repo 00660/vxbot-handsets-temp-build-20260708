@@ -296,12 +296,44 @@ public final class GoutouJunshiStore {
 
     public static String latestSummary(Context context) {
         List<JSONObject> rows = recentAnalyses(context);
-        if (rows.isEmpty()) return "";
+        if (rows.isEmpty()) return "狗头军师操作流\n等待普通聊天消息\n联系人资料可选；未配置联系人也会进入自动策略。";
         JSONObject row = rows.get(0);
-        String reply = row.optString("selected");
-        if (reply.length() > 44) reply = reply.substring(0, 44) + "…";
-        return "军师自动策略：" + row.optString("strategy") + "  ·  " + row.optString("sender")
-                + "\n自动回复：" + (reply.isEmpty() || "null".equals(reply) ? "本轮无需回复" : reply);
+        StringBuilder out = new StringBuilder("狗头军师 · 自动操作流\n");
+        String session = row.optString("session");
+        String sender = row.optString("sender");
+        if (!session.isEmpty() || !sender.isEmpty()) out.append(session).append(" · ").append(sender).append('\n');
+        out.append("策略选择：").append(row.optString("strategy", "等待分析"));
+        if (!row.isNull("confidence") && row.has("confidence")) {
+            out.append("（把握 ").append(Math.round(row.optDouble("confidence") * 100)).append("%）");
+        }
+        appendSummary(out, "建议动作", row.optString("best_action"));
+        appendSummary(out, "对方意图", row.optString("intent"));
+        boolean replyNow = row.optBoolean("reply_now", true);
+        JSONArray candidates = row.optJSONArray("candidates");
+        if (!replyNow) {
+            out.append("\n流程结果：判断无需回复，已停止发送");
+        } else if (candidates == null || candidates.length() == 0) {
+            out.append("\n流程结果：策略分析已保存，候选或排序尚未完成");
+        } else {
+            out.append("\n流程：策略判断 → 生成候选 → 排序 → 自动采用");
+            String selected = row.optString("selected");
+            for (int i = 0; i < candidates.length(); i++) {
+                JSONObject candidate = candidates.optJSONObject(i);
+                if (candidate == null) continue;
+                String text = candidate.optString("text");
+                out.append("\n").append(i + 1).append(i == 0 ? " ★ " : "   ").append(text);
+                if (text.equals(selected)) out.append("  ← 自动采用");
+                String reason = candidate.optString("reason");
+                if (!reason.isEmpty()) out.append("\n   理由：").append(reason);
+            }
+        }
+        return out.toString();
+    }
+
+    private static void appendSummary(StringBuilder out, String label, String value) {
+        if (value != null && !value.trim().isEmpty() && !"null".equals(value)) {
+            out.append('\n').append(label).append("：").append(value.trim());
+        }
     }
 
     public static JSONArray historyForTrend(Context context, String session, String sender) {

@@ -485,18 +485,19 @@ public final class MainActivity extends Activity {
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
-        enableLogOverlay = switchRow(featuresPage, "悬浮实时日志");
+        enableLogOverlay = switchRow(featuresPage, "狗头军师操作悬浮窗");
         enableLogOverlay.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (loadingConfig) {
                 return;
             }
             BotConfig.prefs(this).edit().putBoolean("enableLogOverlay", isChecked).apply();
-            String text = isChecked ? "悬浮实时日志已开启" : "悬浮实时日志已关闭";
+            String text = isChecked ? "狗头军师操作悬浮窗已开启" : "狗头军师操作悬浮窗已关闭";
             BotLog.i(this, "config.overlay", text);
             toast(text);
             refreshStatus();
         });
-        keepLogOverlayDuringOperation = switchRow(featuresPage, "微信操作时仍显示悬浮日志");
+        featuresPage.addView(text("悬浮窗可展开查看策略判断、建议动作、三条候选排序和自动采用结果。", 12, MUTED, Typeface.NORMAL));
+        keepLogOverlayDuringOperation = switchRow(featuresPage, "自动操作期间保留军师悬浮窗");
         lockActiveSender = switchRow(featuresPage, "续聊锁定最初 @ 的群员");
         enableFollowUpWithoutMention = switchRow(featuresPage, "续聊免 @ 记住发起人");
         stayInCodexSession = switchRow(featuresPage, "Codex 会话保持前台");

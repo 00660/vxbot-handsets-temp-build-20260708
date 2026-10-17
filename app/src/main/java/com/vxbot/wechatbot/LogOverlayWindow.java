@@ -17,12 +17,14 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 public final class LogOverlayWindow {
-    private static final int PANEL_WIDTH_DP = 260;
-    private static final int PANEL_HEIGHT_DP = 150;
-    private static final int DOT_SIZE_DP = 28;
+    private static final int PANEL_WIDTH_DP = 300;
+    private static final int PANEL_HEIGHT_DP = 300;
+    private static final int DOT_SIZE_DP = 38;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -37,6 +39,7 @@ public final class LogOverlayWindow {
     private WindowManager.LayoutParams params;
     private FrameLayout root;
     private FrameLayout panelView;
+    private FrameLayout panelHeader;
     private TextView dotView;
     private TextView logText;
     private boolean receiverRegistered;
@@ -89,6 +92,7 @@ public final class LogOverlayWindow {
             }
             root = null;
             panelView = null;
+            panelHeader = null;
             dotView = null;
             logText = null;
             params = null;
@@ -100,8 +104,10 @@ public final class LogOverlayWindow {
         handler.post(() -> {
             if (logText != null) {
                 String analysis = GoutouJunshiStore.latestSummary(context);
-                String logs = compactLog(BotLog.readTailNewestFirst(context, 5000));
-                logText.setText(analysis.isEmpty() ? logs : analysis + "\n" + logs);
+                String rawLogs = BotLog.readTailNewestFirst(context, 5000);
+                String flow = compactGoutouLog(rawLogs);
+                String logs = compactLog(rawLogs);
+                logText.setText(analysis + "\n\n本次军师流程记录\n" + flow + "\n\n运行日志\n" + logs);
             }
         });
     }
@@ -127,15 +133,37 @@ public final class LogOverlayWindow {
         panelView = new FrameLayout(context);
         panelView.setBackground(panelBackground());
 
+        LinearLayout panelContent = new LinearLayout(context);
+        panelContent.setOrientation(LinearLayout.VERTICAL);
+        panelView.addView(panelContent, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        panelHeader = new FrameLayout(context);
+        TextView title = new TextView(context);
+        title.setText("狗头军师 · 自动操作流");
+        title.setTextColor(0xFF8FDCCB);
+        title.setTextSize(13);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setPadding(dp(10), 0, dp(36), 0);
+        panelHeader.addView(title, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
         logText = new TextView(context);
         logText.setTextColor(Color.rgb(226, 232, 240));
-        logText.setTextSize(10);
-        logText.setTypeface(Typeface.MONOSPACE);
-        logText.setPadding(dp(10), dp(8), dp(30), dp(8));
+        logText.setTextSize(12);
+        logText.setTypeface(Typeface.DEFAULT);
+        logText.setLineSpacing(dp(2), 1.0f);
+        logText.setPadding(dp(10), dp(6), dp(10), dp(12));
         logText.setSingleLine(false);
-        panelView.addView(logText, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT));
+        ScrollView details = new ScrollView(context);
+        details.setFillViewport(true);
+        details.addView(logText, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+        panelContent.addView(panelHeader, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+        panelContent.addView(details, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         TextView close = new TextView(context);
         close.setText("x");
@@ -145,21 +173,20 @@ public final class LogOverlayWindow {
         close.setBackground(circleBackground(0xDD334155));
         FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP | Gravity.END);
         closeParams.setMargins(0, dp(4), dp(4), 0);
-        panelView.addView(close, closeParams);
+        panelHeader.addView(close, closeParams);
         close.setOnClickListener(v -> applyCollapsed(true));
         root.addView(panelView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
-        attachDrag(panelView, false);
-        attachDrag(logText, false);
+        attachDrag(panelHeader, false);
 
         dotView = new TextView(context);
-        dotView.setText("");
+        dotView.setText("军");
         dotView.setTextColor(Color.WHITE);
-        dotView.setTextSize(1);
+        dotView.setTextSize(14);
         dotView.setTypeface(Typeface.DEFAULT_BOLD);
         dotView.setGravity(Gravity.CENTER);
-        dotView.setBackground(circleBackground(0x662563EB));
+        dotView.setBackground(circleBackground(0xFF1677FF));
         root.addView(dotView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
@@ -266,6 +293,7 @@ public final class LogOverlayWindow {
         }
         root = null;
         panelView = null;
+        panelHeader = null;
         dotView = null;
         logText = null;
         params = null;
@@ -305,6 +333,21 @@ public final class LogOverlayWindow {
             }
         }
         return out.length() == 0 ? "暂无中文日志" : out.toString();
+    }
+
+    private String compactGoutouLog(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "等待普通聊天进入策略分析";
+        StringBuilder selected = new StringBuilder();
+        int count = 0;
+        for (String line : raw.split("\\r?\\n")) {
+            if (!line.contains("goutou.")) continue;
+            String compact = compactLine(line);
+            if (compact.isEmpty()) continue;
+            if (selected.length() > 0) selected.append('\n');
+            selected.append(compact);
+            if (++count == 6) break;
+        }
+        return selected.length() == 0 ? "等待普通聊天进入策略分析" : selected.toString();
     }
 
     private String compactLine(String line) {
