@@ -326,13 +326,6 @@ public final class HidBleClient {
             completeWrite(source, characteristic, status);
         }
 
-        @Override
-        public void onCharacteristicWrite(BluetoothGatt source,
-                                          BluetoothGattCharacteristic characteristic,
-                                          byte[] value, int status) {
-            completeWrite(source, characteristic, status);
-        }
-
         private void completeWrite(BluetoothGatt source,
                                    BluetoothGattCharacteristic characteristic,
                                    int status) {
