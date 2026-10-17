@@ -105,9 +105,11 @@ public final class LogOverlayWindow {
             if (logText != null) {
                 String analysis = GoutouJunshiStore.latestSummary(context);
                 String rawLogs = BotLog.readTailNewestFirst(context, 5000);
+                String routes = compactRouteLog(rawLogs);
                 String flow = compactGoutouLog(rawLogs);
                 String logs = compactLog(rawLogs);
-                logText.setText(analysis + "\n\n本次军师流程记录\n" + flow + "\n\n运行日志\n" + logs);
+                logText.setText(analysis + "\n\n最近消息路由\n" + routes
+                        + "\n\n本次军师流程记录\n" + flow + "\n\n运行日志\n" + logs);
             }
         });
     }
@@ -345,9 +347,24 @@ public final class LogOverlayWindow {
             if (compact.isEmpty()) continue;
             if (selected.length() > 0) selected.append('\n');
             selected.append(compact);
-            if (++count == 6) break;
+            if (++count == 9) break;
         }
         return selected.length() == 0 ? "等待普通聊天进入策略分析" : selected.toString();
+    }
+
+    private String compactRouteLog(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "等待消息路由";
+        StringBuilder selected = new StringBuilder();
+        int count = 0;
+        for (String line : raw.split("\\r?\\n")) {
+            if (!line.contains("route.selected")) continue;
+            String compact = compactLine(line);
+            if (compact.isEmpty()) continue;
+            if (selected.length() > 0) selected.append('\n');
+            selected.append(compact);
+            if (++count == 5) break;
+        }
+        return selected.length() == 0 ? "等待消息路由" : selected.toString();
     }
 
     private String compactLine(String line) {

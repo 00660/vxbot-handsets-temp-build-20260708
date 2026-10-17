@@ -12,8 +12,8 @@
 ## 当前版本
 
 - `applicationId`：`com.vxbot.wechatbot`
-- `versionCode`：`246`
-- `versionName`：`0.1.246-goutoujunshi-auto-strategy`
+- `versionCode`：`248`
+- `versionName`：`0.1.248-goutou-route-trace`
 - 默认上游文字接口：`http://192.168.2.157:8317/v1/chat/completions`
 - 默认 Happy Codex 桥接接口：`http://192.168.2.204:8731/v1/codex`
 - 默认图片接口：`http://192.168.3.1:3002/v1`
@@ -42,7 +42,7 @@
 - GXAZ 机器码激活：白名单会话发送 `机器绑定 10位机器码 天卡|月卡|季卡|年卡`，APK 内部按 1/30/90/365 天签发设备绑定的 24 位激活码，不依赖注册机面板。
 - 赛博喷子模式：支持触发、目标锁定、退出指令。
 - 恋人模式：支持 `撩一下$name`、`表白$name`、`跟$name表白` 等触发。
-- 悬浮日志：支持开关、拖动、收起为小圆点。
+- 悬浮日志：支持开关、拖动、收起为小圆点；新增最近消息路由选择记录，可在同一悬浮窗核对普通聊天进入狗头军师、自拍/图片和金融/搜索等消息保留原专用路由。
 - 支付监听：独立线程监听微信收款通知并回调后端。
 - 保活：前台服务、BootReceiver、KeepAliveScheduler、root/hs daemon 恢复检查。
 - 无 root 保活：`shizuku` 模式可开启低亮透明防熄屏窗口，支持指令恢复亮度。

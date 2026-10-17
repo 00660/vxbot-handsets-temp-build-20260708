@@ -376,6 +376,7 @@ public final class BotService extends Service {
         if (route.kind == MessageRouter.Kind.SHUTUP) {
             sessionStore.muteFor(message.sessionName, 30 * 60 * 1000L);
         }
+        logRouteSelection(config, message, route);
         if (isRestartRecoverable(route)) {
             PendingReplyStore.save(this, message);
             BotLog.i(this, "reply.pending.save", "已写入待处理回复 " + message.display());
@@ -564,6 +565,36 @@ public final class BotService extends Service {
                     .withReplyFormat(route.replyFormat);
         }
         return route;
+    }
+
+    private void logRouteSelection(BotConfig config, WxMessage message, MessageRouter.Route route) {
+        String label;
+        switch (route.kind) {
+            case TEXT:
+                label = config.enableGoutouJunshi ? "普通聊天 → 狗头军师" : "普通聊天 → 通用聊天模型";
+                break;
+            case IMAGE:
+                label = "图片/自拍专用路由";
+                break;
+            case ANALYSIS:
+                label = "图片分析专用路由";
+                break;
+            case SEARCH:
+                label = "金融/实时搜索专用路由";
+                break;
+            case CODEX:
+                label = "Happy Codex 专用路由";
+                break;
+            default:
+                label = route.kind.name();
+                break;
+        }
+        String tag = route.kind == MessageRouter.Kind.TEXT && config.enableGoutouJunshi
+                ? "goutou.route.selected" : "route.selected";
+        BotLog.i(this, tag, "消息路由已选择：" + label + "；类别=" + route.kind.name()
+                + "；会话=" + message.sessionName
+                + (route.instruction == null || route.instruction.trim().isEmpty()
+                ? "" : "；依据=" + route.instruction));
     }
 
     private void workerReply(BotConfig config, WxMessage message, MessageRouter.Route route) {
