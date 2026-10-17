@@ -63,7 +63,7 @@ public final class GoutouJunshiClient {
                         + "she_needs、tension_resolved（布尔值或null）、reply_now（必须是布尔值，判断当前是否应该发送回复）、"
                         + "best_action、support、hypotheses（字符串数组）、next_step、stop_condition、detail。"
                         + "策略必须是七项之一；detail 用中文说明依据和限制。",
-                contextData, config, true);
+                contextData, true);
         validateJudgment(judgment);
 
         if (!judgment.optBoolean("reply_now", true)) {
@@ -90,7 +90,7 @@ public final class GoutouJunshiClient {
                         + "尊重对方边界，不使用操控、施压、贬低、虚假承诺或时间限制。每条候选控制在40个汉字以内。"
                         + "严格只输出 JSON：candidates 数组必须有3项，每项有 text 和 reason（解释为什么这样回）；"
                         + "more_like_me 是一条根据用户人设以及标记为 me 的历史/截图口吻线索改写的变体；截图说话人仅作弱线索。",
-                generationInput, config, false);
+                generationInput, false);
         if (!(generated.opt("more_like_me") instanceof String)) throw new IllegalArgumentException("更像我一点的口吻变体格式错误");
         String moreLikeMe = generated.optString("more_like_me").trim();
         if (moreLikeMe.isEmpty() || moreLikeMe.length() > 40) throw new IllegalArgumentException("更像我一点的口吻变体为空或超过40字");
@@ -108,7 +108,7 @@ public final class GoutouJunshiClient {
                         + "尊重事实与边界，优先自然、贴合对话、不过度承诺的候选。只输出 JSON：ranked_ids 为恰好含 0、1、2 的数组，"
                         + "rank_reason 为中文排序理由，tradeoffs 为恰好三条字符串，依次对应原候选 id 的可能代价。"
                         + "匹配分只是相对顺序，不是成功率。",
-                rankingInput, config, true);
+                rankingInput, true);
         JSONArray rankedIds = ranking.optJSONArray("ranked_ids");
         if (rankedIds == null || rankedIds.length() != 3 || ranking.optString("rank_reason").trim().isEmpty())
             throw new IllegalArgumentException("候选回复排序格式不正确");
