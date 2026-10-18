@@ -30,6 +30,9 @@ public final class HidBleClient {
     private static final UUID CONTROL_COMMAND = UUID.fromString("0000fff5-0000-1000-8000-00805f9b34fb");
     private static final int CONNECT_TIMEOUT_SECONDS = 20;
     private static final int WRITE_TIMEOUT_SECONDS = 8;
+    private static final int MOUSE_LEFT = 1;
+    private static final int MOUSE_RIGHT = 2;
+    private static final int MOUSE_MIDDLE = 4;
 
     private static final Object STATE_LOCK = new Object();
     private static final Object WRITE_LOCK = new Object();
@@ -79,6 +82,37 @@ public final class HidBleClient {
 
     public static String up() throws Exception {
         return write(new byte[]{4});
+    }
+
+    public static String mouse(int buttons, int dx, int dy, int wheel) throws Exception {
+        if ((buttons & ~0x07) != 0)
+            throw new IOException("Mouse buttons must use left=1, right=2, middle=4");
+        return write(new byte[]{7, (byte) buttons, signedMouseDelta(dx),
+                signedMouseDelta(dy), signedMouseDelta(wheel)});
+    }
+
+    public static String mouseMove(int dx, int dy) throws Exception {
+        return mouse(0, dx, dy, 0);
+    }
+
+    public static String mouseButton(int buttons) throws Exception {
+        return mouse(buttons, 0, 0, 0);
+    }
+
+    public static String mouseClick(int button) throws Exception {
+        if (button != MOUSE_LEFT && button != MOUSE_RIGHT && button != MOUSE_MIDDLE)
+            throw new IOException("Mouse click button must be left=1, right=2, or middle=4");
+        mouseButton(button);
+        Thread.sleep(35L);
+        return mouseButton(0);
+    }
+
+    public static String mouseScroll(int amount) throws Exception {
+        return mouse(0, 0, 0, amount);
+    }
+
+    private static byte signedMouseDelta(int value) {
+        return (byte) Math.max(-127, Math.min(127, value));
     }
 
     public static String swipe(int x1, int y1, int x2, int y2, int durationMs) throws Exception {

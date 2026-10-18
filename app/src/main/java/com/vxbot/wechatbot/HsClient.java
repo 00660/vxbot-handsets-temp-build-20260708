@@ -98,6 +98,26 @@ public final class HsClient {
         return HidBleClient.keyCode(code);
     }
 
+    public String mouse(int buttons, int dx, int dy, int wheel) throws Exception {
+        return HidBleClient.mouse(buttons, dx, dy, wheel);
+    }
+
+    public String mouseMove(int dx, int dy) throws Exception {
+        return HidBleClient.mouseMove(dx, dy);
+    }
+
+    public String mouseButton(int buttons) throws Exception {
+        return HidBleClient.mouseButton(buttons);
+    }
+
+    public String mouseClick(int button) throws Exception {
+        return HidBleClient.mouseClick(button);
+    }
+
+    public String mouseScroll(int amount) throws Exception {
+        return HidBleClient.mouseScroll(amount);
+    }
+
     public String clipSet(String text) throws Exception {
         return command("clip_set " + (text == null ? "" : text));
     }
