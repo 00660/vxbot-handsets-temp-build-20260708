@@ -429,7 +429,7 @@ public final class MainActivity extends Activity {
         imageAfterAsVoice = switchRow(imagePage, "后置话术用语音");
         dropImageTaskOnError = switchRow(imagePage, "图片失败直接丢弃任务并退后台");
         notificationSettleMs = edit(imagePage, "通知点开后等待毫秒", "2600", false);
-        sendButtonDelayMs = edit(imagePage, "输入后找发送按钮延时毫秒", "500", false);
+        sendButtonDelayMs = edit(imagePage, "输入后发送等待毫秒", "500", false);
 
         LinearLayout exPage = page(content, "蒸馏模式");
         enableExMode = switchRow(exPage, "打开蒸馏模式");
@@ -504,7 +504,7 @@ public final class MainActivity extends Activity {
         featuresPage.addView(buttonRow(button("试听 TTS", v -> previewTts())));
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
         useBleHidForTextInput = switchRow(featuresPage, "文字消息使用蓝牙 HID 输入和发送");
-        featuresPage.addView(text("开启后用 HID 触屏聚焦、HID 键盘粘贴并用 HID 触屏发送；任一步失败就停止，不切回无障碍点击或软输入。", 12, MUTED, Typeface.NORMAL));
+        featuresPage.addView(text("开启后用 HID 触屏聚焦、HID 键盘粘贴并按 HID Enter 发送；任一步失败就停止，不切回软件点击或输入。", 12, MUTED, Typeface.NORMAL));
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
         enableLogOverlay = switchRow(featuresPage, "狗头军师操作悬浮窗");
@@ -520,6 +520,7 @@ public final class MainActivity extends Activity {
         });
         featuresPage.addView(text("悬浮窗可展开查看策略判断、建议动作、三条候选排序和自动采用结果。", 12, MUTED, Typeface.NORMAL));
         keepLogOverlayDuringOperation = switchRow(featuresPage, "自动操作期间保留军师悬浮窗");
+        featuresPage.addView(text("默认关闭，避免悬浮窗遮挡微信 OCR；开启后可观察自动操作流。", 12, MUTED, Typeface.NORMAL));
         lockActiveSender = switchRow(featuresPage, "续聊锁定最初 @ 的群员");
         enableFollowUpWithoutMention = switchRow(featuresPage, "续聊免 @ 记住发起人");
         stayInCodexSession = switchRow(featuresPage, "Codex 会话保持前台");

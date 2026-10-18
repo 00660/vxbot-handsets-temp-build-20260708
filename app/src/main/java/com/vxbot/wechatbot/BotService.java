@@ -288,17 +288,21 @@ public final class BotService extends Service {
         if (logOverlay == null) {
             return;
         }
+        if (operationActive && !(config.enableLogOverlay && config.keepLogOverlayDuringOperation)) {
+            logOverlay.hide();
+            if (controlOverlay != null) {
+                controlOverlay.hide();
+            }
+            return;
+        }
         if (config.enableLogOverlay) {
             if (logOverlayDismissedByUser) {
                 if (controlOverlay != null) {
-                    controlOverlay.show();
-                }
-                return;
-            }
-            if (operationActive && !config.keepLogOverlayDuringOperation) {
-                logOverlay.hide();
-                if (controlOverlay != null) {
-                    controlOverlay.show();
+                    if (operationActive) {
+                        controlOverlay.hide();
+                    } else {
+                        controlOverlay.show();
+                    }
                 }
                 return;
             }
@@ -307,7 +311,9 @@ public final class BotService extends Service {
             }
             logOverlay.show();
         } else {
-            logOverlay.hide();
+            if (logOverlay != null) {
+                logOverlay.hide();
+            }
             if (controlOverlay != null) {
                 controlOverlay.show();
             }
@@ -1117,15 +1123,23 @@ public final class BotService extends Service {
 
     private void pauseLogOverlayForOperation(BotConfig config) {
         operationActive = true;
-        if (config.enableLogOverlay && !config.keepLogOverlayDuringOperation && logOverlay != null) {
-            logOverlay.hide();
+        if (config.enableLogOverlay && config.keepLogOverlayDuringOperation) {
             if (controlOverlay != null) {
-                controlOverlay.show();
+                controlOverlay.hide();
             }
-            BotLog.i(this, "overlay.pause", "自动操作期间临时隐藏悬浮日志，避免污染 OCR");
+            if (logOverlay != null) {
+                logOverlay.show();
+            }
+            BotLog.i(this, "overlay.keep", "用户已选择自动操作期间保留军师悬浮窗");
+        } else {
+            if (logOverlay != null) {
+                logOverlay.hide();
+            }
+            if (controlOverlay != null) {
+                controlOverlay.hide();
+            }
+            BotLog.i(this, "overlay.pause", "自动操作期间隐藏军师悬浮窗和控制点，避免遮挡微信 OCR");
             SystemClock.sleep(200);
-        } else if (config.enableLogOverlay && config.keepLogOverlayDuringOperation) {
-            BotLog.i(this, "overlay.keep", "配置为微信操作时仍显示悬浮日志");
         }
     }
 
@@ -1140,15 +1154,20 @@ public final class BotService extends Service {
             BotLog.e(this, "ocr.test.abort", "hs daemon 未就绪");
             return;
         }
-        Rect rect = OcrHelper.findBottomRightText(this, new HsClient(config.hsPort), target);
-        if (rect == null) {
-            BotLog.w(this, "ocr.test.miss", "OCR 测试未命中 target=" + target);
-            return;
+        pauseLogOverlayForOperation(config);
+        try {
+            Rect rect = OcrHelper.findBottomRightText(this, new HsClient(config.hsPort), target);
+            if (rect == null) {
+                BotLog.w(this, "ocr.test.miss", "OCR 测试未命中 target=" + target);
+                return;
+            }
+            BotLog.i(this, "ocr.test.hit", "OCR 测试命中 target=" + target
+                    + " x=" + rect.centerX()
+                    + " y=" + rect.centerY()
+                    + " rect=" + rect.flattenToString());
+        } finally {
+            resumeLogOverlayAfterOperation();
         }
-        BotLog.i(this, "ocr.test.hit", "OCR 测试命中 target=" + target
-                + " x=" + rect.centerX()
-                + " y=" + rect.centerY()
-                + " rect=" + rect.flattenToString());
     }
 
     private void runOcrDump(String label) {
@@ -1157,8 +1176,13 @@ public final class BotService extends Service {
             BotLog.e(this, "ocr.dump.abort", "hs daemon 未就绪 label=" + label);
             return;
         }
-        OcrHelper.Screen screen = OcrHelper.inspect(this, new HsClient(config.hsPort));
-        BotLog.i(this, "ocr.dump", "label=" + label + " " + OcrHelper.dumpScreen(screen, 80));
+        pauseLogOverlayForOperation(config);
+        try {
+            OcrHelper.Screen screen = OcrHelper.inspect(this, new HsClient(config.hsPort));
+            BotLog.i(this, "ocr.dump", "label=" + label + " " + OcrHelper.dumpScreen(screen, 80));
+        } finally {
+            resumeLogOverlayAfterOperation();
+        }
     }
 
     private void runBroadcastText(String rawText) {

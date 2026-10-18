@@ -447,7 +447,7 @@ public final class BotConfig {
         enableGoutouJunshi = prefs.getBoolean("enableGoutouJunshi", true);
         saveGoutouJunshiHistory = prefs.getBoolean("saveGoutouJunshiHistory", false);
         enableLogOverlay = prefs.getBoolean("enableLogOverlay", false);
-        keepLogOverlayDuringOperation = prefs.getBoolean("keepLogOverlayDuringOperation", true);
+        keepLogOverlayDuringOperation = prefs.getBoolean("keepLogOverlayDuringOperation", false);
         enableNoRootKeepAwake = prefs.getBoolean("enableNoRootKeepAwake", true);
         enablePaymentListener = prefs.getBoolean("enablePaymentListener", true);
         enableImageWarmupText = prefs.getBoolean("enableImageWarmupText", true);

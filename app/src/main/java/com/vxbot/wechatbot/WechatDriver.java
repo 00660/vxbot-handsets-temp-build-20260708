@@ -140,17 +140,22 @@ public final class WechatDriver {
             }
             boolean hidInput = config != null && config.useBleHidForTextInput;
             BotLog.i(context, "input.route", hidInput ? "文字输入模式=蓝牙 HID" : "文字输入模式=软件输入");
+            Rect hidComposer = hidInput ? focusAndSetTextByHid(context, config, reply) : null;
             boolean textReady = hidInput
-                    ? focusAndSetTextByHid(context, config, reply)
+                    ? hidComposer != null
                     : focusAndSetText(context, config, reply);
             if (!textReady) {
                 BotLog.e(context, "input.failed", "文字未确认进入输入框，取消发送");
                 return false;
             }
             SystemClock.sleep(config.sendButtonDelayMs);
-            boolean sent = hidInput ? tapSendButtonByHid(context) : tapSendButton(context);
+            boolean sent = hidInput
+                    ? sendByHidEnter(context, reply, hidComposer)
+                    : tapSendButton(context);
             if (!sent) {
-                BotLog.e(context, "send.button", "未找到发送按钮，取消返回动作，避免误点");
+                BotLog.e(context, hidInput ? "send.hid.enter.unconfirmed" : "send.button",
+                        hidInput ? "HID 回车后未确认消息已离开输入框，停止后续动作"
+                                : "未找到发送按钮，取消返回动作，避免误点");
                 return false;
             }
             BotLog.i(context, "send.text", "回复已发送 text=" + reply);
@@ -1676,11 +1681,11 @@ public final class WechatDriver {
         return false;
     }
 
-    private boolean focusAndSetTextByHid(Context context, BotConfig config, String text) throws Exception {
+    private Rect focusAndSetTextByHid(Context context, BotConfig config, String text) throws Exception {
         Rect input = OcrHelper.findChatInputBlock(context, hs);
         if (input == null) {
             BotLog.e(context, "input.hid.focus.missing", "OCR 未识别到微信输入框，停止 HID 发送");
-            return false;
+            return null;
         }
         hs.tap(input.centerX(), input.centerY());
         BotLog.i(context, "input.hid.focus.tap", "通过 BLE HID 触屏聚焦输入框 x="
@@ -1693,15 +1698,158 @@ public final class WechatDriver {
 
         if (!setHidClipboardByHs(context, text)) {
             BotLog.e(context, "input.hid.clipboard.fail", "HS 剪贴板命令失败，停止 HID 发送");
-            return false;
+            return null;
         }
         hs.keyCode(279);
         BotLog.i(context, "input.hid.keyboard.paste", "通过 BLE HID 键盘发送 Ctrl+V");
-        if (!waitSendButtonVisibleByOcr(context, 3000L)) {
-            BotLog.e(context, "input.hid.paste.unconfirmed", "粘贴后未通过截图 OCR 确认发送按钮，停止发送");
+        if (!waitForHidComposerText(context, text, input, 3500L)) {
+            BotLog.e(context, "input.hid.paste.unconfirmed", "粘贴后未在微信输入框确认完整消息，停止发送");
+            return null;
+        }
+        return input;
+    }
+
+    private boolean sendByHidEnter(Context context, String text, Rect composer) throws Exception {
+        if (!isWechatForeground()) {
+            BotLog.e(context, "send.hid.enter.foreground", "发送前微信已不在前台，取消 HID 回车");
             return false;
         }
+        InputTextSnapshot before = readInputTextSnapshot();
+        boolean accessibilityConfirmed = before.hasValue && sameMessageText(before.text, text);
+        if (!accessibilityConfirmed
+                && !Boolean.TRUE.equals(composerContainsTextByOcr(context, text, composer))) {
+            BotLog.e(context, "send.hid.enter.draft_changed", "HID 回车前输入框内容与待发消息不一致，取消发送");
+            return false;
+        }
+        hs.key("ENTER");
+        BotLog.i(context, "send.hid.enter", "通过 BLE HID 键盘发送 Enter");
+        if (!waitForHidComposerCleared(context, text, composer, accessibilityConfirmed, 3500L)) {
+            BotLog.e(context, "send.hid.enter.not_cleared", "HID Enter 已发出，但输入框仍保留待发文本");
+            return false;
+        }
+        BotLog.i(context, "send.hid.enter.confirmed", "HID Enter 后已确认输入框清空");
         return true;
+    }
+
+    private boolean waitForHidComposerText(Context context, String expected, Rect composer, long timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+        while (SystemClock.uptimeMillis() < deadline) {
+            InputTextSnapshot snapshot = readInputTextSnapshot();
+            if (snapshot.hasValue && sameMessageText(snapshot.text, expected)) {
+                BotLog.i(context, "input.hid.paste.accessibility.confirmed", "无障碍树确认输入框文本 length="
+                        + (expected == null ? 0 : expected.length()));
+                return true;
+            }
+            if (Boolean.TRUE.equals(composerContainsTextByOcr(context, expected, composer))) {
+                BotLog.i(context, "input.hid.paste.ocr.confirmed", "OCR 在微信输入框内确认粘贴文本");
+                return true;
+            }
+            SystemClock.sleep(250L);
+        }
+        return false;
+    }
+
+    private boolean waitForHidComposerCleared(Context context, String expected, Rect composer,
+                                               boolean accessibilityConfirmed, long timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+        int clearedChecks = 0;
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (accessibilityConfirmed) {
+                InputTextSnapshot snapshot = readInputTextSnapshot();
+                if (snapshot.hasValue && !sameMessageText(snapshot.text, expected)) {
+                    return true;
+                }
+            }
+            Boolean textVisible = composerContainsTextByOcr(context, expected, composer);
+            if (Boolean.TRUE.equals(textVisible)) {
+                clearedChecks = 0;
+            } else if (Boolean.FALSE.equals(textVisible) && ++clearedChecks >= 2) {
+                return true;
+            }
+            SystemClock.sleep(250L);
+        }
+        return false;
+    }
+
+    private InputTextSnapshot readInputTextSnapshot() {
+        try {
+            String dump = hs.dumpActive();
+            Object json = dump.trim().startsWith("[") ? new JSONArray(dump) : new JSONObject(dump);
+            return findInputTextSnapshot(json);
+        } catch (Exception ignored) {
+            return InputTextSnapshot.NOT_FOUND;
+        }
+    }
+
+    private InputTextSnapshot findInputTextSnapshot(Object node) throws Exception {
+        if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length(); i++) {
+                InputTextSnapshot found = findInputTextSnapshot(array.get(i));
+                if (found.found) {
+                    return found;
+                }
+            }
+            return InputTextSnapshot.NOT_FOUND;
+        }
+        if (!(node instanceof JSONObject)) {
+            return InputTextSnapshot.NOT_FOUND;
+        }
+        JSONObject object = (JSONObject) node;
+        if (isInputClass(firstString(object, "cls", "class", "className"))) {
+            boolean hasValue = object.has("text") || object.has("value") || object.has("editableText");
+            return new InputTextSnapshot(true, hasValue,
+                    firstString(object, "text", "value", "editableText"));
+        }
+        Iterator<String> keys = object.keys();
+        while (keys.hasNext()) {
+            Object child = object.opt(keys.next());
+            if (child instanceof JSONObject || child instanceof JSONArray) {
+                InputTextSnapshot found = findInputTextSnapshot(child);
+                if (found.found) {
+                    return found;
+                }
+            }
+        }
+        return InputTextSnapshot.NOT_FOUND;
+    }
+
+    private Boolean composerContainsTextByOcr(Context context, String expected, Rect composer) {
+        OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+        if (screen == null || composer == null) {
+            return null;
+        }
+        StringBuilder observed = new StringBuilder();
+        Rect scan = new Rect(composer);
+        scan.inset(-Math.max(8, composer.height() / 2), -Math.max(8, composer.height() / 2));
+        if (!scan.intersect(0, 0, screen.width, screen.height)) {
+            return null;
+        }
+        for (OcrHelper.OcrItem item : screen.items) {
+            if (Rect.intersects(scan, item.rect)) {
+                observed.append(item.text);
+            }
+        }
+        return sameMessageText(observed.toString(), expected);
+    }
+
+    private static boolean sameMessageText(String left, String right) {
+        String a = NameNormalizer.contentKey(left).toLowerCase(Locale.ROOT);
+        String b = NameNormalizer.contentKey(right).toLowerCase(Locale.ROOT);
+        return !b.isEmpty() && a.equals(b);
+    }
+
+    private static final class InputTextSnapshot {
+        static final InputTextSnapshot NOT_FOUND = new InputTextSnapshot(false, false, "");
+        final boolean found;
+        final boolean hasValue;
+        final String text;
+
+        InputTextSnapshot(boolean found, boolean hasValue, String text) {
+            this.found = found;
+            this.hasValue = hasValue;
+            this.text = text == null ? "" : text;
+        }
     }
 
     private boolean setHidClipboardByHs(Context context, String text) {
@@ -2097,38 +2245,6 @@ public final class WechatDriver {
         }
         BotLog.w(context, "send.button.submit.skip", "未找到绿色发送按钮，不使用 submit/回车伪发送");
         return false;
-    }
-
-    private boolean tapSendButtonByHid(Context context) throws Exception {
-        Rect button = findSendButtonByOcr(context);
-        if (button == null) {
-            BotLog.e(context, "send.button.hid.missing", "截图 OCR 未识别到发送按钮，停止 HID 发送");
-            return false;
-        }
-        hs.tap(button.centerX(), button.centerY());
-        BotLog.i(context, "send.button.hid.tap", "通过 BLE HID 触屏点击发送按钮 x="
-                + button.centerX() + " y=" + button.centerY());
-        return true;
-    }
-
-    private boolean waitSendButtonVisibleByOcr(Context context, long timeoutMs) {
-        long deadline = SystemClock.uptimeMillis() + timeoutMs;
-        while (SystemClock.uptimeMillis() < deadline) {
-            if (findSendButtonByOcr(context) != null || findSendButtonByDump() != null) {
-                return true;
-            }
-            SystemClock.sleep(200L);
-        }
-        return false;
-    }
-
-    private Rect findSendButtonByOcr(Context context) {
-        Rect green = OcrHelper.findGreenSendButton(context, hs);
-        if (green != null) {
-            return green;
-        }
-        Rect text = OcrHelper.findBottomRightText(context, hs, "发送");
-        return text != null ? text : findSendButtonByDump();
     }
 
     private boolean waitSendButtonVisible(Context context, long timeoutMs) {
