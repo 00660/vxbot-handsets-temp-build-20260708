@@ -3,6 +3,8 @@ package com.vxbot.wechatbot;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.SystemClock;
+import android.graphics.Point;
+import android.view.WindowManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -35,8 +37,8 @@ final class BotHttpServer {
     private static final String KEY_PANEL_URL = "robotPushPanelUrl";
     private static final int DEFAULT_HTTP_PORT = 18234;
     private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
-    private static final int APP_VERSION_CODE = 245;
-    private static final String APP_VERSION_NAME = "0.1.245-announcement-receipt";
+    private static final int APP_VERSION_CODE = 263;
+    private static final String APP_VERSION_NAME = "0.1.263-lan-hid-touchpad";
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int REGISTER_READ_TIMEOUT_MS = 8000;
@@ -178,6 +180,64 @@ final class BotHttpServer {
                 }
             }
             String route = new URI(path).getPath();
+            if ("GET".equals(method) && route.startsWith("/touchpad/")) {
+                String[] parts = route.split("/");
+                if (parts.length == 3 && authToken.equals(parts[2])) {
+                    writeBytes(client, 200, "text/html; charset=utf-8", LanTouchpadPanel.html(authToken).getBytes(StandardCharsets.UTF_8));
+                    return;
+                }
+                if (parts.length == 4 && authToken.equals(parts[2]) && "info".equals(parts[3])) {
+                    Point size = displaySize();
+                    writeJson(client, 200, new JSONObject().put("success", true).put("width", size.x).put("height", size.y));
+                    return;
+                }
+                if (parts.length == 4 && authToken.equals(parts[2]) && "screen.jpg".equals(parts[3])) {
+                    byte[] screenshot = new HsClient(BotConfig.load(context).hsPort).screenshotJpeg();
+                    if (screenshot.length < 4 || screenshot[0] != (byte) 0xff || screenshot[1] != (byte) 0xd8) {
+                        writeJson(client, 503, jsonError("screen_capture_failed"));
+                    } else {
+                        writeBytes(client, 200, "image/jpeg", screenshot);
+                    }
+                    return;
+                }
+            }
+            if ("POST".equals(method) && route.startsWith("/touchpad/") && route.endsWith("/event")) {
+                String[] parts = route.split("/");
+                if (parts.length != 4 || !authToken.equals(parts[2])) {
+                    writeJson(client, 401, jsonError("touchpad_auth_failed"));
+                    return;
+                }
+                if (contentLength < 0 || contentLength > 4096) {
+                    writeJson(client, 413, jsonError("request_body_too_large"));
+                    return;
+                }
+                JSONObject event;
+                try {
+                    event = new JSONObject(readBody(input, contentLength));
+                } catch (Exception error) {
+                    writeJson(client, 400, jsonError("invalid_json"));
+                    return;
+                }
+                Point size = displaySize();
+                int x = Math.max(0, Math.min(size.x - 1, event.optInt("x", 0)));
+                int y = Math.max(0, Math.min(size.y - 1, event.optInt("y", 0)));
+                String action = event.optString("action", "");
+                try {
+                    switch (action) {
+                        case "down": HidBleClient.down(x, y); break;
+                        case "move": HidBleClient.move(x, y); break;
+                        case "up": HidBleClient.up(); break;
+                        default:
+                            writeJson(client, 400, jsonError("invalid_touch_action"));
+                            return;
+                    }
+                    writeJson(client, 200, new JSONObject().put("success", true).put("action", action));
+                } catch (Exception error) {
+                    BotLog.w(context, "touchpad.hid.fail", action + " " + x + "," + y + " " + error.getMessage());
+                    writeJson(client, 503, jsonError("hid_unavailable"));
+                }
+                return;
+            }
             if ("GET".equals(method) && "/vxbot/v1/health".equals(route)) {
                 writeJson(client, 200, healthJson());
                 return;
@@ -364,6 +424,26 @@ final class BotHttpServer {
         output.write(headers.getBytes(StandardCharsets.US_ASCII));
         output.write(payload);
         output.flush();
+    }
+
+    private void writeBytes(Socket socket, int status, String contentType, byte[] payload) throws IOException {
+        OutputStream output = socket.getOutputStream();
+        String reason = status == 200 ? "OK" : "Error";
+        String headers = "HTTP/1.1 " + status + " " + reason + "\r\n"
+                + "Content-Type: " + contentType + "\r\n"
+                + "Content-Length: " + payload.length + "\r\n"
+                + "Cache-Control: no-store\r\n"
+                + "Connection: close\r\n\r\n";
+        output.write(headers.getBytes(StandardCharsets.US_ASCII));
+        output.write(payload);
+        output.flush();
+    }
+
+    private Point displaySize() {
+        WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        Point size = new Point(1080, 2400);
+        if (manager != null) manager.getDefaultDisplay().getRealSize(size);
+        return size;
     }
 
     private void registerWithPanel() {

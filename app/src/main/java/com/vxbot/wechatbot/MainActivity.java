@@ -3,6 +3,8 @@ package com.vxbot.wechatbot;
 import android.Manifest;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.res.ColorStateList;
 import android.content.Context;
 import android.content.Intent;
@@ -352,6 +354,22 @@ public final class MainActivity extends Activity {
                 actionButton(R.drawable.ic_ui_file_key, "Shizuku 授权", 0xFF845EC2,
                         v -> toast(ShizukuBridge.requestPermission())),
                 actionButton(R.drawable.ic_ui_hand, "辅助功能", 0xFFFF8A00, v -> openAccessibilitySettings())));
+
+        LinearLayout touchpadCard = card("局域网虚拟触控板");
+        statusPage.addView(touchpadCard, cardLayoutParams());
+        TextView touchpadAddress = text(LanTouchpadPanel.urlFor(this), 12, INK, Typeface.NORMAL);
+        touchpadAddress.setTextIsSelectable(true);
+        touchpadAddress.setPadding(0, 0, 0, dp(8));
+        touchpadCard.addView(touchpadAddress);
+        touchpadCard.addView(text("让第二台设备与手机连接同一局域网，在浏览器打开此地址。画布按手机绝对坐标通过 BLE HID 触控；屏幕参考帧按需抓取。", 12, MUTED, Typeface.NORMAL));
+        touchpadCard.addView(buttonRow(button("刷新地址", v -> touchpadAddress.setText(LanTouchpadPanel.urlFor(this))),
+                button("复制地址", v -> {
+                    String address = LanTouchpadPanel.urlFor(this);
+                    touchpadAddress.setText(address);
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) clipboard.setPrimaryClip(ClipData.newPlainText("HS 虚拟触控板", address));
+                    toast("已复制局域网触控板地址");
+                })));
 
         LinearLayout basicPage = page(content, "基础配置");
         botNames = edit(basicPage, "机器人名称/别名", "机器人", false);
