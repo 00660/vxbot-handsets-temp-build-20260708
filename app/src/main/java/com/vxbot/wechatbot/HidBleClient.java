@@ -103,8 +103,12 @@ public final class HidBleClient {
         if (button != MOUSE_LEFT && button != MOUSE_RIGHT && button != MOUSE_MIDDLE)
             throw new IOException("Mouse click button must be left=1, right=2, or middle=4");
         mouseButton(button);
-        Thread.sleep(35L);
-        return mouseButton(0);
+        try {
+            Thread.sleep(35L);
+        } finally {
+            mouseButton(0);
+        }
+        return "BLE HID sent";
     }
 
     public static String mouseScroll(int amount) throws Exception {

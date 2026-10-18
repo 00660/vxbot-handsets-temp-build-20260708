@@ -504,7 +504,7 @@ public final class MainActivity extends Activity {
         featuresPage.addView(buttonRow(button("试听 TTS", v -> previewTts())));
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
         useBleHidForTextInput = switchRow(featuresPage, "文字消息使用蓝牙 HID 输入和发送");
-        featuresPage.addView(text("开启后用 HID 触屏聚焦、HID 键盘粘贴并按 HID Enter 发送；任一步失败就停止，不切回软件点击或输入。", 12, MUTED, Typeface.NORMAL));
+        featuresPage.addView(text("开启后用 BLE HID 鼠标点击输入框，再用 HID 键盘粘贴并按 Enter 发送；任一步失败就停止，不切回软件点击或输入。", 12, MUTED, Typeface.NORMAL));
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
         enableLogOverlay = switchRow(featuresPage, "狗头军师操作悬浮窗");
