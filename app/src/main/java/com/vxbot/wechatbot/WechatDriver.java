@@ -1691,8 +1691,8 @@ public final class WechatDriver {
         hs.key("BACKSPACE");
         BotLog.i(context, "input.hid.clear", "通过 BLE HID 键盘清空输入框旧草稿");
 
-        if (!setAppClipboard(context, text)) {
-            BotLog.e(context, "input.hid.clipboard.fail", "剪贴板写入校验失败，停止 HID 发送");
+        if (!setHidClipboardByHs(context, text)) {
+            BotLog.e(context, "input.hid.clipboard.fail", "HS 剪贴板命令失败，停止 HID 发送");
             return false;
         }
         hs.keyCode(279);
@@ -1702,6 +1702,22 @@ public final class WechatDriver {
             return false;
         }
         return true;
+    }
+
+    private boolean setHidClipboardByHs(Context context, String text) {
+        try {
+            String result = hs.clipSet(text);
+            if (result == null || result.startsWith("ERR:")) {
+                BotLog.e(context, "input.hid.clipboard.command.fail", "HS 剪贴板命令失败 result=" + result);
+                return false;
+            }
+            BotLog.i(context, "input.hid.clipboard.command", "HS 已接受剪贴板内容，后续只通过 HID 键盘粘贴 length="
+                    + (text == null ? 0 : text.length()));
+            return true;
+        } catch (Exception e) {
+            BotLog.e(context, "input.hid.clipboard.command.fail", "HS 剪贴板命令异常 error=" + e.getMessage());
+            return false;
+        }
     }
 
     private boolean inputWithBotIme(Context context, BotConfig config, String text) {
