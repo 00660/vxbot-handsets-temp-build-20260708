@@ -230,7 +230,7 @@ final class BotHttpServer {
                         writeJson(client, 400, jsonError("invalid_touch_action"));
                         return;
                     }
-                    Future<String> input = touchExecutor.submit(() -> {
+                    Future<String> touchCommand = touchExecutor.submit(() -> {
                         switch (action) {
                             case "down": HidBleClient.down(x, y); break;
                             case "move": HidBleClient.move(x, y); break;
@@ -238,7 +238,7 @@ final class BotHttpServer {
                         }
                         return "sent";
                     });
-                    input.get(15, TimeUnit.SECONDS);
+                    touchCommand.get(15, TimeUnit.SECONDS);
                     writeJson(client, 200, new JSONObject().put("success", true).put("action", action));
                 } catch (Exception error) {
                     BotLog.w(context, "touchpad.hid.fail", action + " " + x + "," + y + " " + error.getMessage());
