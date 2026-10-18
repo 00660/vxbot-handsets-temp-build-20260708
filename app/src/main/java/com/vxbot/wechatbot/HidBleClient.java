@@ -102,8 +102,8 @@ public final class HidBleClient {
     public static String mouseClick(int button) throws Exception {
         if (button != MOUSE_LEFT && button != MOUSE_RIGHT && button != MOUSE_MIDDLE)
             throw new IOException("Mouse click button must be left=1, right=2, or middle=4");
-        mouseButton(button);
         try {
+            mouseButton(button);
             Thread.sleep(35L);
         } finally {
             mouseButton(0);
