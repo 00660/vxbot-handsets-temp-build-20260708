@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 264
-        versionName "0.1.264-lan-hid-touchpad-token-fix"
+        versionCode 265
+        versionName "0.1.265-lan-hid-touchpad-coalesced"
         multiDexKeepProguard file("multidex-keep.pro")
         externalNativeBuild {
             cmake {

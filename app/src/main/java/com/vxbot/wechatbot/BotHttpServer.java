@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -37,8 +38,8 @@ final class BotHttpServer {
     private static final String KEY_PANEL_URL = "robotPushPanelUrl";
     private static final int DEFAULT_HTTP_PORT = 18234;
     private static final String DEFAULT_PANEL_URL = "http://192.168.2.204:5000";
-    private static final int APP_VERSION_CODE = 264;
-    private static final String APP_VERSION_NAME = "0.1.264-lan-hid-touchpad-token-fix";
+    private static final int APP_VERSION_CODE = 265;
+    private static final String APP_VERSION_NAME = "0.1.265-lan-hid-touchpad-coalesced";
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 5000;
     private static final int REGISTER_READ_TIMEOUT_MS = 8000;
@@ -87,6 +88,7 @@ final class BotHttpServer {
     private final SharedPreferences prefs;
     private final ExecutorService acceptExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService requestExecutor = Executors.newCachedThreadPool();
+    private final ExecutorService touchExecutor = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService registrationExecutor = Executors.newSingleThreadScheduledExecutor();
     private final ScheduledExecutorService receiptExecutor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, DeliveryRecord> deliveries = new LinkedHashMap<>();
@@ -126,6 +128,7 @@ final class BotHttpServer {
         closeServer();
         registrationExecutor.shutdownNow();
         receiptExecutor.shutdownNow();
+        touchExecutor.shutdownNow();
         requestExecutor.shutdownNow();
         acceptExecutor.shutdownNow();
         BotLog.i(context, "robot.http.stop", "机器人 HTTP 服务已停止");
@@ -223,14 +226,19 @@ final class BotHttpServer {
                 int y = Math.max(0, Math.min(size.y - 1, event.optInt("y", 0)));
                 String action = event.optString("action", "");
                 try {
-                    switch (action) {
-                        case "down": HidBleClient.down(x, y); break;
-                        case "move": HidBleClient.move(x, y); break;
-                        case "up": HidBleClient.up(); break;
-                        default:
-                            writeJson(client, 400, jsonError("invalid_touch_action"));
-                            return;
+                    if (!"down".equals(action) && !"move".equals(action) && !"up".equals(action)) {
+                        writeJson(client, 400, jsonError("invalid_touch_action"));
+                        return;
                     }
+                    Future<String> input = touchExecutor.submit(() -> {
+                        switch (action) {
+                            case "down": HidBleClient.down(x, y); break;
+                            case "move": HidBleClient.move(x, y); break;
+                            case "up": HidBleClient.up(); break;
+                        }
+                        return "sent";
+                    });
+                    input.get(15, TimeUnit.SECONDS);
                     writeJson(client, 200, new JSONObject().put("success", true).put("action", action));
                 } catch (Exception error) {
                     BotLog.w(context, "touchpad.hid.fail", action + " " + x + "," + y + " " + error.getMessage());
