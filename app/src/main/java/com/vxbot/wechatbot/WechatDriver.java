@@ -7,6 +7,7 @@ import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.view.KeyEvent;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -1169,6 +1170,23 @@ public final class WechatDriver {
             if (!ensureConversationListForBroadcast(context, config, "broadcast:" + sessionName + ":" + attempt)) {
                 continue;
             }
+            if (clickConversationFromListByOcr(context, config, sessionName, null)
+                    && waitWechatChatByOcr(context, config, Math.max(6500, config.notificationSettleMs + 3500))) {
+                OcrHelper.Screen current = OcrHelper.inspect(context, hs);
+                if (looksLikeCurrentSessionScreen(current, sessionName)) {
+                    BotLog.write(context, "SUCCESS", "broadcast.search.list_shortcut.confirmed",
+                            "从最近会话列表按群名进入目标会话 sessionName=" + sessionName);
+                    return true;
+                }
+                BotLog.w(context, "broadcast.search.list_shortcut.wrong_chat",
+                        "会话列表点击后标题与目标群不符，回到列表继续搜索 sessionName=" + sessionName
+                                + " title=" + titleFromOcr(current));
+                hs.key("BACK");
+                SystemClock.sleep(Math.max(800L, stepDelay(config)));
+                if (!ensureConversationListForBroadcast(context, config, "broadcast-list-shortcut-retry:" + sessionName)) {
+                    continue;
+                }
+            }
             if (!tapSearchEntryForBroadcast(context, config)
                     || !setSearchKeywordForBroadcast(context, config, sessionName)
                     || !waitSearchResultReadyForBroadcast(context, config, sessionName)
@@ -1254,6 +1272,8 @@ public final class WechatDriver {
             }
             hs.tap(input.centerX(), input.centerY());
             broadcastStepDelay(config, "search_input_tap");
+            hs.keyChord(0x01, KeyEvent.KEYCODE_A);
+            hs.key("BACKSPACE");
             setAppClipboard(context, sessionName);
             String pasteResult = hs.keyCode(279);
             BotLog.i(context, "broadcast.search.input.keypaste", "已按 OCR 搜索框粘贴群名 sessionName="
@@ -1261,6 +1281,9 @@ public final class WechatDriver {
                     + " rect=" + input.flattenToString()
                     + " attempt=" + attempt
                     + " result=" + pasteResult);
+            String submitResult = hs.key("ENTER");
+            BotLog.i(context, "broadcast.search.input.submit", "通过 BLE HID 回车提交群名搜索 sessionName="
+                    + sessionName + " attempt=" + attempt + " result=" + submitResult);
             broadcastStepDelay(config, "search_input_paste");
             if (waitSearchResultReadyForBroadcast(context, config, sessionName)) {
                 return true;
@@ -1640,6 +1663,10 @@ public final class WechatDriver {
         BotLog.i(context, "input.hid.focus.tap", "通过 BLE HID 触屏聚焦输入框 x="
                 + input.centerX() + " y=" + input.centerY());
         SystemClock.sleep(stepDelay(config));
+
+        hs.keyChord(0x01, KeyEvent.KEYCODE_A);
+        hs.key("BACKSPACE");
+        BotLog.i(context, "input.hid.clear", "通过 BLE HID 键盘清空输入框旧草稿");
 
         if (!setAppClipboard(context, text)) {
             BotLog.e(context, "input.hid.clipboard.fail", "剪贴板写入校验失败，停止 HID 发送");

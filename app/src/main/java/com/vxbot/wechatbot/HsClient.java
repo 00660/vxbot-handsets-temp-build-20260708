@@ -98,6 +98,10 @@ public final class HsClient {
         return HidBleClient.keyCode(code);
     }
 
+    public String keyChord(int modifiers, int code) throws Exception {
+        return HidBleClient.keyChord(modifiers, code);
+    }
+
     public String mouse(int buttons, int dx, int dy, int wheel) throws Exception {
         return HidBleClient.mouse(buttons, dx, dy, wheel);
     }

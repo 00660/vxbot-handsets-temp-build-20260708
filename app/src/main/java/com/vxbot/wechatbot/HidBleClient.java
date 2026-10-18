@@ -150,11 +150,17 @@ public final class HidBleClient {
 
     public static String keyCode(int androidKeyCode) throws Exception {
         if (androidKeyCode == 279) // Android KEYCODE_PASTE => Ctrl+V on a HID keyboard.
-            return write(new byte[]{6, 1, 0x19});
+            return keyChord(0x01, KeyEvent.KEYCODE_V);
+        return keyChord(0, androidKeyCode);
+    }
+
+    public static String keyChord(int modifiers, int androidKeyCode) throws Exception {
+        if ((modifiers & ~0xff) != 0)
+            throw new IOException("HID keyboard modifiers must fit in one byte");
         int usage = hidUsage(androidKeyCode);
         if (usage == 0)
             throw new IOException("Unsupported Android key code for BLE HID: " + androidKeyCode);
-        return write(new byte[]{6, 0, (byte) usage});
+        return write(new byte[]{6, (byte) modifiers, (byte) usage});
     }
 
     private static int hidUsage(int keyCode) {
