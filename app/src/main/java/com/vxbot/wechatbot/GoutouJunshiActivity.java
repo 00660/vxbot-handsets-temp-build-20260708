@@ -176,7 +176,7 @@ public final class GoutouJunshiActivity extends Activity {
         }
         BotConfig.prefs(this).edit()
                 .putBoolean("enableLogOverlay", true)
-                .putBoolean("keepLogOverlayDuringOperation", true)
+                .putBoolean("keepLogOverlayDuringOperation", false)
                 .apply();
         Intent service = new Intent(this, BotService.class);
         if (BotService.isRunning()) service.setAction(BotService.ACTION_SHOW_LOG_OVERLAY);
