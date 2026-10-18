@@ -1710,9 +1710,8 @@ public final class WechatDriver {
         }
         hs.keyCode(279);
         BotLog.i(context, "input.hid.keyboard.paste", "通过 BLE HID 键盘发送 Ctrl+V");
-        if (!waitForHidComposerText(context, text, input, 3500L)) {
-            BotLog.e(context, "input.hid.paste.unconfirmed", "粘贴后未在微信输入框确认完整消息，停止发送");
-            return null;
+        if (!waitForHidComposerText(context, text, input, 1500L)) {
+            BotLog.w(context, "input.hid.paste.unconfirmed", "OCR 未确认粘贴文本；仍按要求继续发送 HID Enter");
         }
         return input;
     }
@@ -1722,20 +1721,13 @@ public final class WechatDriver {
             BotLog.e(context, "send.hid.enter.foreground", "发送前微信已不在前台，取消 HID 回车");
             return false;
         }
-        InputTextSnapshot before = readInputTextSnapshot();
-        boolean accessibilityConfirmed = before.hasValue && sameMessageText(before.text, text);
-        if (!accessibilityConfirmed
-                && !Boolean.TRUE.equals(composerContainsTextByOcr(context, text, composer))) {
-            BotLog.e(context, "send.hid.enter.draft_changed", "HID 回车前输入框内容与待发消息不一致，取消发送");
-            return false;
-        }
         hs.key("ENTER");
         BotLog.i(context, "send.hid.enter", "通过 BLE HID 键盘发送 Enter");
-        if (!waitForHidComposerCleared(context, text, composer, accessibilityConfirmed, 3500L)) {
-            BotLog.e(context, "send.hid.enter.not_cleared", "HID Enter 已发出，但输入框仍保留待发文本");
-            return false;
+        if (waitForHidComposerCleared(context, text, composer, false, 2500L)) {
+            BotLog.i(context, "send.hid.enter.confirmed", "HID Enter 后已确认输入框清空");
+        } else {
+            BotLog.w(context, "send.hid.enter.unconfirmed", "HID Enter 已发送，但 OCR 未能确认输入框变化");
         }
-        BotLog.i(context, "send.hid.enter.confirmed", "HID Enter 后已确认输入框清空");
         return true;
     }
 
