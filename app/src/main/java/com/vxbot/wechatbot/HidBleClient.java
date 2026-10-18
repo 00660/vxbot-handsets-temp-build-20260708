@@ -164,7 +164,10 @@ public final class HidBleClient {
         int usage = hidUsage(androidKeyCode);
         if (usage == 0)
             throw new IOException("Unsupported Android key code for BLE HID: " + androidKeyCode);
-        return write(new byte[]{6, (byte) modifiers, (byte) usage});
+        String result = write(new byte[]{6, (byte) modifiers, (byte) usage});
+        Thread.sleep(35L);
+        write(new byte[]{6, 0, 0});
+        return result;
     }
 
     private static int hidUsage(int keyCode) {
