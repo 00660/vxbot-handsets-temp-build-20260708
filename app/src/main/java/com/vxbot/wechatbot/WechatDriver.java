@@ -1157,6 +1157,11 @@ public final class WechatDriver {
     }
 
     private boolean openSessionBySearchForBroadcast(Context context, BotConfig config, String sessionName) throws Exception {
+        if (isCurrentBroadcastChat(context, sessionName)) {
+            BotLog.write(context, "SUCCESS", "broadcast.search.current_chat.reuse",
+                    "当前微信会话标题和输入框均匹配目标群，直接复用 sessionName=" + sessionName);
+            return true;
+        }
         for (int attempt = 1; attempt <= 2; attempt++) {
             if (attempt > 1) {
                 BotLog.w(context, "broadcast.search.retry", "主动群发进入会话失败，返回微信列表后重试 attempt=" + attempt
@@ -1204,6 +1209,24 @@ public final class WechatDriver {
         }
         BotLog.e(context, "broadcast.search.chat.failed", "微信搜索结果进入目标会话失败 sessionName=" + sessionName);
         return false;
+    }
+
+    private boolean isCurrentBroadcastChat(Context context, String sessionName) {
+        if (!isWechatForeground()) {
+            return false;
+        }
+        OcrHelper.Screen screen = OcrHelper.inspect(context, hs);
+        if (!looksLikeCurrentSessionScreen(screen, sessionName)) {
+            return false;
+        }
+        Rect input = OcrHelper.findChatInputBlock(context, hs);
+        if (input == null) {
+            return false;
+        }
+        BotLog.i(context, "broadcast.search.current_chat.confirmed",
+                "OCR 确认当前会话标题和输入框 sessionName=" + sessionName
+                        + " input=" + input.flattenToString());
+        return true;
     }
 
     private boolean ensureConversationListForBroadcast(Context context, BotConfig config, String reason) throws Exception {
