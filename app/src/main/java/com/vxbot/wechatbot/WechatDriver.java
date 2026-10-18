@@ -137,12 +137,17 @@ public final class WechatDriver {
                 BotLog.e(context, "input.mode.text.abort", "发送文字前未确认文字输入模式，取消输入动作");
                 return false;
             }
-            if (!focusAndSetText(context, config, reply)) {
+            boolean hidInput = config != null && config.useBleHidForTextInput;
+            BotLog.i(context, "input.route", hidInput ? "文字输入模式=蓝牙 HID" : "文字输入模式=软件输入");
+            boolean textReady = hidInput
+                    ? focusAndSetTextByHid(context, config, reply)
+                    : focusAndSetText(context, config, reply);
+            if (!textReady) {
                 BotLog.e(context, "input.failed", "文字未确认进入输入框，取消发送");
                 return false;
             }
             SystemClock.sleep(config.sendButtonDelayMs);
-            boolean sent = tapSendButton(context);
+            boolean sent = hidInput ? tapSendButtonByHid(context) : tapSendButton(context);
             if (!sent) {
                 BotLog.e(context, "send.button", "未找到发送按钮，取消返回动作，避免误点");
                 return false;
@@ -1625,6 +1630,30 @@ public final class WechatDriver {
         return false;
     }
 
+    private boolean focusAndSetTextByHid(Context context, BotConfig config, String text) throws Exception {
+        Rect input = OcrHelper.findChatInputBlock(context, hs);
+        if (input == null) {
+            BotLog.e(context, "input.hid.focus.missing", "OCR 未识别到微信输入框，停止 HID 发送");
+            return false;
+        }
+        hs.tap(input.centerX(), input.centerY());
+        BotLog.i(context, "input.hid.focus.tap", "通过 BLE HID 触屏聚焦输入框 x="
+                + input.centerX() + " y=" + input.centerY());
+        SystemClock.sleep(stepDelay(config));
+
+        if (!setAppClipboard(context, text)) {
+            BotLog.e(context, "input.hid.clipboard.fail", "剪贴板写入校验失败，停止 HID 发送");
+            return false;
+        }
+        hs.keyCode(279);
+        BotLog.i(context, "input.hid.keyboard.paste", "通过 BLE HID 键盘发送 Ctrl+V");
+        if (!waitSendButtonVisibleByOcr(context, 3000L)) {
+            BotLog.e(context, "input.hid.paste.unconfirmed", "粘贴后未通过截图 OCR 确认发送按钮，停止发送");
+            return false;
+        }
+        return true;
+    }
+
     private boolean inputWithBotIme(Context context, BotConfig config, String text) {
         try {
             if (!ensureBotInputMethod(context)) {
@@ -2002,6 +2031,34 @@ public final class WechatDriver {
         }
         BotLog.w(context, "send.button.submit.skip", "未找到绿色发送按钮，不使用 submit/回车伪发送");
         return false;
+    }
+
+    private boolean tapSendButtonByHid(Context context) throws Exception {
+        Rect button = findSendButtonByOcr(context);
+        if (button == null) {
+            BotLog.e(context, "send.button.hid.missing", "截图 OCR 未识别到发送按钮，停止 HID 发送");
+            return false;
+        }
+        hs.tap(button.centerX(), button.centerY());
+        BotLog.i(context, "send.button.hid.tap", "通过 BLE HID 触屏点击发送按钮 x="
+                + button.centerX() + " y=" + button.centerY());
+        return true;
+    }
+
+    private boolean waitSendButtonVisibleByOcr(Context context, long timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + timeoutMs;
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (findSendButtonByOcr(context) != null) {
+                return true;
+            }
+            SystemClock.sleep(200L);
+        }
+        return false;
+    }
+
+    private Rect findSendButtonByOcr(Context context) {
+        Rect green = OcrHelper.findGreenSendButton(context, hs);
+        return green != null ? green : OcrHelper.findBottomRightText(context, hs, "发送");
     }
 
     private boolean waitSendButtonVisible(Context context, long timeoutMs) {

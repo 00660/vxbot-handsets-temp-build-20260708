@@ -177,6 +177,7 @@ public final class MainActivity extends Activity {
     private Switch enableImageAfterText;
     private Switch imageAfterAsVoice;
     private Switch normalReplyAsVoice;
+    private Switch useBleHidForTextInput;
     private Switch syncInputModeFromVoiceSwitch;
     private Switch dropImageTaskOnError;
     private Switch fullScreenBackgroundSwitch;
@@ -502,6 +503,8 @@ public final class MainActivity extends Activity {
         mimoAudioTagControl = edit(mimoTtsConfigGroup, "MiMo 音频标签控制", BotConfig.DEFAULT_MIMO_AUDIO_TAG_CONTROL, false);
         featuresPage.addView(buttonRow(button("试听 TTS", v -> previewTts())));
         normalReplyAsVoice = switchRow(featuresPage, "普通聊天用语音回复");
+        useBleHidForTextInput = switchRow(featuresPage, "文字消息使用蓝牙 HID 输入和发送");
+        featuresPage.addView(text("开启后用 HID 触屏聚焦、HID 键盘粘贴并用 HID 触屏发送；任一步失败就停止，不切回无障碍点击或软输入。", 12, MUTED, Typeface.NORMAL));
         syncInputModeFromVoiceSwitch = switchRow(featuresPage, "语音开关批量同步输入态");
         enableNoRootKeepAwake = switchRow(featuresPage, "无 root 低亮防熄屏保活");
         enableLogOverlay = switchRow(featuresPage, "狗头军师操作悬浮窗");
@@ -946,6 +949,7 @@ public final class MainActivity extends Activity {
             saveGoutouJunshiHistory.setChecked(config.saveGoutouJunshiHistory);
             goutouContextHistoryCount.setText(String.valueOf(config.goutouContextHistoryCount));
             normalReplyAsVoice.setChecked(config.normalReplyAsVoice);
+            useBleHidForTextInput.setChecked(config.useBleHidForTextInput);
             syncInputModeFromVoiceSwitch.setChecked(config.syncInputModeFromVoiceSwitch);
             enableNoRootKeepAwake.setChecked(config.enableNoRootKeepAwake);
             enableLogOverlay.setChecked(config.enableLogOverlay);
@@ -1054,6 +1058,7 @@ public final class MainActivity extends Activity {
         e.putBoolean("saveGoutouJunshiHistory", saveGoutouJunshiHistory.isChecked());
         e.putInt("goutouContextHistoryCount", intValue(goutouContextHistoryCount, 20));
         e.putBoolean("normalReplyAsVoice", newNormalVoice);
+        e.putBoolean("useBleHidForTextInput", useBleHidForTextInput.isChecked());
         e.putBoolean("syncInputModeFromVoiceSwitch", newSyncInputMode);
         e.putBoolean("enableNoRootKeepAwake", enableNoRootKeepAwake.isChecked());
         e.putBoolean("enableLogOverlay", enableLogOverlay.isChecked());

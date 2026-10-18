@@ -347,6 +347,7 @@ public final class BotConfig {
     public final boolean enableImageAfterText;
     public final boolean imageAfterAsVoice;
     public final boolean normalReplyAsVoice;
+    public final boolean useBleHidForTextInput;
     public final boolean syncInputModeFromVoiceSwitch;
     public final boolean enableExMode;
     public final boolean dropImageTaskOnError;
@@ -454,6 +455,7 @@ public final class BotConfig {
         enableImageAfterText = prefs.getBoolean("enableImageAfterText", true);
         imageAfterAsVoice = prefs.getBoolean("imageAfterAsVoice", false);
         normalReplyAsVoice = prefs.getBoolean("normalReplyAsVoice", false);
+        useBleHidForTextInput = prefs.getBoolean("useBleHidForTextInput", false);
         syncInputModeFromVoiceSwitch = prefs.getBoolean("syncInputModeFromVoiceSwitch", false);
         enableExMode = prefs.getBoolean("enableExMode", false);
         dropImageTaskOnError = prefs.getBoolean("dropImageTaskOnError", true);
