@@ -2114,7 +2114,7 @@ public final class WechatDriver {
     private boolean waitSendButtonVisibleByOcr(Context context, long timeoutMs) {
         long deadline = SystemClock.uptimeMillis() + timeoutMs;
         while (SystemClock.uptimeMillis() < deadline) {
-            if (findSendButtonByOcr(context) != null) {
+            if (findSendButtonByOcr(context) != null || findSendButtonByDump() != null) {
                 return true;
             }
             SystemClock.sleep(200L);
@@ -2124,7 +2124,11 @@ public final class WechatDriver {
 
     private Rect findSendButtonByOcr(Context context) {
         Rect green = OcrHelper.findGreenSendButton(context, hs);
-        return green != null ? green : OcrHelper.findBottomRightText(context, hs, "发送");
+        if (green != null) {
+            return green;
+        }
+        Rect text = OcrHelper.findBottomRightText(context, hs, "发送");
+        return text != null ? text : findSendButtonByDump();
     }
 
     private boolean waitSendButtonVisible(Context context, long timeoutMs) {
