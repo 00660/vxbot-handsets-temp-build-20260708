@@ -1687,17 +1687,17 @@ public final class WechatDriver {
             BotLog.e(context, "input.hid.focus.missing", "OCR 未识别到微信输入框，停止 HID 发送");
             return null;
         }
-        android.graphics.Point mouse;
+        android.graphics.Point pointer;
         try {
-            mouse = HidMouseController.clickAt(context, hs, input.centerX(), input.centerY());
+            pointer = HidPointerController.clickAt(context, hs, input.centerX(), input.centerY());
         } catch (Exception e) {
-            BotLog.e(context, "input.hid.mouse.fail", "BLE HID 鼠标未能定位并点击输入框，停止发送: "
+            BotLog.e(context, "input.hid.pointer.fail", "BLE HID 坐标点击未能定位输入框，停止发送: "
                     + e.getMessage());
             throw e;
         }
-        BotLog.i(context, "input.hid.mouse.focus", "通过 BLE HID 鼠标定位并点击输入框 target="
+        BotLog.i(context, "input.hid.pointer.focus", "通过 BLE HID 坐标触控定位并点击输入框 target="
                 + input.centerX() + "," + input.centerY()
-                + " pointer=" + mouse.x + "," + mouse.y);
+                + " hid=" + pointer.x + "," + pointer.y);
         SystemClock.sleep(stepDelay(config));
 
         hs.keyChord(0x01, KeyEvent.KEYCODE_A);
