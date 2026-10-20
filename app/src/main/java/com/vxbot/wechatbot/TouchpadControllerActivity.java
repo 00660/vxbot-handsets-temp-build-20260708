@@ -2,8 +2,6 @@ package com.vxbot.wechatbot;
 
 import android.Manifest;
 import android.app.Activity;
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -30,25 +28,33 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** Pair-free Android BLE advertiser controller. The robot HTTP endpoint is used only for frames. */
+/** Second-device touch controller. HTTP supplies the screen image; BLE GATT carries touch input. */
 public final class TouchpadControllerActivity extends Activity {
     private static final String PREFS = "touchpad_controller";
     private static final String URL_KEY = "frame_base_url";
-    private static final int REQUEST_ADVERTISE = 7411;
+    private static final int REQUEST_BLE_CONNECT = 7411;
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
+    private final ExecutorService bleWorker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final TouchBroadcastSender sender = new TouchBroadcastSender();
+    private final AtomicReference<int[]> pendingMove = new AtomicReference<>();
+    private final AtomicBoolean moveDrainScheduled = new AtomicBoolean();
     private EditText frameBase;
     private TextView status;
-    private Button broadcastButton;
+    private TextView controlStatus;
+    private Button controlButton;
     private FrameView frame;
     private volatile int targetWidth;
     private volatile int targetHeight;
-    private volatile boolean broadcasting;
+    private volatile boolean controlling;
+    private volatile boolean controlConnectionOwned;
+    private volatile boolean touchPressed;
     private volatile boolean framePolling;
     private volatile String activeFrameBase = "";
 
@@ -71,8 +77,7 @@ public final class TouchpadControllerActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, dp(38)));
 
         TextView help = new TextView(this);
-        help.setText("触控坐标由本机 BLE 广播直达 CH591D，无需配对。下方 HTTP 地址只用于读取机器人手机画面。把机器人状态页中的触控板地址粘贴到这里。目标编号："
-                + String.format(java.util.Locale.US, "%04X", TouchBroadcastSender.TARGET_ID));
+        help.setText("本机作为第二台控制设备，通过 BLE GATT 连接 CH591D 发送触控指令；首次连接需完成系统蓝牙配对。下方 HTTP 地址只用于读取第一台手机画面。把机器人状态页中的触控板地址粘贴到这里。");
         help.setTextColor(0xffaab7cc);
         help.setTextSize(12);
         root.addView(help, new LinearLayout.LayoutParams(-1, -2));
@@ -92,17 +97,23 @@ public final class TouchpadControllerActivity extends Activity {
         load.setText("读取画面");
         load.setOnClickListener(v -> startFrames());
         buttons.addView(load, new LinearLayout.LayoutParams(0, dp(48), 1));
-        broadcastButton = new Button(this);
-        broadcastButton.setText("开始 BLE 广播");
-        broadcastButton.setOnClickListener(v -> toggleBroadcast());
-        buttons.addView(broadcastButton, new LinearLayout.LayoutParams(0, dp(48), 1));
+        controlButton = new Button(this);
+        controlButton.setText("连接蓝牙触控");
+        controlButton.setOnClickListener(v -> toggleControl());
+        buttons.addView(controlButton, new LinearLayout.LayoutParams(0, dp(48), 1));
         root.addView(buttons, new LinearLayout.LayoutParams(-1, dp(52)));
 
         status = new TextView(this);
-        status.setText("先读取画面，再开始广播控制");
+        status.setText("先读取第一台手机画面");
         status.setTextColor(0xffb9c6da);
         status.setTextSize(12);
         root.addView(status, new LinearLayout.LayoutParams(-1, dp(30)));
+
+        controlStatus = new TextView(this);
+        controlStatus.setText("蓝牙未连接");
+        controlStatus.setTextColor(0xffb9c6da);
+        controlStatus.setTextSize(12);
+        root.addView(controlStatus, new LinearLayout.LayoutParams(-1, dp(26)));
 
         frame = new FrameView(this);
         frame.setOnTouchListener((view, event) -> onFrameTouch(event));
@@ -164,68 +175,124 @@ public final class TouchpadControllerActivity extends Activity {
         return connection;
     }
 
-    private void toggleBroadcast() {
-        if (broadcasting) {
-            sender.up();
-            worker.schedule(sender::stop, 180, TimeUnit.MILLISECONDS);
-            broadcasting = false;
-            broadcastButton.setText("开始 BLE 广播");
-            status.setText("正在发送抬起并停止广播");
+    private void toggleControl() {
+        if (controlling) {
+            controlling = false;
+            touchPressed = false;
+            pendingMove.set(null);
+            controlButton.setEnabled(false);
+            controlStatus.setText("正在松开触控并断开蓝牙…");
+            bleWorker.execute(() -> {
+                try { HidBleClient.up(); } catch (Exception ignored) {}
+                HidBleClient.disconnect();
+                controlConnectionOwned = false;
+                mainHandler.post(() -> {
+                    controlButton.setEnabled(true);
+                    controlButton.setText("连接蓝牙触控");
+                    controlStatus.setText("蓝牙已断开");
+                });
+            });
             return;
         }
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
-                != PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT >= 31 &&
-                checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_ADVERTISE,
-                    Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_ADVERTISE);
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BLE_CONNECT);
             return;
         }
-        startBroadcast();
+        startControl();
     }
 
-    private void startBroadcast() {
-        try {
-            BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-            BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
-            if (adapter == null || !adapter.isEnabled()) { toast("请先打开蓝牙"); return; }
-            sender.start(this, message -> runOnUiThread(() -> status.setText(message)));
-            broadcasting = true;
-            broadcastButton.setText("停止广播");
-        } catch (Exception error) { status.setText(error.getMessage()); }
+    private void startControl() {
+        controlButton.setEnabled(false);
+        controlStatus.setText("正在连接 CH591D 并等待配对…");
+        bleWorker.execute(() -> {
+            try {
+                String result = HidBleClient.connect();
+                controlConnectionOwned = true;
+                controlling = true;
+                mainHandler.post(() -> {
+                    controlButton.setEnabled(true);
+                    controlButton.setText("断开蓝牙触控");
+                    controlStatus.setText(result + "；触控通过 BLE 直达设备");
+                });
+            } catch (Exception error) {
+                mainHandler.post(() -> {
+                    controlButton.setEnabled(true);
+                    controlStatus.setText("蓝牙连接失败：" + error.getMessage());
+                });
+            }
+        });
     }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == REQUEST_ADVERTISE && results.length > 0) {
+        if (requestCode == REQUEST_BLE_CONNECT && results.length > 0) {
             boolean granted = true;
             for (int result : results) granted &= result == PackageManager.PERMISSION_GRANTED;
-            if (granted) startBroadcast();
-            else status.setText("需要蓝牙连接与广播权限才能发送触控命令");
+            if (granted) startControl();
+            else controlStatus.setText("需要蓝牙连接权限才能发送触控命令");
         }
     }
 
     private boolean onFrameTouch(MotionEvent event) {
-        if (!broadcasting || targetWidth < 2 || targetHeight < 2) return false;
+        if (!controlling || targetWidth < 2 || targetHeight < 2) return false;
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {
                 int[] point = frame.map(event.getX(), event.getY(), targetWidth, targetHeight);
                 if (point == null) return false;
                 frame.getParent().requestDisallowInterceptTouchEvent(true);
-                sender.down(point[0], point[1], targetWidth, targetHeight);
+                touchPressed = true;
+                int width = targetWidth, height = targetHeight;
+                bleWorker.execute(() -> sendTouch(() ->
+                        HidBleClient.downInSpace(point[0], point[1], width, height)));
                 return true;
             }
             case MotionEvent.ACTION_MOVE: {
+                if (!touchPressed) return true;
                 int[] point = frame.map(event.getX(), event.getY(), targetWidth, targetHeight);
                 if (point == null) return true;
-                sender.move(point[0], point[1], targetWidth, targetHeight);
+                pendingMove.set(new int[]{point[0], point[1], targetWidth, targetHeight});
+                scheduleMoveDrain();
                 return true;
             }
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                sender.up();
+                touchPressed = false;
+                pendingMove.set(null);
+                bleWorker.execute(() -> sendTouch(HidBleClient::up));
                 frame.getParent().requestDisallowInterceptTouchEvent(false);
                 return true;
             default: return true;
+        }
+    }
+
+    private void scheduleMoveDrain() {
+        if (moveDrainScheduled.compareAndSet(false, true))
+            bleWorker.execute(this::drainMoves);
+    }
+
+    private void drainMoves() {
+        try {
+            int[] move;
+            while ((move = pendingMove.getAndSet(null)) != null) {
+                int[] current = move;
+                sendTouch(() -> HidBleClient.moveInSpace(current[0], current[1], current[2], current[3]));
+            }
+        } finally {
+            moveDrainScheduled.set(false);
+            if (pendingMove.get() != null) scheduleMoveDrain();
+        }
+    }
+
+    private void sendTouch(TouchCommand command) {
+        try {
+            command.send();
+        } catch (Exception error) {
+            controlling = false;
+            mainHandler.post(() -> {
+                controlButton.setText("连接蓝牙触控");
+                controlStatus.setText("触控发送失败：" + error.getMessage());
+            });
         }
     }
 
@@ -237,13 +304,21 @@ public final class TouchpadControllerActivity extends Activity {
 
     @Override protected void onDestroy() {
         framePolling = false;
-        if (broadcasting) {
-            sender.up();
-            mainHandler.postDelayed(sender::stop, 180);
+        if (touchPressed || controlConnectionOwned) {
+            pendingMove.set(null);
+            bleWorker.execute(() -> {
+                if (touchPressed) {
+                    try { HidBleClient.up(); } catch (Exception ignored) {}
+                }
+                if (controlConnectionOwned) HidBleClient.disconnect();
+            });
         }
         worker.shutdownNow();
+        bleWorker.shutdown();
         super.onDestroy();
     }
+
+    private interface TouchCommand { String send() throws Exception; }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
     private void toast(String value) { Toast.makeText(this, value, Toast.LENGTH_SHORT).show(); }

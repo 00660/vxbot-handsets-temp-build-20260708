@@ -65,6 +65,38 @@ public final class HidBleClient {
         thread.start();
     }
 
+    public static String connect() throws Exception {
+        BluetoothGatt activeGatt = ensureConnected();
+        BluetoothDevice device = activeGatt.getDevice();
+        if (device.getBondState() != BluetoothDevice.BOND_BONDED && !awaitBond(activeGatt))
+            throw new IOException("等待 CH591D 蓝牙配对超时");
+        return "BLE GATT 已连接并完成配对";
+    }
+
+    public static void disconnect() {
+        BluetoothGatt activeGatt;
+        CountDownLatch ready;
+        CountDownLatch pendingWrite;
+        synchronized (STATE_LOCK) {
+            activeGatt = gatt;
+            gatt = null;
+            commandCharacteristic = null;
+            connecting = false;
+            bondRequested = false;
+            ready = connectionLatch;
+            connectionLatch = null;
+            pendingWrite = writeLatch;
+            writeLatch = null;
+            waitingForWrite = null;
+        }
+        if (ready != null) ready.countDown();
+        if (pendingWrite != null) pendingWrite.countDown();
+        if (activeGatt != null) {
+            try { activeGatt.disconnect(); } catch (SecurityException ignored) {}
+            try { activeGatt.close(); } catch (SecurityException ignored) {}
+        }
+    }
+
     public static String tap(int x, int y) throws Exception {
         Point point = normalize(x, y);
         return write(new byte[]{1, low(point.x), high(point.x), low(point.y), high(point.y)});
@@ -75,8 +107,18 @@ public final class HidBleClient {
         return write(new byte[]{2, low(point.x), high(point.x), low(point.y), high(point.y)});
     }
 
+    public static String downInSpace(int x, int y, int width, int height) throws Exception {
+        Point point = normalize(x, y, width, height);
+        return write(new byte[]{2, low(point.x), high(point.x), low(point.y), high(point.y)});
+    }
+
     public static String move(int x, int y) throws Exception {
         Point point = normalize(x, y);
+        return write(new byte[]{3, low(point.x), high(point.x), low(point.y), high(point.y)});
+    }
+
+    public static String moveInSpace(int x, int y, int width, int height) throws Exception {
+        Point point = normalize(x, y, width, height);
         return write(new byte[]{3, low(point.x), high(point.x), low(point.y), high(point.y)});
     }
 
@@ -205,12 +247,16 @@ public final class HidBleClient {
         Display display = manager.getDefaultDisplay();
         Point size = new Point();
         display.getRealSize(size);
-        if (size.x <= 1 || size.y <= 1)
+        return normalize(x, y, size.x, size.y);
+    }
+
+    private static Point normalize(int x, int y, int width, int height) throws IOException {
+        if (width <= 1 || height <= 1)
             throw new IOException("Display size is unavailable");
         int normalizedX = Math.max(0, Math.min(32767,
-                Math.round(Math.max(0, Math.min(size.x - 1, x)) * 32767f / (size.x - 1))));
+                Math.round(Math.max(0, Math.min(width - 1, x)) * 32767f / (width - 1))));
         int normalizedY = Math.max(0, Math.min(32767,
-                Math.round(Math.max(0, Math.min(size.y - 1, y)) * 32767f / (size.y - 1))));
+                Math.round(Math.max(0, Math.min(height - 1, y)) * 32767f / (height - 1))));
         return new Point(normalizedX, normalizedY);
     }
 

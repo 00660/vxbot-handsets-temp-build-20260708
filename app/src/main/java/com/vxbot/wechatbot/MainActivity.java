@@ -355,13 +355,13 @@ public final class MainActivity extends Activity {
                         v -> toast(ShizukuBridge.requestPermission())),
                 actionButton(R.drawable.ic_ui_hand, "辅助功能", 0xFFFF8A00, v -> openAccessibilitySettings())));
 
-        LinearLayout touchpadCard = card("蓝牙广播触控板");
+        LinearLayout touchpadCard = card("第二设备蓝牙触控板");
         statusPage.addView(touchpadCard, cardLayoutParams());
         TextView touchpadAddress = text(LanTouchpadPanel.urlFor(this), 12, INK, Typeface.NORMAL);
         touchpadAddress.setTextIsSelectable(true);
         touchpadAddress.setPadding(0, 0, 0, dp(8));
         touchpadCard.addView(touchpadAddress);
-        touchpadCard.addView(text("这是只读画面地址。控制设备安装同版 APK 后，从桌面单独打开“HS 蓝牙触控板”，粘贴此地址；触控坐标由控制设备蓝牙广播直达 CH591D，不经过机器人 HTTP，也无需配对。", 12, MUTED, Typeface.NORMAL));
+        touchpadCard.addView(text("这是只读画面地址。第二台设备安装同版 APK 后，从桌面打开“HS 蓝牙触控板”并粘贴此地址；触控指令通过 BLE GATT 直连 CH591D，再由 HID 控制本机。首次连接需要完成蓝牙配对；HTTP 只传屏幕画面。", 12, MUTED, Typeface.NORMAL));
         touchpadCard.addView(buttonRow(button("刷新地址", v -> touchpadAddress.setText(LanTouchpadPanel.urlFor(this))),
                 button("复制地址", v -> {
                     String address = LanTouchpadPanel.urlFor(this);
