@@ -8,7 +8,10 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Point;
 import android.os.Build;
@@ -18,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.WindowManager;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -46,10 +50,184 @@ public final class HidBleClient {
     private static boolean connecting;
     private static volatile boolean bondRequested;
 
+    /* ---- In-app pairing management (replaces the system pairing dialog) ----
+     * FFF5 is ENCRYPT_WRITE so a BLE bond is mandatory at the link layer. But we
+     * hide the OS pairing UI entirely: the app triggers the bond itself,
+     * auto-confirms the SMP pairing request (Just Works), and manages the paired
+     * state / forget / reconnect from inside the app. The user never sees the
+     * Android system Bluetooth pairing screen. */
+    private static volatile BluetoothDevice managedDevice;
+    private static volatile boolean autoConfirmBond = true;
+    private static BroadcastReceiver pairReceiver;
+    private static Context receiverContext;
+
+    private static final BroadcastReceiver PAIR_RECEIVER = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action == null) return;
+            BluetoothDevice device;
+            if (Build.VERSION.SDK_INT >= 33) {
+                device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
+            } else {
+                device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+            }
+            if (device == null || managedDevice == null ||
+                    !DEVICE_ADDRESS.equalsIgnoreCase(device.getAddress()))
+                return;
+            switch (action) {
+                case BluetoothDevice.ACTION_PAIRING_REQUEST:
+                    if (!autoConfirmBond) return;
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                            device.setPairingConfirmation(true);
+                        }
+                        abortBroadcast();
+                        Log.i(TAG, "Auto-confirmed in-app pairing request");
+                    } catch (RuntimeException e) {
+                        Log.w(TAG, "Auto-confirm pairing failed: " + e.getMessage());
+                    }
+                    break;
+                case BluetoothDevice.ACTION_BOND_STATE_CHANGED:
+                    int state = device.getBondState();
+                    Log.i(TAG, "BOND_STATE_CHANGED -> " + state);
+                    if (state == BluetoothDevice.BOND_BONDED) {
+                        bondRequested = false;
+                    } else if (state == BluetoothDevice.BOND_NONE) {
+                        bondRequested = false;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+    };
+
     private HidBleClient() {}
 
     public static void initialize(Context context) {
         appContext = context.getApplicationContext();
+        registerPairReceiver(appContext);
+    }
+
+    private static synchronized void registerPairReceiver(Context context) {
+        if (pairReceiver != null) return;
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
+        filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.setPriority(1000);
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(PAIR_RECEIVER, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                context.registerReceiver(PAIR_RECEIVER, filter);
+            }
+            pairReceiver = PAIR_RECEIVER;
+            receiverContext = context;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not register pairing receiver: " + e.getMessage());
+        }
+    }
+
+    /* ================= In-app pairing management API ================= */
+
+    /** True once the robot device is bonded (paired) — driven entirely by the app. */
+    public static boolean isPaired() {
+        try {
+            BluetoothDevice d = remoteDevice();
+            return d != null && d.getBondState() == BluetoothDevice.BOND_BONDED;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static boolean isBonding() {
+        try {
+            BluetoothDevice d = remoteDevice();
+            return d != null && d.getBondState() == BluetoothDevice.BOND_BONDING;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static String pairedStateLabel() {
+        try {
+            BluetoothDevice d = remoteDevice();
+            if (d == null) return "蓝牙不可用";
+            switch (d.getBondState()) {
+                case BluetoothDevice.BOND_BONDED: return "已配对";
+                case BluetoothDevice.BOND_BONDING: return "正在配对…";
+                default: return "未配对";
+            }
+        } catch (Exception e) {
+            return "配对状态未知";
+        }
+    }
+
+    private static BluetoothDevice remoteDevice() {
+        Context context = appContext;
+        if (context == null) return null;
+        BluetoothManager manager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
+        if (adapter == null) return null;
+        try {
+            return adapter.getRemoteDevice(DEVICE_ADDRESS);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Do the whole pairing from inside the app: bond (auto-confirmed, no system
+     * dialog) then connect the GATT link. Returns a user-facing status string.
+     */
+    public static String pairAndConnect() throws Exception {
+        pair() ;                       /* ensure bonded first (in-app, auto-confirm) */
+        return connect();              /* connect + verify encrypted link */
+    }
+
+    /** Trigger the bond from inside the app and block until bonded (or timeout). */
+    public static boolean pair() throws Exception {
+        Context context = appContext;
+        if (context == null) throw new IOException("BLE HID client is not initialized");
+        if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED)
+            throw new SecurityException("Bluetooth permission is required");
+        BluetoothDevice device = remoteDevice();
+        if (device == null) throw new IOException("Bluetooth is unavailable");
+        managedDevice = device;
+        if (device.getBondState() == BluetoothDevice.BOND_BONDED)
+            return true;
+        autoConfirmBond = true;
+        if (device.getBondState() != BluetoothDevice.BOND_BONDING) {
+            try {
+                bondRequested = device.createBond();
+            } catch (SecurityException e) {
+                throw new IOException("无法发起配对：" + e.getMessage());
+            }
+        }
+        for (int i = 0; i < 80; i++) {           /* up to 20s */
+            int state = device.getBondState();
+            if (state == BluetoothDevice.BOND_BONDED) return true;
+            if (state == BluetoothDevice.BOND_NONE && !bondRequested && i > 4) return false;
+            Thread.sleep(250L);
+        }
+        return device.getBondState() == BluetoothDevice.BOND_BONDED;
+    }
+
+    /** Forget the pairing from inside the app (removes the OS bond too, on purpose). */
+    public static boolean forget() {
+        BluetoothDevice device = managedDevice != null ? managedDevice : remoteDevice();
+        if (device == null) return false;
+        try {
+            disconnect();
+            Method removeBond = device.getClass().getMethod("removeBond");
+            removeBond.setAccessible(true);
+            Object ok = removeBond.invoke(device);
+            return ok instanceof Boolean ? (Boolean) ok : true;
+        } catch (Exception e) {
+            Log.w(TAG, "forget() failed: " + e.getMessage());
+            return false;
+        }
     }
 
     public static void connectAsync() {
@@ -404,7 +582,9 @@ public final class HidBleClient {
             if (latch != null)
                 latch.countDown();
             try {
+                managedDevice = source.getDevice();
                 if (source.getDevice().getBondState() == BluetoothDevice.BOND_NONE) {
+                    autoConfirmBond = true;
                     bondRequested = source.getDevice().createBond();
                 }
             } catch (SecurityException e) {
@@ -440,7 +620,9 @@ public final class HidBleClient {
     private static boolean awaitBond(BluetoothGatt activeGatt) throws InterruptedException {
         try {
             BluetoothDevice device = activeGatt.getDevice();
+            managedDevice = device;
             if (device.getBondState() == BluetoothDevice.BOND_NONE && !bondRequested) {
+                autoConfirmBond = true;
                 bondRequested = device.createBond();
             }
             for (int i = 0; i < 60; i++) {

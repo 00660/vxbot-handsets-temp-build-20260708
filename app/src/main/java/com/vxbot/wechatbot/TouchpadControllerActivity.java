@@ -48,6 +48,7 @@ public final class TouchpadControllerActivity extends Activity {
     private EditText frameBase;
     private TextView status;
     private TextView controlStatus;
+    private TextView pairStatus;
     private Button controlButton;
     private FrameView frame;
     private volatile int targetWidth;
@@ -61,6 +62,11 @@ public final class TouchpadControllerActivity extends Activity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildUi();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        refreshPairStatus();
     }
 
     private void buildUi() {
@@ -77,7 +83,7 @@ public final class TouchpadControllerActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, dp(38)));
 
         TextView help = new TextView(this);
-        help.setText("本机作为第二台控制设备，通过 BLE GATT 连接 CH591D 发送触控指令；首次连接需完成系统蓝牙配对。下方 HTTP 地址只用于读取第一台手机画面。把机器人状态页中的触控板地址粘贴到这里。");
+        help.setText("本机作为第二台控制设备，通过 BLE GATT 连接 CH591D 发送触控指令。配对在本页内完成（自动确认，不弹系统蓝牙配对界面，无需去系统设置里配对）。下方 HTTP 地址只用于读取第一台手机画面。把机器人状态页中的触控板地址粘贴到这里。");
         help.setTextColor(0xffaab7cc);
         help.setTextSize(12);
         root.addView(help, new LinearLayout.LayoutParams(-1, -2));
@@ -114,6 +120,20 @@ public final class TouchpadControllerActivity extends Activity {
         controlStatus.setTextColor(0xffb9c6da);
         controlStatus.setTextSize(12);
         root.addView(controlStatus, new LinearLayout.LayoutParams(-1, dp(26)));
+
+        LinearLayout pairRow = new LinearLayout(this);
+        pairRow.setOrientation(LinearLayout.HORIZONTAL);
+        pairStatus = new TextView(this);
+        pairStatus.setText("配对状态：" + HidBleClient.pairedStateLabel());
+        pairStatus.setTextColor(0xffb9c6da);
+        pairStatus.setTextSize(12);
+        pairStatus.setGravity(Gravity.CENTER_VERTICAL);
+        pairRow.addView(pairStatus, new LinearLayout.LayoutParams(0, dp(40), 1));
+        Button forget = new Button(this);
+        forget.setText("忘记配对");
+        forget.setOnClickListener(v -> forgetPairing());
+        pairRow.addView(forget, new LinearLayout.LayoutParams(0, dp(40), 1));
+        root.addView(pairRow, new LinearLayout.LayoutParams(-1, dp(44)));
 
         frame = new FrameView(this);
         frame.setOnTouchListener((view, event) -> onFrameTouch(event));
@@ -204,24 +224,46 @@ public final class TouchpadControllerActivity extends Activity {
 
     private void startControl() {
         controlButton.setEnabled(false);
-        controlStatus.setText("正在连接 CH591D 并等待配对…");
+        controlStatus.setText("正在本页内配对并连接 CH591D（无需系统配对）…");
         bleWorker.execute(() -> {
             try {
-                String result = HidBleClient.connect();
+                String result = HidBleClient.pairAndConnect();
                 controlConnectionOwned = true;
                 controlling = true;
                 mainHandler.post(() -> {
                     controlButton.setEnabled(true);
                     controlButton.setText("断开蓝牙触控");
                     controlStatus.setText(result + "；触控通过 BLE 直达设备");
+                    refreshPairStatus();
                 });
             } catch (Exception error) {
                 mainHandler.post(() -> {
                     controlButton.setEnabled(true);
                     controlStatus.setText("蓝牙连接失败：" + error.getMessage());
+                    refreshPairStatus();
                 });
             }
         });
+    }
+
+    private void forgetPairing() {
+        pairStatus.setText("配对状态：正在忘记…");
+        bleWorker.execute(() -> {
+            boolean ok = HidBleClient.forget();
+            mainHandler.post(() -> {
+                pairStatus.setText("配对状态：" + HidBleClient.pairedStateLabel());
+                controlStatus.setText(ok ? "已在 App 内解除配对" : "解除配对失败");
+                if (controlling) {
+                    controlling = false;
+                    controlConnectionOwned = false;
+                    controlButton.setText("连接蓝牙触控");
+                }
+            });
+        });
+    }
+
+    private void refreshPairStatus() {
+        if (pairStatus != null) pairStatus.setText("配对状态：" + HidBleClient.pairedStateLabel());
     }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
