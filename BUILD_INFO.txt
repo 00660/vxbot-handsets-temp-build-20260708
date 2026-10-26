@@ -1,0 +1,4 @@
+sha=84d8b712ab4222c00083d97e2ad3754aa65b8093
+run_id=40258341487
+created_at=2026-10-26T02:21:43Z
+apk=hs-wechatbot-latest.apk
