@@ -177,41 +177,62 @@ public final class HidBleClient {
     }
 
     /**
-     * Do the whole pairing from inside the app: bond (auto-confirmed, no system
-     * dialog) then connect the GATT link. Returns a user-facing status string.
+     * Do the whole pairing from inside the app. The robot is a BLE (LE)
+     * peripheral, so we must (1) open the LE GATT link first, then (2) trigger
+     * SMP bonding on that LE transport. createBond() alone defaults to
+     * BT_TRANSPORT_AUTO and wrongly picks BR/EDR (classic) for this address and
+     * fails with a page timeout — so we always bond over TRANSPORT_LE here.
      */
     public static String pairAndConnect() throws Exception {
-        pair() ;                       /* ensure bonded first (in-app, auto-confirm) */
-        return connect();              /* connect + verify encrypted link */
+        ensureConnected();             /* open LE link (auto-discovers services) */
+        if (!pair())                    /* bond over the existing LE link */
+            throw new IOException("配对未完成");
+        return connect();              /* verify encrypted link + control characteristic */
     }
 
-    /** Trigger the bond from inside the app and block until bonded (or timeout). */
+    /** Trigger the LE bond from inside the app and block until bonded (or timeout). */
     public static boolean pair() throws Exception {
         Context context = appContext;
         if (context == null) throw new IOException("BLE HID client is not initialized");
         if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
                 != PackageManager.PERMISSION_GRANTED)
             throw new SecurityException("Bluetooth permission is required");
-        BluetoothDevice device = remoteDevice();
+        BluetoothDevice device = managedDevice != null ? managedDevice : remoteDevice();
         if (device == null) throw new IOException("Bluetooth is unavailable");
         managedDevice = device;
         if (device.getBondState() == BluetoothDevice.BOND_BONDED)
             return true;
         autoConfirmBond = true;
-        if (device.getBondState() != BluetoothDevice.BOND_BONDING) {
-            try {
-                bondRequested = device.createBond();
-            } catch (SecurityException e) {
-                throw new IOException("无法发起配对：" + e.getMessage());
-            }
-        }
+        startLeBond(device);
         for (int i = 0; i < 80; i++) {           /* up to 20s */
             int state = device.getBondState();
             if (state == BluetoothDevice.BOND_BONDED) return true;
-            if (state == BluetoothDevice.BOND_NONE && !bondRequested && i > 4) return false;
+            if (state == BluetoothDevice.BOND_NONE && !bondRequested && i > 8) return false;
+            if (i == 20 && state == BluetoothDevice.BOND_NONE && !bondRequested)
+                startLeBond(device);             /* retry once if it never started */
             Thread.sleep(250L);
         }
         return device.getBondState() == BluetoothDevice.BOND_BONDED;
+    }
+
+    /** Create a bond, preferring the LE transport (reflection for public createBond(int)). */
+    private static void startLeBond(BluetoothDevice device) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                Method m = BluetoothDevice.class.getMethod("createBond", int.class);
+                bondRequested = (Boolean) m.invoke(device, BluetoothDevice.TRANSPORT_LE);
+            } else {
+                bondRequested = device.createBond();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "createBond(LE) reflection failed, trying createBond(): " + e.getMessage());
+            try {
+                bondRequested = device.createBond();
+            } catch (SecurityException se) {
+                bondRequested = false;
+            }
+        }
+        Log.i(TAG, "startLeBond requested=" + bondRequested);
     }
 
     /** Forget the pairing from inside the app (removes the OS bond too, on purpose). */
@@ -585,7 +606,7 @@ public final class HidBleClient {
                 managedDevice = source.getDevice();
                 if (source.getDevice().getBondState() == BluetoothDevice.BOND_NONE) {
                     autoConfirmBond = true;
-                    bondRequested = source.getDevice().createBond();
+                    startLeBond(source.getDevice());
                 }
             } catch (SecurityException e) {
                 Log.w(TAG, "Could not begin HID pairing: " + e.getMessage());
@@ -623,7 +644,7 @@ public final class HidBleClient {
             managedDevice = device;
             if (device.getBondState() == BluetoothDevice.BOND_NONE && !bondRequested) {
                 autoConfirmBond = true;
-                bondRequested = device.createBond();
+                startLeBond(device);
             }
             for (int i = 0; i < 60; i++) {
                 int state = device.getBondState();
