@@ -8,10 +8,16 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Point;
 import android.os.Build;
@@ -22,14 +28,23 @@ import android.view.WindowManager;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class HidBleClient {
     private static final String TAG = "HsHidBle";
-    private static final String DEVICE_ADDRESS = "5C:53:10:5D:70:2D";
+    private static final String DEVICE_ADDRESS = "5C:53:10:5D:70:2D"; /* legacy fallback only */
+    /* Robots are discovered by name; the chosen MAC is remembered in prefs. */
+    private static final String PREFS = "hs_hid_ble";
+    private static final String PREF_ADDRESS = "device_address";
+    private static final String ROBOT_NAME_PREFIX = "HS BLE HID";
+    private static volatile String chosenAddress = null;
+    private static volatile BluetoothDevice discoveredDevice = null;
     private static final UUID CONTROL_SERVICE = UUID.fromString("0000fff4-0000-1000-8000-00805f9b34fb");
     private static final UUID CONTROL_COMMAND = UUID.fromString("0000fff5-0000-1000-8000-00805f9b34fb");
     private static final int CONNECT_TIMEOUT_SECONDS = 20;
@@ -169,11 +184,98 @@ public final class HidBleClient {
         BluetoothManager manager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
         BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
         if (adapter == null) return null;
+        String addr = chosenAddress;
+        if (addr == null && context != null)
+            addr = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(PREF_ADDRESS, null);
+        if (addr == null) addr = DEVICE_ADDRESS;
         try {
-            return adapter.getRemoteDevice(DEVICE_ADDRESS);
+            return adapter.getRemoteDevice(addr);
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /** The MAC the app is currently bound to (remembered / discovered), for logging/UI. */
+    public static String currentAddress() {
+        Context context = appContext;
+        String addr = chosenAddress;
+        if (addr == null && context != null)
+            addr = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(PREF_ADDRESS, null);
+        return addr;
+    }
+
+    /**
+     * Scan for the HS robot by advertised name (prefix "HS BLE HID"), pick the
+     * strongest match, remember its MAC in prefs, and return the device. This
+     * replaces any hard-coded address: the device the operator actually has is
+     * auto-selected. Returns null if none seen within timeoutMs.
+     */
+    public static BluetoothDevice scanForRobot(final long timeoutMs) throws Exception {
+        Context context = appContext;
+        if (context == null) throw new IOException("BLE HID client is not initialized");
+        if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN)
+                != PackageManager.PERMISSION_GRANTED)
+            throw new SecurityException("需要蓝牙扫描权限");
+        BluetoothManager manager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        final BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
+        if (adapter == null || !adapter.isEnabled()) throw new IOException("蓝牙未开启");
+        BluetoothLeScanner scanner = adapter.getBluetoothLeScanner();
+        if (scanner == null) throw new IOException("蓝牙扫描不可用");
+
+        final AtomicReference<ScanResult> best = new AtomicReference<>();
+        final CountDownLatch found = new CountDownLatch(1);
+        final ScanCallback cb = new ScanCallback() {
+            @Override public void onScanResult(int callbackType, ScanResult result) {
+                String name = result.getDevice().getName();
+                if (name != null && name.startsWith(ROBOT_NAME_PREFIX)) {
+                    ScanResult cur = best.get();
+                    if (cur == null || result.getRssi() > cur.getRssi()) {
+                        best.set(result);
+                        found.countDown();
+                    }
+                }
+            }
+            @Override public void onScanFailed(int errorCode) {
+                Log.w(TAG, "Scan failed: " + errorCode);
+                found.countDown();
+            }
+        };
+
+        List<ScanFilter> filters = new ArrayList<>();
+        ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                    != PackageManager.PERMISSION_GRANTED)
+                throw new SecurityException("需要蓝牙权限");
+            scanner.startScan(filters, settings, cb);
+            found.await(timeoutMs, TimeUnit.MILLISECONDS);
+        } finally {
+            try { scanner.stopScan(cb); } catch (RuntimeException ignored) {}
+        }
+
+        ScanResult result = best.get();
+        if (result == null) return null;
+        BluetoothDevice device = result.getDevice();
+        chosenAddress = device.getAddress();
+        discoveredDevice = device;
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(PREF_ADDRESS, chosenAddress).apply();
+        Log.i(TAG, "Discovered robot " + device.getName() + " @ " + chosenAddress + " rssi=" + result.getRssi());
+        return device;
+    }
+
+    private static BluetoothDevice resolveRobot(long scanTimeoutMs) throws Exception {
+        String addr = currentAddress();
+        if (addr != null) {
+            BluetoothDevice d = remoteDevice();
+            if (d != null && d.getBondState() == BluetoothDevice.BOND_BONDED) return d;
+        }
+        BluetoothDevice found = scanForRobot(scanTimeoutMs);
+        if (found != null) return found;
+        BluetoothDevice d = remoteDevice();
+        if (d == null) throw new IOException("找不到 HS 机器人（请确认机器人在广播）");
+        return d;
     }
 
     /**
@@ -184,6 +286,9 @@ public final class HidBleClient {
      * fails with a page timeout — so we always bond over TRANSPORT_LE here.
      */
     public static String pairAndConnect() throws Exception {
+        BluetoothDevice robot = resolveRobot(15000);   /* scan by name, remember MAC */
+        managedDevice = robot;
+        discoveredDevice = robot;
         ensureConnected();             /* open LE link (auto-discovers services) */
         if (!pair())                    /* bond over the existing LE link */
             throw new IOException("配对未完成");
@@ -537,7 +642,18 @@ public final class HidBleClient {
                 BluetoothAdapter adapter = manager == null ? null : manager.getAdapter();
                 if (adapter == null || !adapter.isEnabled())
                     throw new IOException("Bluetooth is disabled");
-                BluetoothDevice device = adapter.getRemoteDevice(DEVICE_ADDRESS);
+                BluetoothDevice device = discoveredDevice;
+                if (device == null) {
+                    String a = currentAddress();
+                    if (a != null) {
+                        try { device = adapter.getRemoteDevice(a); } catch (IllegalArgumentException ignored) {}
+                    }
+                }
+                if (device == null) {
+                    connecting = false;
+                    connectionLatch = null;
+                    throw new IOException("未找到机器人设备，请先在触控页点连接（自动扫描）");
+                }
                 latch = new CountDownLatch(1);
                 connectionLatch = latch;
                 connecting = true;

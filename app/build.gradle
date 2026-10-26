@@ -19,8 +19,8 @@ android {
         applicationId "com.vxbot.wechatbot"
         minSdk 26
         targetSdk 35
-        versionCode 269
-        versionName "0.1.269-robot-702d"
+        versionCode 270
+        versionName "0.1.270-scan-pair"
         multiDexKeepProguard file("multidex-keep.pro")
         externalNativeBuild {
             cmake {
