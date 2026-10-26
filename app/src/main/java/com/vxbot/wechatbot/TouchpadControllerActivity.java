@@ -214,10 +214,16 @@ public final class TouchpadControllerActivity extends Activity {
             });
             return;
         }
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQUEST_BLE_CONNECT);
-            return;
+        if (Build.VERSION.SDK_INT >= 31) {
+            java.util.List<String> need = new java.util.ArrayList<>();
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
+                need.add(Manifest.permission.BLUETOOTH_CONNECT);
+            if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED)
+                need.add(Manifest.permission.BLUETOOTH_SCAN);
+            if (!need.isEmpty()) {
+                requestPermissions(need.toArray(new String[0]), REQUEST_BLE_CONNECT);
+                return;
+            }
         }
         startControl();
     }
