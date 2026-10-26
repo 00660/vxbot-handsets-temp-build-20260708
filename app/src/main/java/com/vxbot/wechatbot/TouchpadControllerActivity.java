@@ -83,7 +83,7 @@ public final class TouchpadControllerActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, dp(38)));
 
         TextView help = new TextView(this);
-        help.setText("本机作为第二台控制设备，通过 BLE GATT 连接 CH591D 发送触控指令。配对在本页内完成（自动确认，不弹系统蓝牙配对界面，无需去系统设置里配对）。下方 HTTP 地址只用于读取第一台手机画面。把机器人状态页中的触控板地址粘贴到这里。");
+        help.setText("本机作为第二台控制设备，通过 BLE GATT 连接 HS 机器人设备发送触控指令。配对在本页内完成（自动确认，不弹系统蓝牙配对界面，无需去系统设置里配对）。下方 HTTP 地址只用于读取第一台手机画面。把机器人状态页中的触控板地址粘贴到这里。");
         help.setTextColor(0xffaab7cc);
         help.setTextSize(12);
         root.addView(help, new LinearLayout.LayoutParams(-1, -2));
@@ -224,7 +224,7 @@ public final class TouchpadControllerActivity extends Activity {
 
     private void startControl() {
         controlButton.setEnabled(false);
-        controlStatus.setText("正在本页内配对并连接 CH591D（无需系统配对）…");
+        controlStatus.setText("正在本页内配对并连接 HS 机器人（无需系统配对）…");
         bleWorker.execute(() -> {
             try {
                 String result = HidBleClient.pairAndConnect();

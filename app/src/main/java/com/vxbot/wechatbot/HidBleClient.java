@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class HidBleClient {
     private static final String TAG = "HsHidBle";
-    private static final String DEVICE_ADDRESS = "DC:32:62:9B:82:2D";
+    private static final String DEVICE_ADDRESS = "5C:53:10:5D:70:2D";
     private static final UUID CONTROL_SERVICE = UUID.fromString("0000fff4-0000-1000-8000-00805f9b34fb");
     private static final UUID CONTROL_COMMAND = UUID.fromString("0000fff5-0000-1000-8000-00805f9b34fb");
     private static final int CONNECT_TIMEOUT_SECONDS = 20;
